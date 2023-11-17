@@ -1,0 +1,14 @@
+{
+  "name": "mineflayer-baritone",
+  "version": "0.0.1",
+  "description": "Minecraft pathfinder made in javascript using mineflayer and node js.",
+  "main": "index.js",
+  "scripts": {},
+  "keywords": [],
+  "author": "Ash",
+  "license": "ISC",
+  "dependencies": {
+    "mineflayer": "^4.14.0",
+    "require-dir": "^1.2.0"
+  }
+}
