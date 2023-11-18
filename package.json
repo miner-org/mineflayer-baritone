@@ -4,6 +4,7 @@
   "description": "Minecraft pathfinder made in javascript using mineflayer and node js.",
   "main": "index.js",
   "scripts": {
+    "start": "node src/index.js NubPlayzBoi.aternos.me 26216"
   },
   "keywords": [],
   "author": "Ash",

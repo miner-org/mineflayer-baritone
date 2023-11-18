@@ -84,7 +84,7 @@ function processBatch({
     ) {
       neighbor.parent = currentNode;
       neighbor.gCost = tempG;
-      neighbor.hCost = octileHeuristic3D(neighbor.worldPos, end, neighbor.cost);
+      neighbor.hCost = euclideanDistance(neighbor.worldPos, end);
       neighbor.fCost = neighbor.gCost + neighbor.hCost;
 
       if (!openSet.has(defaultHash(neighbor.worldPos))) {
@@ -105,22 +105,62 @@ async function Astar(start, endPos, bot, endFunc, config) {
   const openList = new BinarySearchTree();
   const openSet = new Set();
   const closedSet = new Set();
+  const backoffThreshold = 5; // Distance threshold for backoff
+  let backoffIncrement = 7; // Increment for modifying cost heuristic
 
   openList.insert(new Cell(start));
   openSet.add(defaultHash(start));
 
   let path = [];
 
+  // Track the best node and associated backoff metric
+  let bestNode = null;
+  let bestBackoffMetric = Infinity;
+
   return new Promise(async (resolve) => {
     let lastSleep = performance.now();
+    let startTime = performance.now();
 
     while (!openList.isEmpty()) {
-      if (performance.now() - lastSleep >= 50) {
+      if (performance.now() - lastSleep >= 10) {
         await new Promise((r) => setTimeout(r, 0));
         lastSleep = performance.now();
       }
 
+      let currentTime = performance.now();
+      if (currentTime - startTime >= config.thinkTimeout) {
+        // Time limit exceeded, return the best partial path found within the time limit
+        if (bestNode) {
+          console.log(bestNode);
+          console.log(bestBackoffMetric);
+
+          NodeManager.dispose();
+          return resolve({
+            path: reconstructPath(bestNode),
+            status: "partial",
+            cost: bestNode.fCost,
+          });
+        } else {
+          NodeManager.dispose();
+          return resolve({
+            path,
+            status: "no path",
+          });
+        }
+      }
+
       let currentNode = openList.getMin();
+
+      let backoffMetric =
+        currentNode.fCost / backoffIncrement;
+
+      // Keep track of the best node based on backoff metric
+      if (backoffMetric < bestBackoffMetric) {
+        bestNode = currentNode;
+        bestBackoffMetric = backoffMetric;
+        console.log(bestNode.fCost);
+        console.log(bestBackoffMetric);
+      }
 
       if (endFunc(currentNode.worldPos, end, true)) {
         NodeManager.dispose();
@@ -157,6 +197,14 @@ async function Astar(start, endPos, bot, endFunc, config) {
           verPlace,
         });
       }
+    }
+
+    if (bestNode && bestBackoffMetric < backoffThreshold) {
+      return resolve({
+        path: reconstructPath(bestNode),
+        status: "partial",
+        cost: bestNode.fCost,
+      });
     }
 
     return resolve({
