@@ -1,6 +1,4 @@
 const { Vec3 } = require("vec3");
-const FastPriorityQueue = require("fastpriorityqueue");
-const climbableBlocks = ["ladder", "vine", "scaffolding"];
 const { getNeighbors2, NodeManager } = require("./movement");
 const { BinarySearchTree } = require("./heap");
 

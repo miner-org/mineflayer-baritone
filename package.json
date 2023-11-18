@@ -3,7 +3,8 @@
   "version": "0.0.1",
   "description": "Minecraft pathfinder made in javascript using mineflayer and node js.",
   "main": "index.js",
-  "scripts": {},
+  "scripts": {
+  },
   "keywords": [],
   "author": "Ash",
   "license": "ISC",
