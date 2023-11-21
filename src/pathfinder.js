@@ -1,6 +1,6 @@
 const { Vec3 } = require("vec3");
 const { getNeighbors2, NodeManager } = require("./movement");
-const { BinarySearchTree } = require("./heap");
+const { BinarySearchTree, MinHeap } = require("./heap");
 
 // const sleep = (ms = 2000) => {
 //   return new Promise((r) => {
@@ -13,7 +13,7 @@ class Cell {
     /**
      * @type {Vec3}
      */
-    this.worldPos = worldPos;
+    this.worldPos = worldPos || null;
     this.gCost = 0;
     this.hCost = 0;
     this.fCost = 0;
@@ -33,19 +33,52 @@ function processBatch({
   batch,
   currentNode,
   openList,
-  openSet,
+  openSet = new Map(),
   breakBlocks,
   horPlace,
   verPlace,
   closedSet,
   end,
+  bestNode,
 }) {
-  for (const neighbor of batch) {
-    if (closedSet.has(defaultHash(neighbor.worldPos))) {
-      continue;
+  for (const neighborData of batch) {
+    if (closedSet.has(defaultHash(neighborData))) continue;
+
+    let tempG = currentNode.gCost + neighborData.cost;
+    let neighbor = openSet.get(defaultHash(neighborData));
+    let update = false;
+
+    if (neighbor === undefined) {
+      neighbor = new Cell();
+
+      openSet.set(defaultHash(neighborData), neighbor);
+    } else {
+      if (neighbor.gCost < tempG) {
+        // skip dis one cuz we foudn btter path
+        continue;
+      }
+
+      update = true;
     }
 
-    let tempG = currentNode.gCost + neighbor.cost;
+    neighbor.worldPos = new Vec3(
+      neighborData.x,
+      neighborData.y,
+      neighborData.z
+    );
+    neighbor.parent = currentNode;
+    neighbor.gCost = tempG;
+    neighbor.hCost = combinedHeuristic(neighborData, end, 0.5);
+    neighbor.fCost = neighbor.gCost + neighbor.hCost;
+
+    // if (neighbor.hCost < bestNode.hCost) bestNode = neighbor;
+
+    if (update) {
+      openList.update(neighbor, neighbor.fCost);
+    } else {
+      openList.insert(neighbor);
+      openSet.set(defaultHash(neighborData), neighbor);
+    }
 
     if (neighbor.breakThis) {
       for (const dirVec of breakBlocks) {
@@ -77,24 +110,6 @@ function processBatch({
         }
       }
     }
-
-    if (
-      tempG < neighbor.gCost ||
-      !openSet.has(defaultHash(neighbor.worldPos))
-    ) {
-      neighbor.parent = currentNode;
-      neighbor.gCost = tempG;
-      neighbor.hCost = euclideanDistance(neighbor.worldPos, end);
-      neighbor.fCost = neighbor.gCost + neighbor.hCost;
-
-      if (!openSet.has(defaultHash(neighbor.worldPos))) {
-        openList.insert(neighbor);
-        openSet.add(defaultHash(neighbor.worldPos));
-      } else {
-        openList.update(neighbor);
-        openSet.add(defaultHash(neighbor.worldPos));
-      }
-    }
   }
 }
 
@@ -102,14 +117,18 @@ async function Astar(start, endPos, bot, endFunc, config) {
   let end = endPos.clone().offset(0.5, 0.5, 0.5);
   start = start.floored().offset(0.5, 0.5, 0.5);
 
-  const openList = new BinarySearchTree();
-  const openSet = new Set();
+  const openList = new MinHeap();
+  const openSet = new Map();
   const closedSet = new Set();
   const backoffThreshold = 5; // Distance threshold for backoff
-  let backoffIncrement = 7; // Increment for modifying cost heuristic
+  let backoffIncrement = 1; // Increment for modifying cost heuristic
+  const startNode = new Cell(start);
+  startNode.gCost = 0;
+  startNode.hCost = combinedHeuristic(startNode.worldPos, end, 0.5);
+  startNode.fCost = startNode.gCost + startNode.hCost;
 
-  openList.insert(new Cell(start));
-  openSet.add(defaultHash(start));
+  openList.insert(startNode);
+  openSet.set(defaultHash(start), startNode); 
 
   let path = [];
 
@@ -118,49 +137,10 @@ async function Astar(start, endPos, bot, endFunc, config) {
   let bestBackoffMetric = Infinity;
 
   return new Promise(async (resolve) => {
-    let lastSleep = performance.now();
     let startTime = performance.now();
 
     while (!openList.isEmpty()) {
-      if (performance.now() - lastSleep >= 10) {
-        await new Promise((r) => setTimeout(r, 0));
-        lastSleep = performance.now();
-      }
-
-      let currentTime = performance.now();
-      if (currentTime - startTime >= config.thinkTimeout) {
-        // Time limit exceeded, return the best partial path found within the time limit
-        if (bestNode) {
-          console.log(bestNode);
-          console.log(bestBackoffMetric);
-
-          NodeManager.dispose();
-          return resolve({
-            path: reconstructPath(bestNode),
-            status: "partial",
-            cost: bestNode.fCost,
-          });
-        } else {
-          NodeManager.dispose();
-          return resolve({
-            path,
-            status: "no path",
-          });
-        }
-      }
-
-      let currentNode = openList.getMin();
-
-      let backoffMetric =
-        currentNode.fCost / backoffIncrement;
-
-      // Keep track of the best node based on backoff metric
-      if (backoffMetric < bestBackoffMetric) {
-        bestNode = currentNode;
-        bestBackoffMetric = backoffMetric;
-        console.log(bestNode.fCost);
-        console.log(bestBackoffMetric);
-      }
+      let currentNode = openList.extractMin();
 
       if (endFunc(currentNode.worldPos, end, true)) {
         NodeManager.dispose();
@@ -172,7 +152,6 @@ async function Astar(start, endPos, bot, endFunc, config) {
       }
 
       openSet.delete(defaultHash(currentNode.worldPos));
-      openList.remove(currentNode);
       closedSet.add(defaultHash(currentNode.worldPos));
 
       const {
@@ -195,11 +174,42 @@ async function Astar(start, endPos, bot, endFunc, config) {
           openList,
           openSet,
           verPlace,
+          bestNode,
         });
       }
+
+      let currentTime = performance.now();
+      if (currentTime - startTime >= config.thinkTimeout) {
+        // Time limit exceeded, return the best partial path found within the time limit
+        if (bestNode) {
+          NodeManager.dispose();
+          return resolve({
+            path: reconstructPath(bestNode),
+            status: "partial",
+            cost: bestNode.fCost,
+          });
+        } else {
+          NodeManager.dispose();
+          return resolve({
+            path,
+            status: "no path",
+          });
+        }
+      }
+
+      let backoffMetric = currentNode.fCost / backoffIncrement;
+
+      if (backoffMetric < bestBackoffMetric) {
+        bestNode = currentNode;
+        bestBackoffMetric = backoffMetric;
+        backoffIncrement += 0.2;
+      }
+
+      await new Promise((r) => setTimeout(r, 0));
     }
 
     if (bestNode && bestBackoffMetric < backoffThreshold) {
+      console.log("i reach here")
       return resolve({
         path: reconstructPath(bestNode),
         status: "partial",
@@ -215,9 +225,9 @@ async function Astar(start, endPos, bot, endFunc, config) {
 }
 
 function euclideanDistance(node, goal) {
-  const dx = goal.x - node.x;
-  const dy = goal.y - node.y;
-  const dz = goal.z - node.z;
+  const dx = Math.abs(goal.x - node.x);
+  const dy = Math.abs(goal.y - node.y);
+  const dz = Math.abs(goal.z - node.z);
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
@@ -250,16 +260,16 @@ function octileHeuristic3D(node, goal, cost) {
 }
 
 function yoinkedHeuristic(node, endPos) {
-  const dx = node.x - endPos.x;
-  const dy = node.y - endPos.y;
-  const dz = node.z - endPos.z;
+  const dx = endPos.x - node.x;
+  const dy = endPos.y - node.y;
+  const dz = endPos.z - node.z;
   return distanceXZ(dx, dz) + Math.abs(dy);
 }
 
 function distanceXZ(dx, dz) {
   dx = Math.abs(dx);
   dz = Math.abs(dz);
-  return Math.sqrt(dx * dx + dz * dz);
+  return Math.abs(dx - dz) + Math.min(dx, dz) * Math.SQRT2;
 }
 
 function reconstructPath(node) {
@@ -281,20 +291,20 @@ function getNeighbors(node, bot, config) {
   let neighbor = [];
   const neighbors = getNeighbors2(bot.world, node, config);
   for (const dirVec of neighbors.neighbors) {
-    const cell = new Cell(new Vec3(dirVec.x, dirVec.y, dirVec.z), dirVec.cost);
-    if (dirVec.break && dirVec.break === true) {
-      cell.breakThis = true;
-    }
-
-    if (dirVec.placeHorizontal && dirVec.placeHorizontal === true) {
-      cell.placeHere = true;
-    }
-
-    if (dirVec.placeVertical && dirVec.placeVertical === true) {
-      cell.placeHere = true;
-    }
-
-    neighbor.push(cell);
+    /**
+     * Syntax
+     *
+     * {
+     * x,
+     * y,
+     * z,
+     * break?,
+     * placeHorizontal?,
+     * placeVertical?
+     * cost,
+     * }
+     */
+    neighbor.push(dirVec);
   }
 
   return {
@@ -306,7 +316,7 @@ function getNeighbors(node, bot, config) {
 }
 
 function defaultHash(node) {
-  return node.toString();
+  return `${node.x}_${node.y}_${node.z}`;
 }
 
 module.exports = {

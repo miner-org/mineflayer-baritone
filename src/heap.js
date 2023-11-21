@@ -9,6 +9,7 @@ class TreeNode {
 class BinarySearchTree {
   constructor() {
     this.root = null;
+    this.size = 0; // Added size property
   }
 
   insert(cell) {
@@ -19,6 +20,7 @@ class BinarySearchTree {
     } else {
       this.insertNode(this.root, newNode);
     }
+    this.size++; // Increment size after insertion
   }
 
   insertNode(node, newNode) {
@@ -60,15 +62,15 @@ class BinarySearchTree {
   }
 
   getMin() {
-    let current = this.root;
-    while (current.left !== null) {
-      current = current.left;
+    if (this.root === null) {
+      return null;
     }
-    return current.cell;
+    return this.root.left ? this.root.left.cell : this.root.cell;
   }
 
   remove(cell) {
     this.root = this.removeNode(this.root, cell);
+    this.size--; // Decrement size after removal
   }
 
   removeNode(node, cell) {
@@ -109,10 +111,96 @@ class BinarySearchTree {
   }
 
   isEmpty() {
-    return this.root === null;
+    return this.size === 0; // Check size instead of root
+  }
+}
+
+class MinHeap {
+  constructor() {
+    this.heap = [];
+    this.deletedSet = new Set();
+  }
+
+  insert(cell) {
+    this.heap.push(cell);
+    this.bubbleUp(this.heap.length - 1);
+  }
+
+  bubbleUp(index) {
+    let currentIdx = index;
+    let parentIdx = Math.floor((currentIdx - 1) / 2);
+
+    while (
+      currentIdx > 0 &&
+      this.heap[currentIdx].fCost < this.heap[parentIdx].fCost
+    ) {
+      [this.heap[currentIdx], this.heap[parentIdx]] = [
+        this.heap[parentIdx],
+        this.heap[currentIdx],
+      ];
+      currentIdx = parentIdx;
+      parentIdx = Math.floor((currentIdx - 1) / 2);
+    }
+  }
+
+  extractMin() {
+    while (this.heap.length && this.deletedSet.has(this.heap[0])) {
+      this.deletedSet.delete(this.heap[0]);
+      this.heap[0] = this.heap.pop();
+      this.heapify(0);
+    }
+
+    if (this.heap.length === 1) {
+      return this.heap.pop();
+    }
+
+    const min = this.heap[0];
+    this.heap[0] = this.heap.pop();
+    this.heapify(0);
+    return min;
+  }
+
+  update(nodeToUpdate, newCost) {
+    const index = this.heap.findIndex((node) => node === nodeToUpdate);
+
+    if (index !== -1) {
+      this.heap[index].fCost = newCost; // Update the cost
+
+      // Adjust the heap if necessary after updating the cost
+      this.bubbleUp(index);
+      this.heapify(index);
+    }
+  }
+
+  heapify(index) {
+    let smallest = index;
+    const left = 2 * index + 1;
+    const right = 2 * index + 2;
+    const length = this.heap.length;
+
+    if (left < length && this.heap[left].fCost < this.heap[smallest].fCost) {
+      smallest = left;
+    }
+
+    if (right < length && this.heap[right].fCost < this.heap[smallest].fCost) {
+      smallest = right;
+    }
+
+    if (smallest !== index) {
+      [this.heap[index], this.heap[smallest]] = [
+        this.heap[smallest],
+        this.heap[index],
+      ];
+      this.heapify(smallest);
+    }
+  }
+
+  isEmpty() {
+    return this.heap.length - this.deletedSet.size === 0;
   }
 }
 
 module.exports = {
   BinarySearchTree,
+  MinHeap,
 };

@@ -8,7 +8,7 @@ const bot = mineflayer.createBot({
   username: "Frisk",
   port: parseInt(argv[3]),
   viewDistance: "tiny",
-  version: "1.18.2",
+  version: "1.20.1",
 });
 
 bot.loadPlugin(inject);
@@ -56,8 +56,8 @@ bot.once("spawn", async () => {
       const eyePos = bot.blockAtEntityCursor(bot.players[username].entity);
 
       if (eyePos) {
-        console.log(eyePos)
-      } else bot.chat("too far")
+        console.log(eyePos);
+      } else bot.chat("too far");
     }
 
     if (command === "s!pos") {
@@ -65,11 +65,67 @@ bot.once("spawn", async () => {
       const block = bot.blockAt(currentPos.floored());
 
       console.log("Current pos", currentPos);
-      console.log("Block", block)
+      console.log("Block", block);
+    }
+    if (command === "s!follow") {
+      const targetPlayer = bot.players[username];
+      const target = targetPlayer?.entity;
+
+      if (!target) return bot.chat("I cannot see you");
+
+      await bot.ashfinder.follow(target);
+    }
+
+    if (command === "s!random") {
+      // Make bot pathfind to random ass locations ig?
+
+      const isGood = (location) => {
+        const block = bot.blockAt(location, false);
+
+        if (!block) return false;
+
+        const blockBelow = bot.blockAt(block.position.offset(0, -1, 0), false);
+        const blockAbove = bot.blockAt(block.position.offset(0, 1, 0), false);
+
+        if (!blockBelow && !blockAbove) return false;
+
+        // we hate water!!
+        if (blockBelow.boundingBox !== "block" || blockBelow.name === "water")
+          return false;
+        
+
+          console.log("block", block.name)
+          console.log("block below", blockBelow.name)
+          console.log("block aboove", blockAbove.name)
+        if (
+          block.boundingBox === "empty" &&
+          block.name !== "water" &&
+          blockAbove.boundingBox === "empty" &&
+          blockAbove.name !== "water"
+        )
+          return true;
+
+        return false;
+      };
+
+      const location = 
+        bot.entity.position
+          .clone()
+          .offset(
+            Math.floor(Math.random() * (50 - 20) + 20),
+            0.5,
+            Math.floor(Math.random() * (50 - 20) + 20)
+          )
+      
+      if (!isGood(location)) {
+        console.log("not good")
+        return
+      };
+
+      await bot.ashfinder.goto(location);
     }
   });
 });
 
-
-bot.on("error", console.log)
-bot.on("kicked", console.log)
+bot.on("error", console.log);
+bot.on("kicked", console.log);

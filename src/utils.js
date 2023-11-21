@@ -344,6 +344,10 @@ function isPointOnPath(pointToCheck, path, options = {}) {
   });
 }
 
+
+
+
+
 // Generate weights for combined heuristic function
 function generateWeights() {
   const weights = [];

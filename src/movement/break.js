@@ -61,7 +61,10 @@ class MoveBreakSemiForwardUp extends Move {
 
     if (
       this.isNodeMarked(targetNode) &&
-      this.getNodeAttribute(targetNode) === "broken"
+      this.getNodeAttribute(targetNode) === "broken" &&
+      this.isNodeMarked(standingNode) &&
+      this.getNodeAttribute(standingNode) === "broken" 
+      
     )
       return [];
 
@@ -174,9 +177,9 @@ class MoveBreakUp extends Move {
 }
 
 registerMoves([
-  MoveBreakForward,
+  // MoveBreakForward,
   MoveBreakSemiForwardUp,
-  MoveBreakForwardUp,
-  MoveBreakUp,
+  // MoveBreakForwardUp,
+  // MoveBreakUp,
   // MoveBreakForwardDown,
 ]);
