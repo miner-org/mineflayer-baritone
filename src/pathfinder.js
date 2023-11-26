@@ -80,15 +80,9 @@ function processBatch({
       openSet.set(defaultHash(neighborData), neighbor);
     }
 
-    if (neighbor.breakThis) {
-      for (const dirVec of breakBlocks) {
-        if (
-          neighbor.worldPos.x === dirVec.parent.x &&
-          neighbor.worldPos.z === dirVec.parent.z
-        ) {
-          neighbor.breakableNeighbors = dirVec.blocks;
-        }
-      }
+    if (neighborData.break) {
+      neighbor.breakThis = true;
+      neighbor.breakableNeighbors = neighborData.blocks;
     }
 
     if (neighbor.placeHere) {
@@ -121,14 +115,14 @@ async function Astar(start, endPos, bot, endFunc, config) {
   const openSet = new Map();
   const closedSet = new Set();
   const backoffThreshold = 5; // Distance threshold for backoff
-  let backoffIncrement = 1; // Increment for modifying cost heuristic
+  let backoffIncrement = 0.1; // Increment for modifying cost heuristic
   const startNode = new Cell(start);
   startNode.gCost = 0;
   startNode.hCost = combinedHeuristic(startNode.worldPos, end, 0.5);
   startNode.fCost = startNode.gCost + startNode.hCost;
 
   openList.insert(startNode);
-  openSet.set(defaultHash(start), startNode); 
+  openSet.set(defaultHash(start), startNode);
 
   let path = [];
 
@@ -202,14 +196,14 @@ async function Astar(start, endPos, bot, endFunc, config) {
       if (backoffMetric < bestBackoffMetric) {
         bestNode = currentNode;
         bestBackoffMetric = backoffMetric;
-        backoffIncrement += 0.2;
+        backoffIncrement += 0.1;
       }
 
       await new Promise((r) => setTimeout(r, 0));
     }
 
     if (bestNode && bestBackoffMetric < backoffThreshold) {
-      console.log("i reach here")
+      console.log("i reach here");
       return resolve({
         path: reconstructPath(bestNode),
         status: "partial",
@@ -291,6 +285,14 @@ function getNeighbors(node, bot, config) {
   let neighbor = [];
   const neighbors = getNeighbors2(bot.world, node, config);
   for (const dirVec of neighbors.neighbors) {
+    for (const obj of neighbors.breakNeighbors) {
+
+      //If this vec is the parent then we set its blocks to the objs blocks
+      if (dirVec.x === obj.parent.x && dirVec.z === obj.parent.z) {
+        dirVec.blocks = obj.blocks;
+      }
+    }
+
     /**
      * Syntax
      *
@@ -302,6 +304,7 @@ function getNeighbors(node, bot, config) {
      * placeHorizontal?,
      * placeVertical?
      * cost,
+     * blocks?: []
      * }
      */
     neighbor.push(dirVec);

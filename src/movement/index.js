@@ -20,6 +20,7 @@ class DirectionalVec3 extends Vec3 {
     this.z = z;
     this.dir = direction;
     this.attributes = attributes;
+    this.blocks = [];
   }
 
   forward(amount = 1, attributes = {}) {

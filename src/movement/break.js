@@ -178,7 +178,7 @@ class MoveBreakUp extends Move {
 
 registerMoves([
   // MoveBreakForward,
-  MoveBreakSemiForwardUp,
+  // MoveBreakSemiForwardUp,
   // MoveBreakForwardUp,
   // MoveBreakUp,
   // MoveBreakForwardDown,

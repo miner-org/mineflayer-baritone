@@ -82,7 +82,6 @@ function isPlayerOnBlock(playerPosition, blockPosition, onGround = false) {
 }
 
 function getControlState(bot) {
-  // we have to do this instead of just returning the control state since it uses custom get() methods
   return {
     forward: bot.controlState.forward,
     back: bot.controlState.back,
@@ -94,44 +93,46 @@ function getControlState(bot) {
   };
 }
 
+/**
+ * 
+ * @param {import("mineflayer").Bot} bot 
+ * @param {Function} satisfyFunction 
+ * @param {Function} controller 
+ * @param {number} ticks 
+ * @param {import('prismarine-physics').PlayerState} state 
+ */
 function simulateUntil(
   bot,
-  func,
-  ticks = 1,
-  controlstate = {},
-  returnState = false,
-  returnInitial = true,
-  extraState
+  satisfyFunction,
+  controller,
+  ticks=1,
+  state = null
 ) {
-  // simulate the physics for the bot until func returns true for a number of ticks
-  const originalControl = getControlState(bot);
-  const simulationControl = originalControl;
-  Object.assign(simulationControl, controlstate);
-  const state = new PlayerState(bot, simulationControl);
-  Object.assign(state, extraState);
-  if (func(state) && returnInitial) return state;
+  if (!state) {
+    const controls = getControlState(bot)
 
-  const world = {
-    getBlock: (pos) => {
-      return bot.blockAt(pos, false);
-    },
-  };
-
-  let airTicks = 0;
-
-  for (let i = 0; i < ticks; i++) {
-    state.control = simulationControl;
-    bot.physics.simulatePlayer(state, world);
-
-    if (!state.onGround) airTicks++;
-    else airTicks = 0;
-    state.airTicks = airTicks;
-
-    // if the state satifies the return function
-    if (func(state)) return state;
+    state = new PlayerState(bot, controls)
   }
 
-  return returnState ? state : false;
+  for (let i = 0; i < ticks; i++) {
+    controller(state, i)
+    bot.physics.simulatePlayer(state, bot.world)
+
+    if (state.isInLava) return state
+
+    if (satisfyFunction(state)) return state
+  }
+
+  return state
+
+}
+
+function getController (jump, sprint, jumpAfter = 0) {
+  return (state, tick) => {
+    state.control.forward = true
+    state.control.jump = jump && tick >= jumpAfter
+    state.control.sprint = sprint
+  }
 }
 
 function distanceFromLine(lineStart, lineEnd, point) {
@@ -379,4 +380,5 @@ module.exports = {
   autoTool,
   isPointOnPath,
   simulateUntil,
+  getController
 };

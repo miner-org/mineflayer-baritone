@@ -9,6 +9,7 @@ const {
   autoTool,
   simulateUntil,
   isPointOnPath,
+  getController,
 } = require("./utils.js");
 const { Cell } = require("./pathfinder");
 const AABB = require("./aabb.js");
@@ -178,7 +179,7 @@ function inject(bot) {
   function canSprintJump(targetPoint) {
     const reached = (state) => {
       if (!state) return false;
-      const isonBlock = isPlayerOnBlock(state.pos, targetPoint);
+      const isonBlock = isPlayerOnBlock(state.pos, targetPoint, true);
 
       return isonBlock;
     };
@@ -186,13 +187,11 @@ function inject(bot) {
     const returnState = simulateUntil(
       bot,
       reached,
-      10,
-      { jump: true, sprint: true, forward: true },
-      true,
-      false
+      getController(true, true, 0),
+      20
     );
 
-    if (!returnState) return false; // Never landed on the ground
+    if (!returnState) return false; 
 
     if (returnState.isInLava) return false;
 
@@ -207,7 +206,7 @@ function inject(bot) {
       targetDistX * targetDistX + targetDistZ * targetDistZ
     );
 
-    if (jumpDist >= 3 && targetDist <= 1) return true;
+    if (jumpDist >= 3 && jumpDist <= 3.5 && targetDist <= 0.85) return true;
 
     return false;
   }
@@ -223,19 +222,15 @@ function inject(bot) {
     const returnState = simulateUntil(
       bot,
       reached,
-      20,
-      { jump: true, sprint: false, forward: true },
-      true,
-      false
+      getController(true, false),
+      20
     );
 
     const returnStateWithoutJump = simulateUntil(
       bot,
       reached,
-      20,
-      { jump: false, sprint: true, forward: true },
-      true,
-      false
+      getController(false, true),
+      20
     );
 
     if (!returnState) return false; // never landed on ground
@@ -258,7 +253,7 @@ function inject(bot) {
       targetDistX * targetDistX + targetDistZ * targetDistZ
     );
 
-    if (jumpDist <= 2 && targetDist <= 1) return true;
+    if (jumpDist <= 2.5 && targetDist <= 1) return true;
 
     return false;
   }
@@ -289,7 +284,7 @@ function inject(bot) {
     if (reached(state)) return true;
 
     if (sprint) {
-      if (canSprintJump(targetPoint)) return false;
+      if (canSprintJump(targetPoint)) return false; 
     } else {
       if (canWalkJump(targetPoint)) return false;
     }
@@ -398,7 +393,7 @@ function inject(bot) {
     }
 
     if (isPlayerOnBlock(bot.entity.position, point)) {
-      bot.setControlState("forward", false);
+      // bot.setControlState("forward", false);
       bot.setControlState("jump", false);
 
       if (straightPathOptions) straightPathOptions.resolve();
@@ -437,7 +432,6 @@ function inject(bot) {
 
     let shouldWalkJump = canWalkJump(point);
     let shouldSprintJump = canSprintJump(point);
-    let shouldStraightLine = canStraightLine(true, point);
 
     if (
       (ladderBlock && ladderBlock.name === "ladder") ||
@@ -500,39 +494,6 @@ function inject(bot) {
     return false;
   }
 
-  function followTick() {
-    // updates the target position every followedAgo milliseconds
-    let entity = bot.entities[targetEntity.id];
-
-    if (!entity) return;
-
-    if (!entity.onGround) return;
-
-    if (!bot.entity.onGround) return;
-
-    const distance = bot.entity.position.distanceTo(entity.position);
-    if (
-      bot.ashfinder.pathOptions.maxDistance &&
-      distance > bot.ashfinder.pathOptions.maxDistance
-    ) {
-    } else if (
-      bot.ashfinder.pathOptions.minDistance &&
-      distance < bot.ashfinder.pathOptions.minDistance
-    ) {
-    } else if (
-      bot.ashfinder.pathOptions.maxDistance ||
-      bot.ashfinder.pathOptions.minDistance
-    )
-      return;
-
-    let entityMoved = goal === null || !entity.position.equals(goal);
-    let followedAgo = performance.now() - lastFollowed;
-    if (!calculating && entityMoved && followedAgo > 100) {
-      lastFollowed = performance.now();
-      path(entity.position.clone(), bot.ashfinder.pathOptions);
-    }
-  }
-
   let initialPos = null;
   let finalPos = null;
   let startTime = null;
@@ -592,7 +553,6 @@ function inject(bot) {
     console.log("called");
     let position = endPos.clone();
     let pathNumber = ++currentPathNumber;
-    let hasPartialPath = false;
     goal = position.clone();
     calculating = true;
     continuousPath = true;
@@ -631,6 +591,8 @@ function inject(bot) {
     breakBlocks = complexPathPoints
       .filter((cell) => cell.breakThis)
       .map((cell) => cell.breakableNeighbors);
+
+    console.log("Break: ", breakBlocks);
 
     while (complexPathPoints.length > 0) {
       const movement = complexPathPoints[0];
@@ -679,51 +641,6 @@ function inject(bot) {
         breakTargets: breakTargets,
       });
 
-      if (result.status === "partial" && !hasPartialPath) {
-        const currentPos = bot.entity.position;
-
-        // Check if we've reached the actual end position
-        if (isPlayerOnBlock(currentPos, position, true)) {
-          complexPathPoints = null;
-          bot.clearControlStates();
-          return;
-        }
-
-        bot.clearControlStates();
-
-        const last = complexPathPoints[complexPathPoints.length - 1].worldPos;
-        const newPathSegment = await calculatePathSegment(last, position);
-
-        // If newPathSegment is not null, integrate it into the bot's path
-        if (newPathSegment !== null) {
-          console.log(
-            "Previous points",
-            complexPathPoints.map((cell) => cell.worldPos)
-          );
-          console.log(
-            "added segmenets",
-            newPathSegment.map((cell) => cell.worldPos)
-          );
-          complexPathPoints = [...complexPathPoints, ...newPathSegment];
-          bot.ashfinder.path = complexPathPoints;
-
-          vertical = complexPathPoints
-            .filter((cell) => cell.placeHere)
-            .map((cell) => cell.verticalPlacable);
-
-          horizontal = complexPathPoints
-            .filter((cell) => cell.placeHere)
-            .map((cell) => cell.horizontalPlacable);
-
-          breakBlocks = complexPathPoints
-            .filter((cell) => cell.breakThis)
-            .map((cell) => cell.breakableNeighbors);
-
-          hasPartialPath = true;
-          continue;
-        }
-      }
-
       if (
         currentCalculatedPathNumber > pathNumber ||
         complexPathPoints === null
@@ -732,12 +649,16 @@ function inject(bot) {
       complexPathPoints.shift();
     }
 
-    // if we still arent on the end pos then calc new path
-    if (!isPlayerOnBlock(bot.entity.position, endPos, true)) {
-      complexPathPoints = null;
-      bot.clearControlStates();
-      return await path(endPos, {});
+
+    if (result.status === "partial") {
+      // if we arent on the end pos and the path was partial then we recalculate
+      if (!isPlayerOnBlock(bot.entity.position, endPos, true)) {
+        complexPathPoints = null;
+        bot.clearControlStates();
+        return await path(endPos, {})
+      }
     }
+
 
 
     console.log("Done!!")
