@@ -121,9 +121,9 @@ class MoveForwardDown extends Move {
     let upNode = this.forward(1).up(1);
 
 
-    if (!this.isWalkable(walkableNode)) return [];
+    if (!this.isAir(walkableNode) && this.isAir(upNode)) return [];
 
-    // if (this.isSolid(landingNode)) return [];
+    if (this.isSolid(landingNode)) return [];
 
     let isSafe = false;
     let cost = 0;
@@ -144,18 +144,6 @@ class MoveForwardDown extends Move {
     ) {
       neighbors.push(this.makeMovement(landingNode, 1.5 + cost));
       return
-    }
-
-
-    // this only goes down one block
-    if (
-      config.breakBlocks &&
-      this.isBreakble(upNode, config) &&
-      this.isBreakble(landingNode, config) &&
-      this.isBreakble(walkableNode, config)
-    ) {
-      this.break = true;
-      neighbors.push(this.makeBreakable(landingNode, 1.5));
     }
   }
 
