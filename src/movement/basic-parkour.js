@@ -10,17 +10,6 @@ class MoveParkour1 extends Move {
 
     let airNode = this.forward(1).down(1);
 
-    if (
-      this.isNodeMarked(landingNode) &&
-      this.getNodeAttribute(landingNode) === "broken" &&
-      this.isNodeMarked(spaceNode1) &&
-      this.getNodeAttribute(spaceNode1) === "broken" &&
-      this.isNodeMarked(spaceNode2) &&
-      this.getNodeAttribute(spaceNode2) === "broken"
-    ) {
-      return [];
-    }
-
     if (!this.isAir(airNode)) return [];
 
     if (
@@ -56,21 +45,6 @@ class MoveForwardParkour2 extends Move {
     let airNode = this.forward(1).down(1);
     let airNode2 = this.forward(2).down(1);
 
-    if (
-      this.isNodeMarked(landingNode) &&
-      this.getNodeAttribute(landingNode) === "broken" &&
-      this.isNodeMarked(spaceNode1) &&
-      this.getNodeAttribute(spaceNode1) === "broken" &&
-      this.isNodeMarked(spaceNode2) &&
-      this.getNodeAttribute(spaceNode2) === "broken" &&
-      this.isNodeMarked(spaceNode3) &&
-      this.getNodeAttribute(spaceNode3) === "broken" &&
-      this.isNodeMarked(spaceNode4) &&
-      this.getNodeAttribute(spaceNode4) === "broken"
-    ) {
-      return [];
-    }
-
     if (!this.isAir(airNode) && !this.isAir(airNode2)) return [];
 
     if (
@@ -104,25 +78,7 @@ class MoveForwardParkour3 extends Move {
     let airNode2 = this.down(1, spaceNode2);
     let airNode3 = this.down(1, spaceNode3);
 
-    if (
-      this.isNodeMarked(landingNode) &&
-      this.getNodeAttribute(landingNode) === "broken" &&
-      this.isNodeMarked(spaceNode1) &&
-      this.getNodeAttribute(spaceNode1) === "broken" &&
-      this.isNodeMarked(spaceNode2) &&
-      this.getNodeAttribute(spaceNode2) === "broken" &&
-      this.isNodeMarked(spaceNode3) &&
-      this.getNodeAttribute(spaceNode3) === "broken"
-    ) {
-      return [];
-    }
 
-    if (
-      this.isNodeMarked(landingNode) &&
-      this.getNodeAttribute(landingNode) === "broken"
-    ) {
-      return [];
-    }
 
     if (!this.isAir(airNode1) && !this.isAir(airNode2) && !this.isAir(airNode3))
       return [];
@@ -149,14 +105,7 @@ class MoveForwardParkourUp1 extends Move {
 
     let shouldJump = this.isAir(this.down(1).forward(1));
 
-    if (
-      this.isNodeMarked(landingNode) &&
-      this.getNodeAttribute(landingNode) === "broken" &&
-      this.isNodeMarked(gapNode1) &&
-      this.getNodeAttribute(gapNode1) === "broken"
-    ) {
-      return [];
-    }
+
 
     // if not air return
     if (!shouldJump) return [];
@@ -175,16 +124,7 @@ class MoveForwardParkourUp2 extends Move {
     let gapNode1 = this.forward(1);
     let gapNode2 = this.forward(2);
 
-    if (
-      this.isNodeMarked(landingNode) &&
-      this.getNodeAttribute(landingNode) === "broken" &&
-      this.isNodeMarked(gapNode1) &&
-      this.getNodeAttribute(gapNode1) === "broken" &&
-      this.isNodeMarked(gapNode2) &&
-      this.getNodeAttribute(gapNode2) === "broken"
-    ) {
-      return [];
-    }
+
 
     let shouldJump =
       this.isAir(this.down(1).forward(1)) &&
@@ -192,12 +132,7 @@ class MoveForwardParkourUp2 extends Move {
 
     if (!shouldJump) return [];
 
-    if (
-      this.isNodeMarked(landingNode) &&
-      this.getNodeAttribute(landingNode) === "broken"
-    ) {
-      return [];
-    }
+
 
     if (
       this.isJumpable(gapNode1) &&
@@ -218,31 +153,13 @@ class MoveForwardParkourUp3 extends Move {
     let gapNode2 = this.forward(2);
     let gapNode3 = this.forward(3);
 
-    if (
-      this.isNodeMarked(landingNode) &&
-      this.getNodeAttribute(landingNode) === "broken" &&
-      this.isNodeMarked(gapNode1) &&
-      this.getNodeAttribute(gapNode1) === "broken" &&
-      this.isNodeMarked(gapNode2) &&
-      this.getNodeAttribute(gapNode2) === "broken" &&
-      this.isNodeMarked(gapNode3) &&
-      this.getNodeAttribute(gapNode3) === "broken"
-    ) {
-      return [];
-    }
-
     let shouldJump =
       this.isAir(this.down(1).forward(1)) &&
       this.isAir(this.down(1).forward(2)) &&
       this.isAir(this.down(1).forward(3));
     if (!shouldJump) return [];
 
-    if (
-      this.isNodeMarked(landingNode) &&
-      this.getNodeAttribute(landingNode) === "broken"
-    ) {
-      return [];
-    }
+
 
     if (
       this.isJumpable(gapNode1) &&
@@ -303,12 +220,7 @@ class MoveForwardParkourDown2 extends Move {
 
     if (!shouldJump) return [];
 
-    if (
-      this.isNodeMarked(landingNode) &&
-      this.getNodeAttribute(landingNode) === "broken"
-    ) {
-      return [];
-    }
+
 
     if (
       this.isStandable(landingNode) &&
@@ -344,13 +256,6 @@ class MoveForwardParkourDown3 extends Move {
       this.isAir(spaceNode2) &&
       this.isAir(spaceNode3);
     if (!shouldJump) return [];
-
-    if (
-      this.isNodeMarked(landingNode) &&
-      this.getNodeAttribute(landingNode) === "broken"
-    ) {
-      return [];
-    }
 
     if (
       this.isStandable(landingNode) &&

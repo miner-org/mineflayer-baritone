@@ -1,5 +1,5 @@
 const { Vec3 } = require("vec3");
-const { getNeighbors2, NodeManager } = require("./movement");
+const { getNeighbors2 } = require("./movement");
 const { BinarySearchTree, MinHeap } = require("./heap");
 
 // const sleep = (ms = 2000) => {
@@ -7,6 +7,32 @@ const { BinarySearchTree, MinHeap } = require("./heap");
 //     setTimeout(r, ms);
 //   });
 // };
+
+function defaultHash(node) {
+  return `${node.x}_${node.y}_${node.z}`;
+}
+
+class NodeManager {
+  constructor() {
+    this.markedNodes = new Map();
+  }
+
+  markNode(node, attribute) {
+    this.markedNodes.set(defaultHash(node), attribute);
+  }
+
+  unmarkNode(node) {
+    this.markedNodes.delete(defaultHash(node));
+  }
+
+  isNodeMarked(node) {
+    return this.markedNodes.has(defaultHash(node));
+  }
+
+  getNodeAttribute(node) {
+    return this.markedNodes.get(defaultHash(node));
+  }
+}
 
 class Cell {
   constructor(worldPos, cost) {
@@ -33,13 +59,14 @@ function processBatch({
   batch,
   currentNode,
   openList,
-  openSet = new Map(),
+  openSet,
   breakBlocks,
   horPlace,
   verPlace,
   closedSet,
   end,
   bestNode,
+  manager,
 }) {
   for (const neighborData of batch) {
     if (closedSet.has(defaultHash(neighborData))) continue;
@@ -114,6 +141,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
   const openList = new MinHeap();
   const openSet = new Map();
   const closedSet = new Set();
+  const nodemanager = new NodeManager();
   const backoffThreshold = 5; // Distance threshold for backoff
   let backoffIncrement = 0.1; // Increment for modifying cost heuristic
   const startNode = new Cell(start);
@@ -137,7 +165,6 @@ async function Astar(start, endPos, bot, endFunc, config) {
       let currentNode = openList.extractMin();
 
       if (endFunc(currentNode.worldPos, end, true)) {
-        NodeManager.dispose();
         return resolve({
           path: reconstructPath(currentNode),
           cost: currentNode.fCost,
@@ -153,7 +180,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
         horizontalPlace: horPlace,
         verticalPlace: verPlace,
         neighbor: neighbors,
-      } = getNeighbors(currentNode, bot, config);
+      } = getNeighbors(currentNode, bot, config, nodemanager);
 
       const batchSize = 10;
       for (let i = 0; i < neighbors.length; i += batchSize) {
@@ -169,6 +196,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
           openSet,
           verPlace,
           bestNode,
+          manager: nodemanager,
         });
       }
 
@@ -176,14 +204,12 @@ async function Astar(start, endPos, bot, endFunc, config) {
       if (currentTime - startTime >= config.thinkTimeout) {
         // Time limit exceeded, return the best partial path found within the time limit
         if (bestNode) {
-          NodeManager.dispose();
           return resolve({
             path: reconstructPath(bestNode),
             status: "partial",
             cost: bestNode.fCost,
           });
         } else {
-          NodeManager.dispose();
           return resolve({
             path,
             status: "no path",
@@ -204,6 +230,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
 
     if (bestNode && bestBackoffMetric < backoffThreshold) {
       console.log("i reach here");
+
       return resolve({
         path: reconstructPath(bestNode),
         status: "partial",
@@ -281,12 +308,11 @@ function reconstructPath(node) {
   return path;
 }
 
-function getNeighbors(node, bot, config) {
+function getNeighbors(node, bot, config, manager) {
   let neighbor = [];
-  const neighbors = getNeighbors2(bot.world, node, config);
+  const neighbors = getNeighbors2(bot.world, node, config, manager);
   for (const dirVec of neighbors.neighbors) {
     for (const obj of neighbors.breakNeighbors) {
-
       //If this vec is the parent then we set its blocks to the objs blocks
       if (dirVec.x === obj.parent.x && dirVec.z === obj.parent.z) {
         dirVec.blocks = obj.blocks;
@@ -316,10 +342,6 @@ function getNeighbors(node, bot, config) {
     verticalPlace: neighbors.verticalPlacaNeighbors,
     horizontalPlace: neighbors.horizontalPlaceNeighbors,
   };
-}
-
-function defaultHash(node) {
-  return `${node.x}_${node.y}_${node.z}`;
 }
 
 module.exports = {

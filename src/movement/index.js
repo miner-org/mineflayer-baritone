@@ -84,30 +84,6 @@ class DirectionalVec3 extends Vec3 {
   }
 }
 
-class NodeManager {
-  static markedNodes = new Map();
-
-  static markNode(node, attribute) {
-    this.markedNodes.set(hash(node), attribute);
-  }
-
-  static unmarkNode(node) {
-    this.markedNodes.delete(hash(node));
-  }
-
-  static isNodeMarked(node) {
-    return this.markedNodes.has(hash(node));
-  }
-
-  static getNodeAttribute(node) {
-    return this.markedNodes.get(hash(node));
-  }
-
-  static dispose() {
-    this.markedNodes.clear()
-  }
-}
-
 const climbableBlocks = ["ladder", "vines"];
 const interactableBlocks = [
   "oak_door",
@@ -128,24 +104,6 @@ const unbreakableBlocks = [
 ];
 
 class Move {
-  constructor() {}
-
-  markNode(node, attribute) {
-    NodeManager.markNode(node, attribute);
-  }
-
-  unmarkNode(node) {
-    NodeManager.unmarkNode(node);
-  }
-
-  isNodeMarked(node) {
-    return NodeManager.isNodeMarked(node);
-  }
-
-  getNodeAttribute(node) {
-    return NodeManager.getNodeAttribute(node);
-  }
-
   setValues(world, origin, dir) {
     this.world = world;
     this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
@@ -210,6 +168,22 @@ class Move {
     );
   }
 
+  getNodeDigTime(
+    node,
+    options = { heldItemID: null, creative: false, water: false, ground: true }
+  ) {
+    const block = this.world.getBlock(node);
+
+    if (!block) return -1;
+
+    return block.digTime(
+      options.heldItemID,
+      options.creative,
+      options.water,
+      options.ground
+    );
+  }
+
   isJumpable(node) {
     return (
       this.isAir(node) &&
@@ -221,7 +195,7 @@ class Move {
   isWaterLogged(node) {
     const block = this.world.getBlock(node);
     if (!block) return false;
-    return block.getProperties()?.waterlogged
+    return block.getProperties()?.waterlogged;
   }
 
   getBlock(node) {
@@ -296,7 +270,7 @@ function registerMoves(moves) {
   }
 }
 
-function getNeighbors2(world, node, config) {
+function getNeighbors2(world, node, config, manager) {
   let neighbors = [];
   let breakNeighbors = [];
   let verticalPlacaNeighbors = [];
@@ -305,7 +279,7 @@ function getNeighbors2(world, node, config) {
   for (const move of moveClasses) {
     for (const dir of cardinalDirections) {
       move.setValues(world, node.worldPos, dir);
-      move.addNeighbors(neighbors, config);
+      move.addNeighbors(neighbors, config, manager);
 
       if (move.break) {
         move.addBreakNeighbors(breakNeighbors);
@@ -329,6 +303,6 @@ function getNeighbors2(world, node, config) {
   };
 }
 
-module.exports = { getNeighbors2, Move, registerMoves, NodeManager };
+module.exports = { getNeighbors2, Move, registerMoves };
 
 requireDir("./");
