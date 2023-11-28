@@ -104,10 +104,11 @@ const unbreakableBlocks = [
 ];
 
 class Move {
-  setValues(world, origin, dir) {
+  setValues(world, origin, dir, bot) {
     this.world = world;
     this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
     this.dir = dir;
+    this.bot = bot;
   }
 
   makeMovement(position, cost) {
@@ -132,6 +133,25 @@ class Move {
     position.placeVertical = true;
     position.cost = costToPlace;
     return position;
+  }
+
+  isNearBaddie(node, config, range) {
+    const baddies = config.blocksToStayAway;
+
+    const block = this.world.getBlock(node);
+
+    if (!block) return false;
+
+    const nearestBaddie = this.bot.findBlock({
+      matching: (block) => baddies.includes(block.name),
+      maxDistance: range,
+      point: node,
+    });
+
+    // we arent near a baddie so we good
+    if (!nearestBaddie) return false;
+
+    return true;
   }
 
   isAir(node) {
@@ -270,7 +290,7 @@ function registerMoves(moves) {
   }
 }
 
-function getNeighbors2(world, node, config, manager) {
+function getNeighbors2(world, node, config, manager, bot) {
   let neighbors = [];
   let breakNeighbors = [];
   let verticalPlacaNeighbors = [];
@@ -278,7 +298,7 @@ function getNeighbors2(world, node, config, manager) {
 
   for (const move of moveClasses) {
     for (const dir of cardinalDirections) {
-      move.setValues(world, node.worldPos, dir);
+      move.setValues(world, node.worldPos, dir, bot);
       move.addNeighbors(neighbors, config, manager);
 
       if (move.break) {
@@ -301,6 +321,13 @@ function getNeighbors2(world, node, config, manager) {
     verticalPlacaNeighbors,
     horizontalPlaceNeighbors,
   };
+}
+
+function getXZDist(nodeA, nodeB) {
+  const xDist = Math.abs(nodeB.x - nodeA.x);
+  const zDist = Math.abs(nodeB.z - nodeA.z);
+
+  return Math.sqrt(xDist * xDist + zDist * zDist);
 }
 
 module.exports = { getNeighbors2, Move, registerMoves };

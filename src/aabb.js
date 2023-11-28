@@ -20,10 +20,22 @@ class AABB {
       this.maxY = this.minY + fullBlockDim.height;
       this.maxZ = this.minZ + fullBlockDim.depth;
     } else if (type === "half") {
+      // for slabs and shit
       this.maxX = this.minX + halfBlockDim.width;
       this.maxY = this.minY + halfBlockDim.height;
       this.maxZ = this.minZ + halfBlockDim.depth;
     }
+  }
+
+  isAtEdge(x, y, z) {
+    return (
+      x === this.minX ||
+      x === this.maxX ||
+      y === this.minY ||
+      y === this.maxY ||
+      z === this.minZ ||
+      z === this.maxZ
+    );
   }
 }
 

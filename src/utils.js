@@ -94,45 +94,48 @@ function getControlState(bot) {
 }
 
 /**
- * 
- * @param {import("mineflayer").Bot} bot 
- * @param {Function} satisfyFunction 
- * @param {Function} controller 
- * @param {number} ticks 
- * @param {import('prismarine-physics').PlayerState} state 
+ *
+ * @param {import("mineflayer").Bot} bot
+ * @param {Function} satisfyFunction
+ * @param {Function} controller
+ * @param {number} ticks
+ * @param {import('prismarine-physics').PlayerState} state
  */
 function simulateUntil(
   bot,
   satisfyFunction,
   controller,
-  ticks=1,
+  ticks = 1,
   state = null
 ) {
   if (!state) {
-    const controls = getControlState(bot)
+    const controls = getControlState(bot);
 
-    state = new PlayerState(bot, controls)
+    state = new PlayerState(bot, controls);
   }
 
   for (let i = 0; i < ticks; i++) {
-    controller(state, i)
-    bot.physics.simulatePlayer(state, bot.world)
+    controller(state, i);
+    bot.physics.simulatePlayer(state, bot.world);
 
-    if (state.isInLava) return state
+    if (state.isInLava) return state;
 
-    if (satisfyFunction(state)) return state
+    if (satisfyFunction(state)) return state;
   }
 
-  return state
-
+  return state;
 }
 
-function getController (jump, sprint, jumpAfter = 0) {
+function getController(nextPoint, jump, sprint, jumpAfter = 0) {
   return (state, tick) => {
-    state.control.forward = true
-    state.control.jump = jump && tick >= jumpAfter
-    state.control.sprint = sprint
-  }
+    const dx = nextPoint.x - state.pos.x;
+    const dz = nextPoint.z - state.pos.z;
+    state.yaw = Math.atan2(-dx, -dz);
+
+    state.control.forward = true;
+    state.control.jump = jump && tick >= jumpAfter;
+    state.control.sprint = sprint;
+  };
 }
 
 function distanceFromLine(lineStart, lineEnd, point) {
@@ -345,10 +348,6 @@ function isPointOnPath(pointToCheck, path, options = {}) {
   });
 }
 
-
-
-
-
 // Generate weights for combined heuristic function
 function generateWeights() {
   const weights = [];
@@ -380,5 +379,5 @@ module.exports = {
   autoTool,
   isPointOnPath,
   simulateUntil,
-  getController
+  getController,
 };

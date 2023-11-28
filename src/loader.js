@@ -26,10 +26,12 @@ function inject(bot) {
   bot.ashfinder.config = {
     //blocks to avoid breaking
     blocksToAvoid: ["crafting_table", "chest", "furnace", "gravel", "sand"],
+    blocksToStayAway: ["cactus"],
     placeBlocks: false,
     breakBlocks: true,
     parkour: true,
     checkBreakUpNodes: true,
+    proParkour: false,
     maxFallDist: 3,
     maxWaterDist: 256,
     disposableBlocks: [
@@ -187,28 +189,32 @@ function inject(bot) {
     const returnState = simulateUntil(
       bot,
       reached,
-      getController(true, true, 0),
+      getController(targetPoint, true, true, 0),
       20
     );
 
-    if (!returnState) return false; 
+    if (!returnState) return false;
 
     if (returnState.isInLava) return false;
 
-    const xDist = Math.abs(returnState.pos.x - bot.entity.position.x);
-    const zDist = Math.abs(returnState.pos.z - bot.entity.position.z);
+    const returnStateOffset = returnState.pos.offset(0.5, 0, 0.5);
 
-    const targetDistX = Math.abs(returnState.pos.x - targetPoint.x);
-    const targetDistZ = Math.abs(returnState.pos.z - targetPoint.z);
+    const xDist = Math.abs(returnStateOffset.x - bot.entity.position.x);
+    const zDist = Math.abs(returnStateOffset.z - bot.entity.position.z);
+    const yDist = Math.abs(returnStateOffset.y - bot.entity.position.y);
 
-    const jumpDist = Math.sqrt(xDist * xDist + zDist * zDist);
-    const targetDist = Math.sqrt(
-      targetDistX * targetDistX + targetDistZ * targetDistZ
+    const targetDistX = Math.abs(targetPoint.x - returnStateOffset.x);
+    const targetDistZ = Math.abs(targetPoint.z - returnStateOffset.z);
+    const jumpDist = Math.sqrt(xDist * xDist + zDist * zDist + yDist * yDist);
+    const targetDist = targetPoint.minus(returnStateOffset);
+
+    return (
+      jumpDist >= 3 &&
+      jumpDist < 3 &&
+      Math.abs(targetDist.x) <= 0.35 &&
+      Math.abs(targetDist.z) <= 0.35 &&
+      Math.abs(targetDist.y) < 1
     );
-
-    if (jumpDist >= 3 && jumpDist <= 3.5 && targetDist <= 0.85) return true;
-
-    return false;
   }
 
   function canWalkJump(targetPoint) {
@@ -222,14 +228,14 @@ function inject(bot) {
     const returnState = simulateUntil(
       bot,
       reached,
-      getController(true, false),
+      getController(targetPoint, true, false),
       20
     );
 
     const returnStateWithoutJump = simulateUntil(
       bot,
       reached,
-      getController(false, true),
+      getController(targetPoint, false, true),
       20
     );
 
@@ -284,7 +290,7 @@ function inject(bot) {
     if (reached(state)) return true;
 
     if (sprint) {
-      if (canSprintJump(targetPoint)) return false; 
+      if (canSprintJump(targetPoint)) return false;
     } else {
       if (canWalkJump(targetPoint)) return false;
     }
@@ -377,11 +383,11 @@ function inject(bot) {
     let dz = point.z - botPos.z;
 
     if (!headLocked && !placing) {
-      // const yaw = Math.atan2(-dx, -dz);
-      // const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
+      const yaw = Math.atan2(-dx, -dz);
+      const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
 
-      // bot.look(yaw, pitch);
-      bot.lookAt(point.offset(0, 1.1, 0), true);
+      bot.look(yaw, 0, true);
+      // bot.lookAt(point.offset(0, 1.1, 0), true);
     }
 
     if (!placing && !digging && !climbing && !bot.getControlState("forward")) {
@@ -469,8 +475,8 @@ function inject(bot) {
     } else if (bot.entity.onGround && shouldSprintJump) {
       console.log("sprint jumped!");
       headLocked = true;
-      bot.setControlState("jump", true);
       bot.setControlState("sprint", true);
+      bot.setControlState("jump", true);
     } else {
       if (bot.entity.onGround) {
         walkingUntillGround = false;
@@ -547,7 +553,6 @@ function inject(bot) {
       else resolve();
     });
   }
-
 
   async function path(endPos, options = {}) {
     console.log("called");
@@ -649,19 +654,16 @@ function inject(bot) {
       complexPathPoints.shift();
     }
 
-
     if (result.status === "partial") {
       // if we arent on the end pos and the path was partial then we recalculate
       if (!isPlayerOnBlock(bot.entity.position, endPos, true)) {
         complexPathPoints = null;
         bot.clearControlStates();
-        return await path(endPos, {})
+        return await path(endPos, {});
       }
     }
 
-
-
-    console.log("Done!!")
+    console.log("Done!!");
     complexPathPoints = null;
     bot.clearControlStates();
   }

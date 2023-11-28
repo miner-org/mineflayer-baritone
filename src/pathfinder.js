@@ -32,6 +32,12 @@ class NodeManager {
   getNodeAttribute(node) {
     return this.markedNodes.get(defaultHash(node));
   }
+
+  isNodeBroken(node) {
+    const attribute = this.getNodeAttribute(node);
+
+    return attribute === "broken"
+  }
 }
 
 class Cell {
@@ -98,7 +104,7 @@ function processBatch({
     neighbor.hCost = combinedHeuristic(neighborData, end, 0.5);
     neighbor.fCost = neighbor.gCost + neighbor.hCost;
 
-    // if (neighbor.hCost < bestNode.hCost) bestNode = neighbor;
+    if (neighbor.hCost < bestNode.hCost) bestNode = neighbor;
 
     if (update) {
       openList.update(neighbor, neighbor.fCost);
@@ -112,25 +118,25 @@ function processBatch({
       neighbor.breakableNeighbors = neighborData.blocks;
     }
 
-    if (neighbor.placeHere) {
-      for (const dirVec of horPlace) {
-        if (
-          neighbor.worldPos.x === dirVec.parent.x &&
-          neighbor.worldPos.z === dirVec.parent.z
-        ) {
-          neighbor.horizontalPlacable = dirVec.blocks;
-        }
-      }
+    // if (neighbor.placeHere) {
+    //   for (const dirVec of horPlace) {
+    //     if (
+    //       neighbor.worldPos.x === dirVec.parent.x &&
+    //       neighbor.worldPos.z === dirVec.parent.z
+    //     ) {
+    //       neighbor.horizontalPlacable = dirVec.blocks;
+    //     }
+    //   }
 
-      for (const dirVec of verPlace) {
-        if (
-          neighbor.worldPos.x === dirVec.parent.x &&
-          neighbor.worldPos.z === dirVec.parent.z
-        ) {
-          neighbor.verticalPlacable = dirVec.blocks;
-        }
-      }
-    }
+    //   for (const dirVec of verPlace) {
+    //     if (
+    //       neighbor.worldPos.x === dirVec.parent.x &&
+    //       neighbor.worldPos.z === dirVec.parent.z
+    //     ) {
+    //       neighbor.verticalPlacable = dirVec.blocks;
+    //     }
+    //   }
+    // }
   }
 }
 
@@ -143,7 +149,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
   const closedSet = new Set();
   const nodemanager = new NodeManager();
   const backoffThreshold = 5; // Distance threshold for backoff
-  let backoffIncrement = 0.1; // Increment for modifying cost heuristic
+  let backoffIncrement = 2; // Increment for modifying cost heuristic
   const startNode = new Cell(start);
   startNode.gCost = 0;
   startNode.hCost = combinedHeuristic(startNode.worldPos, end, 0.5);
@@ -155,7 +161,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
   let path = [];
 
   // Track the best node and associated backoff metric
-  let bestNode = null;
+  let bestNode = startNode;
   let bestBackoffMetric = Infinity;
 
   return new Promise(async (resolve) => {
@@ -180,7 +186,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
         horizontalPlace: horPlace,
         verticalPlace: verPlace,
         neighbor: neighbors,
-      } = getNeighbors(currentNode, bot, config, nodemanager);
+      } = getNeighbors(currentNode, bot, config, nodemanager, bot);
 
       const batchSize = 10;
       for (let i = 0; i < neighbors.length; i += batchSize) {
@@ -215,14 +221,6 @@ async function Astar(start, endPos, bot, endFunc, config) {
             status: "no path",
           });
         }
-      }
-
-      let backoffMetric = currentNode.fCost / backoffIncrement;
-
-      if (backoffMetric < bestBackoffMetric) {
-        bestNode = currentNode;
-        bestBackoffMetric = backoffMetric;
-        backoffIncrement += 0.1;
       }
 
       await new Promise((r) => setTimeout(r, 0));
@@ -308,9 +306,9 @@ function reconstructPath(node) {
   return path;
 }
 
-function getNeighbors(node, bot, config, manager) {
+function getNeighbors(node, bot, config, manager, bot) {
   let neighbor = [];
-  const neighbors = getNeighbors2(bot.world, node, config, manager);
+  const neighbors = getNeighbors2(bot.world, node, config, manager, bot);
   for (const dirVec of neighbors.neighbors) {
     for (const obj of neighbors.breakNeighbors) {
       //If this vec is the parent then we set its blocks to the objs blocks
