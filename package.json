@@ -6,8 +6,12 @@
   "scripts": {
     "start": "node src/index.js localhost 25565"
   },
-  "keywords": [],
+  "keywords": [
+    "miner-org",
+    "mineflayer"
+  ],
   "author": "Ash",
+  "homepage": "https://github.com/miner-org/mineflayer-baritone",
   "license": "ISC",
   "dependencies": {
     "require-dir": "^1.2.0"
