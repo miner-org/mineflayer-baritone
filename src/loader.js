@@ -322,7 +322,7 @@ function inject(bot) {
       );
 
     if (straightPathOptions.breakTargets.length > 0) {
-      bot.clearControlStates();
+      bot.setControlState("forward", false);
       const targets = straightPathOptions.breakTargets;
       // console.log("Break targets:", targets)
       for (const target of targets) {
@@ -383,7 +383,7 @@ function inject(bot) {
     const dy = point.y - botPos.y;
     let dz = point.z - botPos.z;
 
-    if (!headLocked && !placing) {
+    if (!headLocked && !placing && !digging) {
       const yaw = Math.atan2(-dx, -dz);
       const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
 
@@ -601,6 +601,28 @@ function inject(bot) {
 
     console.log("Break: ", breakBlocks);
 
+    if (result.status === "partial") {
+      complexPathPoints = await pathStich(complexPathPoints, bot, endPos);
+
+      if (!complexPathPoints) {
+        console.log("Failed to stitch path. Terminating.");
+        return;
+      }
+
+      bot.ashfinder.path = complexPathPoints;
+      vertical = complexPathPoints
+        .filter((cell) => cell.placeHere)
+        .map((cell) => cell.verticalPlacable);
+
+      horizontal = complexPathPoints
+        .filter((cell) => cell.placeHere)
+        .map((cell) => cell.horizontalPlacable);
+
+      breakBlocks = complexPathPoints
+        .filter((cell) => cell.breakThis)
+        .map((cell) => cell.breakableNeighbors);
+    }
+
     while (complexPathPoints.length > 0) {
       const movement = complexPathPoints[0];
       // Array of blocks to place horizontally to reach this movement/node
@@ -656,18 +678,34 @@ function inject(bot) {
       complexPathPoints.shift();
     }
 
-    if (result.status === "partial") {
-      // if we arent on the end pos and the path was partial then we recalculate
-      if (!isPlayerOnBlock(bot.entity.position, endPos, true)) {
-        complexPathPoints = null;
-        bot.clearControlStates();
-        return await path(endPos, {});
-      }
-    }
-
     console.log("Done!!");
     complexPathPoints = null;
     bot.clearControlStates();
+  }
+
+  async function pathStich(originalPath, bot, endPos) {
+    console.log("Stitching paths...");
+
+    // Calculate a new path from the end of the partial path to the final destination
+    const partialEnd = originalPath[originalPath.length - 1].worldPos;
+    const newPath = await astar(
+      partialEnd,
+      endPos,
+      bot,
+      isPlayerOnBlock,
+      bot.ashfinder.config
+    );
+
+    // Check if the new path was successfully calculated
+    if (newPath.status === "partial" || newPath.status === "found") {
+      console.log("New path stitched successfully!");
+      // Combine the original path and the new path
+      const combinedPath = originalPath.concat(newPath.path.slice(1));
+      return combinedPath;
+    } else {
+      console.log("Failed to stitch a new path.");
+      return originalPath;
+    }
   }
 
   async function calculatePathSegment(startPos, endPos) {
