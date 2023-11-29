@@ -43,7 +43,7 @@ class NodeManager {
   isNodeBroken(node) {
     const attribute = this.getNodeAttribute(node);
 
-    if (!attribute) return false
+    if (!attribute) return false;
 
     return attribute === "broken";
   }
@@ -253,6 +253,12 @@ async function Astar(start, endPos, bot, endFunc, config) {
           neighbor.breakableNeighbors = neighborData.blocks;
           nodemanager.markNodes(neighborData.blocks, "broken");
         }
+
+        if (neighborData.placeHorizontal) {
+          neighbor.placeHere = true;
+          neighbor.horizontalPlacable = neighborData.blocks;
+          nodemanager.markNodes(neighborData.blocks, "placeHorizontal")
+        }
       }
 
       // const batchSize = 10;
@@ -375,6 +381,12 @@ function getNeighbors(node, bot, config, manager, bot) {
   for (const dirVec of neighbors.neighbors) {
     for (const obj of neighbors.breakNeighbors) {
       //If this vec is the parent then we set its blocks to the objs blocks
+      if (dirVec.x === obj.parent.x && dirVec.z === obj.parent.z) {
+        dirVec.blocks = obj.blocks;
+      }
+    }
+
+    for (const obj of neighbors.horizontalPlaceNeighbors) {
       if (dirVec.x === obj.parent.x && dirVec.z === obj.parent.z) {
         dirVec.blocks = obj.blocks;
       }

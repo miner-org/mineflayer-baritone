@@ -473,7 +473,6 @@ function inject(bot) {
       bot.setControlState("jump", true);
       bot.setControlState("sprint", false);
     } else if (bot.entity.onGround && shouldAutoJump(bot)) {
-      bot.setControlState("sprint", false);
       bot.setControlState("jump", true);
     } else if (bot.entity.onGround && shouldWalkJump) {
       if (bot.ashfinder.debug) console.log("walk jumped");
