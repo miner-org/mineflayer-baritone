@@ -1,6 +1,7 @@
 const { Vec3 } = require("vec3");
 const { getNeighbors2 } = require("./movement");
 const { BinarySearchTree, MinHeap } = require("./heap");
+const blockMapCost = require("./blockmap");
 
 // const sleep = (ms = 2000) => {
 //   return new Promise((r) => {
@@ -36,7 +37,7 @@ class NodeManager {
   isNodeBroken(node) {
     const attribute = this.getNodeAttribute(node);
 
-    return attribute === "broken"
+    return attribute === "broken";
   }
 }
 
@@ -73,6 +74,7 @@ function processBatch({
   end,
   bestNode,
   manager,
+  world,
 }) {
   for (const neighborData of batch) {
     if (closedSet.has(defaultHash(neighborData))) continue;
@@ -101,10 +103,16 @@ function processBatch({
     );
     neighbor.parent = currentNode;
     neighbor.gCost = tempG;
-    neighbor.hCost = combinedHeuristic(neighborData, end, 0.5);
+
+    const blockID = world.getBlock(neighborData).name;
+
+    neighbor.hCost = euclideanDistance(neighborData, end, blockID);
     neighbor.fCost = neighbor.gCost + neighbor.hCost;
 
-    if (neighbor.hCost < bestNode.hCost) bestNode = neighbor;
+    if (neighbor.hCost < bestNode.hCost) {
+      console.log("Setting neighbor to best node");
+      bestNode = neighbor;
+    }
 
     if (update) {
       openList.update(neighbor, neighbor.fCost);
@@ -148,11 +156,13 @@ async function Astar(start, endPos, bot, endFunc, config) {
   const openSet = new Map();
   const closedSet = new Set();
   const nodemanager = new NodeManager();
-  const backoffThreshold = 5; // Distance threshold for backoff
-  let backoffIncrement = 2; // Increment for modifying cost heuristic
   const startNode = new Cell(start);
+
+  const world = bot.world;
+  const blockID = world.getBlock(start).name;
+
   startNode.gCost = 0;
-  startNode.hCost = combinedHeuristic(startNode.worldPos, end, 0.5);
+  startNode.hCost = euclideanDistance(startNode.worldPos, end, blockID);
   startNode.fCost = startNode.gCost + startNode.hCost;
 
   openList.insert(startNode);
@@ -187,27 +197,80 @@ async function Astar(start, endPos, bot, endFunc, config) {
         neighbor: neighbors,
       } = getNeighbors(currentNode, bot, config, nodemanager, bot);
 
-      const batchSize = 10;
-      for (let i = 0; i < neighbors.length; i += batchSize) {
-        const batch = neighbors.slice(i, i + batchSize);
-        processBatch({
-          batch,
-          breakBlocks,
-          closedSet,
-          currentNode,
-          end,
-          horPlace,
-          openList,
-          openSet,
-          verPlace,
-          bestNode,
-          manager: nodemanager,
-        });
+      for (const neighborData of neighbors) {
+        if (closedSet.has(defaultHash(neighborData))) continue;
+
+        let tempG = currentNode.gCost + neighborData.cost;
+        let neighbor = openSet.get(defaultHash(neighborData));
+        let update = false;
+
+        if (neighbor === undefined) {
+          neighbor = new Cell();
+
+          openSet.set(defaultHash(neighborData), neighbor);
+        } else {
+          if (neighbor.gCost < tempG) {
+            // skip dis one cuz we foudn btter path
+            continue;
+          }
+
+          update = true;
+        }
+
+        neighbor.worldPos = new Vec3(
+          neighborData.x,
+          neighborData.y,
+          neighborData.z
+        );
+        neighbor.parent = currentNode;
+        neighbor.gCost = tempG;
+
+        const blockID = world.getBlock(neighborData).name;
+
+        neighbor.hCost = euclideanDistance(neighborData, end, blockID);
+        neighbor.fCost = neighbor.gCost + neighbor.hCost;
+
+        if (neighbor.hCost < bestNode.hCost) {
+          // console.log("Setting neighbor to best node");
+          bestNode = neighbor;
+        }
+
+        if (update) {
+          openList.update(neighbor, neighbor.fCost);
+        } else {
+          openList.insert(neighbor);
+          openSet.set(defaultHash(neighborData), neighbor);
+        }
+
+        if (neighborData.break) {
+          neighbor.breakThis = true;
+          neighbor.breakableNeighbors = neighborData.blocks;
+        }
       }
+
+      // const batchSize = 10;
+      // for (let i = 0; i < neighbors.length; i += batchSize) {
+      //   const batch = neighbors.slice(i, i + batchSize);
+      //   processBatch({
+      //     batch,
+      //     breakBlocks,
+      //     closedSet,
+      //     currentNode,
+      //     end,
+      //     horPlace,
+      //     openList,
+      //     openSet,
+      //     verPlace,
+      //     bestNode,
+      //     manager: nodemanager,
+      //     world: world,
+      //   });
+      // }
 
       let currentTime = performance.now();
       if (currentTime - startTime >= config.thinkTimeout) {
         // Time limit exceeded, return the best partial path found within the time limit
+
         if (bestNode) {
           return resolve({
             path: reconstructPath(bestNode),
@@ -232,11 +295,15 @@ async function Astar(start, endPos, bot, endFunc, config) {
   });
 }
 
-function euclideanDistance(node, goal) {
+function euclideanDistance(node, goal, blockID) {
   const dx = Math.abs(goal.x - node.x);
   const dy = Math.abs(goal.y - node.y);
   const dz = Math.abs(goal.z - node.z);
-  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+  const cost = blockMapCost.get(blockID) ?? 1;
+  // console.log(`Block: ${blockID}, Cost: ${cost}`)
+
+  return Math.sqrt(dx * dx + dy * dy + dz * dz) * cost;
 }
 
 function manhattanDistance(node, goal) {

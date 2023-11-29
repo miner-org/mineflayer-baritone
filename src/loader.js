@@ -205,13 +205,14 @@ function inject(bot) {
 
     const targetDistX = Math.abs(targetPoint.x - returnStateOffset.x);
     const targetDistZ = Math.abs(targetPoint.z - returnStateOffset.z);
-    const jumpDist = Math.sqrt(xDist * xDist + zDist * zDist + yDist * yDist);
+    const jumpDist = Math.sqrt(xDist * xDist + zDist * zDist);
+    const fallDist = Math.sqrt(yDist * yDist);
     const targetDist = Math.sqrt(
       targetDistX * targetDistX + targetDistZ * targetDistZ
     );
 
-    console.log(targetDist)
-    if (jumpDist >= 3 && targetDist < 1) return true;
+    // console.log(targetDist);
+    if (jumpDist >= 3 && fallDist < 1 && targetDist < 1) return true;
 
     return false;
   }
@@ -321,17 +322,18 @@ function inject(bot) {
       );
 
     if (straightPathOptions.breakTargets.length > 0) {
+      bot.clearControlStates();
       const targets = straightPathOptions.breakTargets;
       // console.log("Break targets:", targets)
       for (const target of targets) {
-        // bot.chat(
-        //   `/particle dust 1 0 0.93 1 ${target.x} ${target.y} ${target.z} 0.1 0.1 0.1 1 5 force`
-        // );
+        bot.chat(
+          `/particle dust 1 0 0.93 1 ${target.x} ${target.y} ${target.z} 0.1 0.1 0.1 1 5 force`
+        );
         const block = bot.blockAt(target, false);
 
         if (block && block.boundingBox === "block" && !digging) {
           digging = true;
-          bot.clearControlStates();
+
           await autoTool(bot, block);
 
           await bot.dig(block, true).then(() => {
@@ -412,9 +414,10 @@ function inject(bot) {
       return true;
     }
 
-    // bot.chat(
-    //   `/particle dust 0 1 0.93 1 ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 1 5 force`
-    // );
+    // for debuging ingame
+    bot.chat(
+      `/particle dust 0 1 0.93 1 ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 1 5 force`
+    );
 
     // Activate door if standing in front of it
     const block = point !== null ? bot.blockAt(point, false) : null;

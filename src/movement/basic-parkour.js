@@ -1,7 +1,7 @@
 const { Move, registerMoves } = require("./");
 
 class MoveParkour1 extends Move {
-  addNeighbors(neighbors, config) {
+  addNeighbors(neighbors, config, manager) {
     if (!config.parkour) return [];
 
     // only used if config.proParkour is false
@@ -14,6 +14,9 @@ class MoveParkour1 extends Move {
     let airNode = this.forward(1).down(1);
 
     if (!this.isAir(airNode)) return [];
+
+    let standingNode = this.forward(2).down(1);
+    if (manager.isNodeBroken(standingNode)) return [];
 
     // if its false then we have to check if the node above the bot is air
     if (!config.proParkour) {
@@ -39,7 +42,7 @@ class MoveParkour1 extends Move {
 
 class MoveForwardParkour2 extends Move {
   // 2 block jump
-  addNeighbors(neighbors, config) {
+  addNeighbors(neighbors, config, manager) {
     if (!config.parkour) return [];
 
     let jumpNode = this.up(2);
@@ -63,6 +66,9 @@ class MoveForwardParkour2 extends Move {
     let airNode2 = this.forward(2).down(1);
 
     if (!this.isAir(airNode) && !this.isAir(airNode2)) return [];
+
+    let standingNode = this.forward(3).down(1);
+    if (manager.isNodeBroken(standingNode)) return [];
 
     if (!config.proParkour) {
       if (
@@ -88,7 +94,7 @@ class MoveForwardParkour2 extends Move {
 }
 
 class MoveForwardParkour3 extends Move {
-  addNeighbors(neighbors, config) {
+  addNeighbors(neighbors, config, manager) {
     if (!config.parkour) return [];
 
     let jumpNode = this.up(2);
@@ -111,6 +117,9 @@ class MoveForwardParkour3 extends Move {
 
     if (!this.isAir(airNode1) && !this.isAir(airNode2) && !this.isAir(airNode3))
       return [];
+
+    let standingNode = this.forward(4).down(1);
+    if (manager.isNodeBroken(standingNode)) return [];
 
     if (!config.proParkour) {
       if (
@@ -151,7 +160,7 @@ class MoveForwardParkour3 extends Move {
 }
 
 class MoveForwardParkourUp1 extends Move {
-  addNeighbors(neighbors, config) {
+  addNeighbors(neighbors, config, manager) {
     if (!config.parkour) return [];
 
     let jumpNode = this.up(2);
@@ -163,6 +172,9 @@ class MoveForwardParkourUp1 extends Move {
 
     // if not air return
     if (!shouldJump) return [];
+
+    let standingNode = this.forward(2);
+    if (manager.isNodeBroken(standingNode)) return [];
 
     if (!config.proParkour) {
       if (
@@ -181,7 +193,7 @@ class MoveForwardParkourUp1 extends Move {
 }
 
 class MoveForwardParkourUp2 extends Move {
-  addNeighbors(neighbors, config) {
+  addNeighbors(neighbors, config, manager) {
     if (!config.parkour) return [];
 
     let jumpNode = this.up(2);
@@ -196,7 +208,9 @@ class MoveForwardParkourUp2 extends Move {
 
     if (!shouldJump) return [];
 
-    
+    let standingNode = this.forward(3);
+    if (manager.isNodeBroken(standingNode)) return [];
+
     if (!config.proParkour) {
       if (
         this.isAir(jumpNode) &&
@@ -219,7 +233,7 @@ class MoveForwardParkourUp2 extends Move {
 }
 
 class MoveForwardParkourUp3 extends Move {
-  addNeighbors(neighbors, config) {
+  addNeighbors(neighbors, config, manager) {
     if (!config.parkour) return [];
 
     let jumpNode = this.up(2);
@@ -235,8 +249,9 @@ class MoveForwardParkourUp3 extends Move {
       this.isAir(this.down(1).forward(3));
     if (!shouldJump) return [];
 
+    let standingNode = this.forward(4);
+    if (manager.isNodeBroken(standingNode)) return [];
     if (!config.proParkour) {
-
       if (
         this.isAir(jumpNode) &&
         this.isJumpable(gapNode1) &&
@@ -247,7 +262,6 @@ class MoveForwardParkourUp3 extends Move {
         neighbors.push(this.makeMovement(landingNode, 4.5));
       }
     } else {
-
       if (
         this.isJumpable(gapNode1) &&
         this.isJumpable(gapNode2) &&
@@ -261,7 +275,7 @@ class MoveForwardParkourUp3 extends Move {
 }
 
 class MoveForwardParkourDown1 extends Move {
-  addNeighbors(neighbors, config) {
+  addNeighbors(neighbors, config, manager) {
     if (!config.parkour) return [];
 
     let jumpNode = this.up(2);
@@ -278,6 +292,9 @@ class MoveForwardParkourDown1 extends Move {
       this.isAir(spaceNode1);
 
     if (!shouldJump) return [];
+
+    let standingNode = this.forward(2).down(2)
+    if (manager.isNodeBroken(standingNode)) return []
 
     if (!config.proParkour) {
       if (
@@ -301,7 +318,7 @@ class MoveForwardParkourDown1 extends Move {
 }
 
 class MoveForwardParkourDown2 extends Move {
-  addNeighbors(neighbors, config) {
+  addNeighbors(neighbors, config, manager) {
     if (!config.parkour) return [];
 
     let jumpNode = this.up(2);
@@ -323,6 +340,9 @@ class MoveForwardParkourDown2 extends Move {
 
     if (!shouldJump) return [];
 
+    let standingNode = this.forward(3).down(2)
+    if (manager.isNodeBroken(standingNode)) return []
+
     if (!config.proParkour) {
       if (
         this.isAir(jumpNode) &&
@@ -334,7 +354,6 @@ class MoveForwardParkourDown2 extends Move {
         neighbors.push(this.makeMovement(landingNode, 3.5));
       }
     } else {
-
       if (
         this.isStandable(landingNode) &&
         this.isWalkable(gapNode1) &&
@@ -348,7 +367,7 @@ class MoveForwardParkourDown2 extends Move {
 }
 
 class MoveForwardParkourDown3 extends Move {
-  addNeighbors(neighbors, config) {
+  addNeighbors(neighbors, config, manager) {
     if (!config.parkour) return [];
 
     let jumpNode = this.up(2);
@@ -373,7 +392,9 @@ class MoveForwardParkourDown3 extends Move {
       this.isAir(spaceNode3);
     if (!shouldJump) return [];
 
-    
+    let standingNode = this.forward(4).down(2)
+    if (manager.isNodeBroken(standingNode)) return []
+
     if (!config.proParkour) {
       if (
         this.isAir(jumpNode) &&
