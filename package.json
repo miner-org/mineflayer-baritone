@@ -1,10 +1,10 @@
 {
-  "name": "mineflayer-baritone",
+  "name": "@miner-org/mineflayer-baritone",
   "version": "0.0.1",
   "description": "Minecraft pathfinder made in javascript using mineflayer and node js.",
   "main": "index.js",
   "scripts": {
-    "start": "node src/index.js NubPlayzBoi.aternos.me 26216"
+    "start": "node src/index.js localhost 25565"
   },
   "keywords": [],
   "author": "Ash",
