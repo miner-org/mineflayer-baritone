@@ -40,29 +40,14 @@ class MoveForward extends Move {
 
 class MoveDiagonal extends Move {
   addNeighbors(neighbors, config, manager) {
-    let landingNode = this.right(1).forward(1);
+    let targetNode = this.right(1).forward(1);
+    let forwardNode = this.forward(1);
     let rightNode = this.right(1);
-    let forwadNode = this.forward(1);
-    let weGood = false;
 
-    let isRightWalkable = this.isWalkable(rightNode);
-    let isForwardWalkable = this.isWalkable(forwadNode);
-    if (!isRightWalkable && !isForwardWalkable) {
-      // if they arent walkable check if they are broken
-      if (manager.isNodeBroken(rightNode) && manager.isNodeBroken(forwadNode)) {
-        // then safe to walk apon
-        weGood = true;
-        return;
-      }
+    if (!this.isWalkable(forwardNode) && !this.isWalkable(rightNode)) return [];
 
-      //other wise fuck nah
-      weGood = false;
-    }
-
-    if (this.isStandable(landingNode)) {
-      neighbors.push(this.makeMovement(landingNode, Math.SQRT2));
-    } else if (weGood) {
-      neighbors.push(this.makeMovement(landingNode, Math.SQRT2));
+    if (this.isStandable(targetNode)) {
+      neighbors.push(this.makeMovement(targetNode, 1.4))
     }
   }
 }
@@ -143,20 +128,6 @@ class MoveForwardDown extends Move {
       neighbors.push(this.makeMovement(landingNode, 1.5 + cost));
       return;
     }
-  }
-
-  addBreakNeighbors(neighbors) {
-    let landingNode = this.forward(1).down(1);
-    let upNode = this.forward(1).up(1);
-    let node2 = this.forward(1);
-
-    this.markNode(landingNode, "broken");
-    this.markNode(upNode, "broken");
-    this.markNode(node2, "broken");
-    neighbors.push({
-      parent: landingNode,
-      blocks: [upNode, node2, landingNode],
-    });
   }
 }
 

@@ -90,11 +90,10 @@ bot.once("spawn", async () => {
         // we hate water!!
         if (blockBelow.boundingBox !== "block" || blockBelow.name === "water")
           return false;
-        
 
-          console.log("block", block.name)
-          console.log("block below", blockBelow.name)
-          console.log("block aboove", blockAbove.name)
+        console.log("block", block.name);
+        console.log("block below", blockBelow.name);
+        console.log("block aboove", blockAbove.name);
         if (
           block.boundingBox === "empty" &&
           block.name !== "water" &&
@@ -106,21 +105,70 @@ bot.once("spawn", async () => {
         return false;
       };
 
-      const location = 
-        bot.entity.position
-          .clone()
-          .offset(
-            Math.floor(Math.random() * (50 - 20) + 20),
-            0.5,
-            Math.floor(Math.random() * (50 - 20) + 20)
-          )
-      
+      const location = bot.entity.position
+        .clone()
+        .offset(
+          Math.floor(Math.random() * (50 - 20) + 20),
+          0.5,
+          Math.floor(Math.random() * (50 - 20) + 20)
+        );
+
       if (!isGood(location)) {
-        console.log("not good")
-        return
-      };
+        console.log("not good");
+        return;
+      }
 
       await bot.ashfinder.goto(location);
+    }
+
+    if (command === "s!sugar") {
+      const sugarcanePositions = bot.findBlocks({
+        matching: (block) => block.name === "sugar_cane",
+        count: 6,
+        maxDistance: 6,
+        useExtraInfo: false,
+      });
+
+      if (sugarcanePositions.length === 0) return console.log("nah im good");
+      let uniquePositions = new Map(); 
+      const hash = (pos) => {
+        return `${pos.x}-${pos.y}-${pos.z}`;
+      };
+
+      for (const pos of sugarcanePositions) {
+        const blockAt = bot.blockAt(pos);
+
+        if (!blockAt) continue;
+
+        for (let i = 0; i < 3; i++) {
+          const block = bot.blockAt(blockAt.position.offset(0, i, 0));
+
+          // then we found a 2 tall sugarcane block
+          if (block.name === "air") {
+            // Get the block below the air block which will probably be the sugarcane idk
+            const sugarcaneBelowAir = bot.blockAt(
+              block.position.offset(0, -1, 0)
+            );
+
+            // store the position in the map if it isnt already there
+            if (!uniquePositions.has(hash(sugarcaneBelowAir.position))) {
+              uniquePositions.set(
+                hash(sugarcaneBelowAir.position),
+                sugarcaneBelowAir
+              );
+            }
+            break;
+          }
+        }
+      }
+
+      if (uniquePositions.size === 0)
+        return console.log("didnt not find any bruh");
+
+      const uniqueBlocks = Array.from(uniquePositions.values()); 
+
+      console.log(`i found ${uniqueBlocks.length} sugarcane blocks!`);
+      console.log(uniqueBlocks);
     }
   });
 });

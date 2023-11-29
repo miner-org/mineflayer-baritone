@@ -102,12 +102,12 @@ function inject(bot) {
     const delta = blockPosition.minus(playerPosition);
 
     const isOnBlock =
-      (Math.abs(delta.x) <= 0.7 &&
-        Math.abs(delta.z) < 0.7 &&
+      (Math.abs(delta.x) <= 0.35 &&
+        Math.abs(delta.z) < 0.35 &&
         Math.abs(delta.y) <= 1) ||
       (onGround &&
-        Math.abs(delta.x) <= 0.7 &&
-        Math.abs(delta.z) <= 0.7 &&
+        Math.abs(delta.x) <= 0.35 &&
+        Math.abs(delta.z) <= 0.35 &&
         Math.abs(delta.y) === 0);
 
     return isOnBlock;
@@ -141,39 +141,22 @@ function inject(bot) {
     const targetPosition = referenceBlock.clone().offset(0.5, 1, 0.5);
     const distance = bot.entity.position.distanceTo(targetPosition);
 
-    const referenceBlockBB = new AABB(
-      referenceBlock.x,
-      referenceBlock.y,
-      referenceBlock.z,
-
-      "full"
-    );
-
-    const isAtEdge =
-      bot.entity.position.x === referenceBlockBB.minX ||
-      bot.entity.position.x === referenceBlockBB.maxX ||
-      bot.entity.position.y === referenceBlockBB.minY ||
-      bot.entity.position.y === referenceBlockBB.maxY ||
-      bot.entity.position.z === referenceBlockBB.minZ ||
-      bot.entity.position.z === referenceBlockBB.maxZ;
-
-    // Move towards the edge while adjusting view and control states
-    if (distance > distanceThreshold) {
+    if (
+      bot.entity.position.distanceTo(
+        referenceBlock.clone().offset(edge.x + 0.5, 1, edge.z + 0.5)
+      ) > 0.4
+    ) {
       bot.lookAt(
         bot.entity.position.offset(viewVector.x, viewVector.y, viewVector.z),
         allowInstantTurn
       );
+      bot.setControlState("forward", false);
       bot.setControlState("sneak", true);
       bot.setControlState("back", true);
       return false;
     }
-
-    if (isAtEdge || distance <= distanceThreshold) {
-      bot.setControlState("back", false);
-      return true;
-    }
-
-    return false;
+    bot.setControlState("back", false);
+    return true;
   }
 
   /**
@@ -194,28 +177,39 @@ function inject(bot) {
       20
     );
 
+    const returnStateWithoutJump = simulateUntil(
+      bot,
+      reached,
+      getController(targetPoint, false, true, 0),
+      20
+    );
+
     if (!returnState) return false;
 
     if (returnState.isInLava) return false;
 
+    if (reached(returnStateWithoutJump)) return false;
+
     const returnStateOffset = returnState.pos.offset(0.5, 0, 0.5);
 
-    const xDist = Math.abs(returnStateOffset.x - bot.entity.position.x);
-    const zDist = Math.abs(returnStateOffset.z - bot.entity.position.z);
-    const yDist = Math.abs(returnStateOffset.y - bot.entity.position.y);
+    const xDist = Math.abs(bot.entity.position.x - returnStateOffset.x);
+    const zDist = Math.abs(bot.entity.position.z - returnStateOffset.z);
+
+    const yDist = Math.abs(bot.entity.position.y - returnStateOffset.y);
 
     const targetDistX = Math.abs(targetPoint.x - returnStateOffset.x);
     const targetDistZ = Math.abs(targetPoint.z - returnStateOffset.z);
-    const jumpDist = Math.sqrt(xDist * xDist + zDist * zDist);
-    const fallDist = Math.sqrt(yDist * yDist);
+    const targetDistY = Math.abs(targetPoint.y - returnStateOffset.y);
+    const jumpDist = Math.floor(Math.sqrt(xDist * xDist + zDist * zDist));
+
+    const fallDist = Math.floor(Math.sqrt(yDist * yDist));
     const targetDist = Math.sqrt(
-      targetDistX * targetDistX + targetDistZ * targetDistZ
+      targetDistX * targetDistX +
+        targetDistZ * targetDistZ +
+        targetDistY * targetDistY
     );
 
-    // console.log(targetDist);
-    if (between(jumpDist, 3, 4) && fallDist < 1 && targetDist < 1) return true;
-
-    return false;
+    return reached(returnState);
   }
 
   function between(x, min, max) {
@@ -326,18 +320,17 @@ function inject(bot) {
         bot.ashfinder.config.disposableBlocks.includes(item.name)
       );
 
-    if (straightPathOptions.breakTargets.length > 0) {
-      bot.setControlState("forward", false);
-      const targets = straightPathOptions.breakTargets;
+    if (cell.breakableNeighbors.length > 0) {
+      bot.clearControlStates();
       // console.log("Break targets:", targets)
-      for (const target of targets) {
+      for (const target of cell.breakableNeighbors) {
         if (bot.ashfinder.debug)
           bot.chat(
             `/particle dust 1 0 0.93 1 ${target.x} ${target.y} ${target.z} 0.1 0.1 0.1 1 5 force`
           );
         const block = bot.blockAt(target, false);
 
-        if (block && block.boundingBox === "block" && !digging) {
+        if (block.boundingBox === "block" && !digging) {
           digging = true;
 
           await autoTool(bot, block);
@@ -349,11 +342,19 @@ function inject(bot) {
       }
     }
 
-    if (straightPathOptions.horizontalPlaceTarget && !placing) {
-      const horizontalPlaceTarget = straightPathOptions.horizontalPlaceTarget;
-      const placeTarget = bot.blockAt(horizontalPlaceTarget, false);
+    if (placing || cell.horizontalPlacable.length > 0) {
+      let placingBlock = null;
+      if (!placing) {
+        placing = true;
+        placingBlock = nextPoint.toPlace.shift();
+        bot.clearControlStates();
+      }
+
+      const placeTarget = bot.blockAt(placingBlock, false);
 
       if (!blockPlace) return false;
+
+      console.log("Cum2");
 
       if (bot.heldItem && !bot.heldItem.name.includes(blockPlace.name))
         bot.equip(blockPlace, "hand");
@@ -361,27 +362,39 @@ function inject(bot) {
       placing = true;
       if (
         moveToEdge(
-          new Vec3(
-            horizontalPlaceTarget.x,
-            horizontalPlaceTarget.y,
-            horizontalPlaceTarget.z
-          ),
-          new Vec3(horizontalPlaceTarget.dir.x, 0, horizontalPlaceTarget.dir.z)
+          new Vec3(placingBlock.x, placingBlock.y, placingBlock.z),
+          new Vec3(placingBlock.dir.x, 0, placingBlock.dir.z)
         )
-      ) {
-        await placeBlock(
-          bot,
+      )
+        return;
+
+      await bot
+        .placeBlock(
           placeTarget,
-          new Vec3(horizontalPlaceTarget.dir.x, 0, horizontalPlaceTarget.dir.z),
-          {
-            forceLook: "ignore",
-            showHand: true,
-            swingArm: "right",
-          }
-        );
-        placing = false;
-        bot.setControlState("sneak", false);
-      } else return;
+          new Vec3(placingBlock.dir.x, 0, placingBlock.dir.z)
+        )
+        .then(() => {
+          bot.setControlState("sneak", false);
+        })
+        .catch((re) => {
+          console.log("fuck me");
+        })
+        .then(() => {
+          placing = false;
+        });
+
+      // await placeBlock(
+      //   bot,
+      //   placeTarget,
+      //   new Vec3(horizontalPlaceTarget.dir.x, 0, horizontalPlaceTarget.dir.z),
+      //   {
+      //     forceLook: "ignore",
+      //     showHand: true,
+      //     swingArm: "right",
+      //   }
+      // );
+      // placing = false;
+      // bot.setControlState("sneak", false);
 
       // return true;
     }
@@ -393,7 +406,7 @@ function inject(bot) {
       const yaw = Math.atan2(-dx, -dz);
       const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
 
-      bot.look(yaw, 0, true);
+      bot.look(yaw, 0);
       // bot.lookAt(point.offset(0, 1.1, 0), true);
     }
 
@@ -405,7 +418,7 @@ function inject(bot) {
       bot.setControlState("sprint", true);
     }
 
-    if (isPlayerOnBlock(bot.entity.position, point)) {
+    if (isPlayerOnBlock(bot.entity.position, point) && !placing && !digging) {
       // bot.setControlState("forward", false);
       bot.setControlState("jump", false);
 
@@ -448,51 +461,51 @@ function inject(bot) {
     let shouldWalkJump = canWalkJump(point);
     let shouldSprintJump = canSprintJump(point);
 
-    if (
-      (ladderBlock && ladderBlock.name === "ladder") ||
-      bot.entity.isOnLadder
-    ) {
-      const yDist = Math.abs(bot.entity.position.y - ladderBlock.position.y);
+    if (!placing && !digging) {
+      if (
+        (ladderBlock && ladderBlock.name === "ladder") ||
+        bot.entity.isOnLadder
+      ) {
+        const yDist = Math.abs(bot.entity.position.y - ladderBlock.position.y);
 
-      // up
-      if (yDist > 0) {
-        headLocked = true;
-        climbing = true;
-        bot.clearControlStates();
-        bot.lookAt(ladderBlock.position.offset(0.5, 1, 0.5), true);
-        bot.setControlState("forward", false);
+        // up
+        if (yDist > 0) {
+          headLocked = true;
+          climbing = true;
+          bot.clearControlStates();
+          bot.lookAt(ladderBlock.position.offset(0.5, 1, 0.5), true);
+          bot.setControlState("forward", false);
+          bot.setControlState("jump", true);
+        } else if (yDist < 0) {
+          // down
+          headLocked = true;
+          climbing = true;
+          bot.setControlState("forward", false);
+          bot.setControlState("jump", false);
+        }
+      } else if (bot.entity.isInWater) {
         bot.setControlState("jump", true);
-      } else if (yDist < 0) {
-        // down
+        bot.setControlState("sprint", false);
+      } else if (bot.entity.onGround && shouldWalkJump) {
+        if (bot.ashfinder.debug) console.log("walk jumped");
         headLocked = true;
-        climbing = true;
-        bot.setControlState("forward", false);
+        walkingUntillGround = true;
+        bot.setControlState("jump", true);
+        bot.setControlState("sprint", false);
+      } else if (bot.entity.onGround && shouldSprintJump) {
+        if (bot.ashfinder.debug) console.log("sprint jumped!");
+        headLocked = true;
+        bot.setControlState("sprint", true);
+        bot.setControlState("jump", true);
+      } else {
+        if (bot.entity.onGround) {
+          walkingUntillGround = false;
+          climbing = false;
+          headLocked = false;
+        }
+
         bot.setControlState("jump", false);
       }
-    } else if (bot.entity.isInWater) {
-      bot.setControlState("jump", true);
-      bot.setControlState("sprint", false);
-    } else if (bot.entity.onGround && shouldAutoJump(bot)) {
-      bot.setControlState("jump", true);
-    } else if (bot.entity.onGround && shouldWalkJump) {
-      if (bot.ashfinder.debug) console.log("walk jumped");
-      headLocked = true;
-      walkingUntillGround = true;
-      bot.setControlState("jump", true);
-      bot.setControlState("sprint", false);
-    } else if (shouldSprintJump) {
-      if (bot.ashfinder.debug) console.log("sprint jumped!");
-      headLocked = true;
-      bot.setControlState("sprint", true);
-      bot.setControlState("jump", true);
-    } else {
-      if (bot.entity.onGround) {
-        walkingUntillGround = false;
-        climbing = false;
-        headLocked = false;
-      }
-
-      bot.setControlState("jump", false);
     }
 
     // if (isBotStuck()) {
@@ -653,6 +666,7 @@ function inject(bot) {
           // Check if the array in horizontal matches movement.horizontalPlacable
           if (arraysMatch(array, cellPlacableHori)) {
             horizontalPlaceTarget = array.shift();
+            console.log("adding vertical placements", horizontalPlaceTarget);
             break;
           }
         }
