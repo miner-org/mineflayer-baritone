@@ -67,7 +67,7 @@ function inject(bot) {
     ],
     thinkTimeout: 5000,
   };
-  bot.ashfinder.debug= true
+  bot.ashfinder.debug = true;
 
   let headLocked = false;
   let walkingUntillGround = false;
@@ -213,9 +213,13 @@ function inject(bot) {
     );
 
     // console.log(targetDist);
-    if (jumpDist >= 3 && fallDist < 1 && targetDist < 1) return true;
+    if (between(jumpDist, 3, 4) && fallDist < 1 && targetDist < 1) return true;
 
     return false;
+  }
+
+  function between(x, min, max) {
+    return x >= min && x <= max;
   }
 
   function canWalkJump(targetPoint) {
@@ -477,7 +481,7 @@ function inject(bot) {
       walkingUntillGround = true;
       bot.setControlState("jump", true);
       bot.setControlState("sprint", false);
-    } else if (bot.entity.onGround && shouldSprintJump) {
+    } else if (shouldSprintJump) {
       if (bot.ashfinder.debug) console.log("sprint jumped!");
       headLocked = true;
       bot.setControlState("sprint", true);
@@ -560,7 +564,7 @@ function inject(bot) {
   }
 
   async function path(endPos, options = {}) {
-    console.log(bot.ashfinder.debug)
+    console.log(bot.ashfinder.debug);
     if (bot.ashfinder.debug) console.log("called");
     let position = endPos.clone();
     let pathNumber = ++currentPathNumber;
