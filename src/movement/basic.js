@@ -74,7 +74,6 @@ class MoveForwardUp extends Move {
     let node2 = this.forward(1).up(2);
     let upNode = this.up(2);
 
-
     this.config = config;
     this.manager = manager;
     if (manager.isNodeBroken(standingNode)) return [];
@@ -120,11 +119,10 @@ class MoveForwardDown extends Move {
     let walkableNode = this.forward(1);
     let upNode = this.forward(1).up(1);
 
-    if (!this.isWalkable(walkableNode)) return []
+    if (!this.isWalkable(walkableNode)) return [];
 
-    if (!this.isWalkable(landingNode)) return []
+    if (!this.isWalkable(landingNode)) return [];
 
-    
     let isSafe = false;
     let cost = 0;
     for (let i = 0; i < config.maxFallDist; i++) {

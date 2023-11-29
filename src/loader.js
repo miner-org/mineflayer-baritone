@@ -67,6 +67,7 @@ function inject(bot) {
     ],
     thinkTimeout: 5000,
   };
+  bot.ashfinder.debug= true
 
   let headLocked = false;
   let walkingUntillGround = false;
@@ -326,9 +327,10 @@ function inject(bot) {
       const targets = straightPathOptions.breakTargets;
       // console.log("Break targets:", targets)
       for (const target of targets) {
-        bot.chat(
-          `/particle dust 1 0 0.93 1 ${target.x} ${target.y} ${target.z} 0.1 0.1 0.1 1 5 force`
-        );
+        if (bot.ashfinder.debug)
+          bot.chat(
+            `/particle dust 1 0 0.93 1 ${target.x} ${target.y} ${target.z} 0.1 0.1 0.1 1 5 force`
+          );
         const block = bot.blockAt(target, false);
 
         if (block && block.boundingBox === "block" && !digging) {
@@ -415,9 +417,10 @@ function inject(bot) {
     }
 
     // for debuging ingame
-    bot.chat(
-      `/particle dust 0 1 0.93 1 ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 1 5 force`
-    );
+    if (bot.ashfinder.debug)
+      bot.chat(
+        `/particle dust 0 1 0.93 1 ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 1 5 force`
+      );
 
     // Activate door if standing in front of it
     const block = point !== null ? bot.blockAt(point, false) : null;
@@ -469,13 +472,13 @@ function inject(bot) {
       bot.setControlState("sprint", false);
       bot.setControlState("jump", true);
     } else if (bot.entity.onGround && shouldWalkJump) {
-      console.log("walk jumped");
+      if (bot.ashfinder.debug) console.log("walk jumped");
       headLocked = true;
       walkingUntillGround = true;
       bot.setControlState("jump", true);
       bot.setControlState("sprint", false);
     } else if (bot.entity.onGround && shouldSprintJump) {
-      console.log("sprint jumped!");
+      if (bot.ashfinder.debug) console.log("sprint jumped!");
       headLocked = true;
       bot.setControlState("sprint", true);
       bot.setControlState("jump", true);
@@ -557,7 +560,8 @@ function inject(bot) {
   }
 
   async function path(endPos, options = {}) {
-    console.log("called");
+    console.log(bot.ashfinder.debug)
+    if (bot.ashfinder.debug) console.log("called");
     let position = endPos.clone();
     let pathNumber = ++currentPathNumber;
     goal = position.clone();
@@ -565,7 +569,6 @@ function inject(bot) {
     continuousPath = true;
     const start = bot.entity.position.clone();
 
-    console.time("astar");
     const result = await astar(
       start,
       position,
@@ -573,10 +576,9 @@ function inject(bot) {
       isPlayerOnBlock,
       bot.ashfinder.config
     );
-    console.timeEnd("astar");
 
-    console.log("Cost:", result.cost);
-    console.log("Status:", result.status);
+    if (bot.ashfinder.debug) console.log("Cost:", result.cost);
+    if (bot.ashfinder.debug) console.log("Status:", result.status);
 
     if (currentCalculatedPathNumber > pathNumber) return;
     else currentCalculatedPathNumber = pathNumber;
@@ -599,13 +601,14 @@ function inject(bot) {
       .filter((cell) => cell.breakThis)
       .map((cell) => cell.breakableNeighbors);
 
-    console.log("Break: ", breakBlocks);
+    if (bot.ashfinder.debug) console.log("Break: ", breakBlocks);
 
     if (result.status === "partial") {
       complexPathPoints = await pathStich(complexPathPoints, bot, endPos);
 
       if (!complexPathPoints) {
-        console.log("Failed to stitch path. Terminating.");
+        if (bot.ashfinder.debug)
+          console.log("Failed to stitch path. Terminating.");
         return;
       }
 
@@ -678,13 +681,13 @@ function inject(bot) {
       complexPathPoints.shift();
     }
 
-    console.log("Done!!");
+    if (bot.ashfinder.debug) console.log("Done!!");
     complexPathPoints = null;
     bot.clearControlStates();
   }
 
   async function pathStich(originalPath, bot, endPos) {
-    console.log("Stitching paths...");
+    if (bot.ashfinder.debug) console.log("Stitching paths...");
 
     // Calculate a new path from the end of the partial path to the final destination
     const partialEnd = originalPath[originalPath.length - 1].worldPos;
@@ -698,12 +701,12 @@ function inject(bot) {
 
     // Check if the new path was successfully calculated
     if (newPath.status === "partial" || newPath.status === "found") {
-      console.log("New path stitched successfully!");
+      if (bot.ashfinder.debug) console.log("New path stitched successfully!");
       // Combine the original path and the new path
       const combinedPath = originalPath.concat(newPath.path.slice(1));
       return combinedPath;
     } else {
-      console.log("Failed to stitch a new path.");
+      if (bot.ashfinder.debug) console.log("Failed to stitch a new path.");
       return originalPath;
     }
   }
