@@ -10,7 +10,9 @@
   "author": "Ash",
   "license": "ISC",
   "dependencies": {
-    "mineflayer": "^4.14.0",
     "require-dir": "^1.2.0"
+  },
+  "devDependencies": {
+    "mineflayer": "^4.14.0"
   }
 }

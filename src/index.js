@@ -8,7 +8,7 @@ const bot = mineflayer.createBot({
   username: "Frisk",
   port: parseInt(argv[3]),
   viewDistance: "tiny",
-  version: "1.20.1",
+  version: "1.18.2",
 });
 
 bot.loadPlugin(inject);

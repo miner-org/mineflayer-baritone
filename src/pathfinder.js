@@ -22,6 +22,12 @@ class NodeManager {
     this.markedNodes.set(defaultHash(node), attribute);
   }
 
+  markNodes(nodes, attribute) {
+    for (const node of nodes) {
+      this.markNode(node, attribute);
+    }
+  }
+
   unmarkNode(node) {
     this.markedNodes.delete(defaultHash(node));
   }
@@ -36,6 +42,8 @@ class NodeManager {
 
   isNodeBroken(node) {
     const attribute = this.getNodeAttribute(node);
+
+    if (!attribute) return false
 
     return attribute === "broken";
   }
@@ -169,8 +177,6 @@ async function Astar(start, endPos, bot, endFunc, config) {
   openSet.set(defaultHash(start), startNode);
 
   let path = [];
-
-  // Track the best node and associated backoff metric
   let bestNode = startNode;
 
   return new Promise(async (resolve) => {
@@ -245,6 +251,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
         if (neighborData.break) {
           neighbor.breakThis = true;
           neighbor.breakableNeighbors = neighborData.blocks;
+          nodemanager.markNodes(neighborData.blocks, "broken");
         }
       }
 
