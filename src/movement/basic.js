@@ -88,6 +88,9 @@ class MoveForwardUp extends Move {
     this.config = config;
     this.manager = manager;
 
+    if (manager.isNodeBroken(standingNode)) return []
+
+
     if (config.breakBlocks) {
       // if the node above us is blocking us
       if (this.isBreakble(upNode, config) && this.isStandable(landingNode)) {
@@ -125,43 +128,52 @@ class MoveForwardUp extends Move {
       }
     }
 
+
     if (this.isAir(upNode) && this.isStandable(landingNode)) {
       neighbors.push(this.makeMovement(landingNode, 1.5));
     } else if (
       manager.isNodeBroken(landingNode) &&
       manager.isNodeBroken(upNode) &&
-      manager.isNodeBroken(node2)
+      manager.isNodeBroken(node2) &&
+      this.isSolid(standingNode)
     ) {
       // we broke all 3 blocks to get here
       this.break = true;
-      neighbors.push(this.makeBreakable(landingNode, 5.5));
-    } else if (manager.isNodeBroken(upNode) && this.isStandable(landingNode)) {
+      neighbors.push(this.makeBreakable(landingNode, 3.5));
+    } else if (
+      manager.isNodeBroken(upNode) &&
+      this.isStandable(landingNode) &&
+      this.isSolid(standingNode)
+    ) {
       // we broke 1 blocks to get here
       this.break = true;
-      neighbors.push(this.makeBreakable(landingNode, 5.5));
+      neighbors.push(this.makeBreakable(landingNode, 3.5));
     } else if (
       manager.isNodeBroken(landingNode) &&
       manager.isNodeBroken(node2) &&
-      this.isAir(upNode)
+      this.isAir(upNode) &&
+      this.isSolid(standingNode)
     ) {
       // we broke 2 blocks to get here
       this.break = true;
-      neighbors.push(this.makeBreakable(landingNode, 5.5));
+      neighbors.push(this.makeBreakable(landingNode, 3.5));
     } else if (
       manager.isNodeBroken(upNode) &&
       manager.isNodeBroken(node2) &&
-      this.isAir(landingNode)
+      this.isAir(landingNode) &&
+      this.isSolid(standingNode)
     ) {
       // we broke 2 blocks to get here
       this.break = true;
-      neighbors.push(this.makeBreakable(landingNode, 5.5));
+      neighbors.push(this.makeBreakable(landingNode, 3.5));
     } else if (
       manager.isNodeBroken(landingNode) &&
       this.isAir(upNode) &&
-      this.isAir(node2)
+      this.isAir(node2) &&
+      this.isSolid(standingNode)
     ) {
       this.break = true;
-      neighbors.push(this.makeBreakable(landingNode, 5.5));
+      neighbors.push(this.makeBreakable(landingNode, 3.5));
     }
   }
 
@@ -169,41 +181,48 @@ class MoveForwardUp extends Move {
     let landingNode = this.forward(1).up(1);
     let upNode = this.up(2);
     let node2 = this.forward(1).up(2);
-
-    if (this.isBreakble(upNode, this.config)) {
+    const manager = this.manager;
+    const config = this.config;
+    if (
+      manager.isNodeBroken(landingNode) &&
+      manager.isNodeBroken(upNode) &&
+      manager.isNodeBroken(node2)
+    ) {
+      neighbors.push({
+        parent: landingNode,
+        blocks: [upNode, node2, landingNode],
+      });
+    } else if (manager.isNodeBroken(upNode) && this.isStandable(landingNode)) {
       neighbors.push({
         parent: landingNode,
         blocks: [upNode],
       });
     } else if (
-      this.isBreakble(landingNode, this.config) &&
-      this.isBreakble(node2, this.config)
+      manager.isNodeBroken(landingNode) &&
+      manager.isNodeBroken(node2) &&
+      this.isAir(upNode)
     ) {
       neighbors.push({
         parent: landingNode,
         blocks: [node2, landingNode],
       });
     } else if (
-      this.isBreakble(node2, this.config) &&
-      this.isBreakble(upNode, this.config)
+      manager.isNodeBroken(upNode) &&
+      manager.isNodeBroken(node2) &&
+      this.isAir(landingNode)
     ) {
       neighbors.push({
         parent: landingNode,
         blocks: [upNode, node2],
       });
-    } else if (this.isBreakble(landingNode, this.config)) {
-      neighbors.push({
-        parent: landingNode,
-        blocks: [landingNode],
-      });
     } else if (
-      this.isBreakble(upNode, this.config) &&
-      this.isBreakble(landingNode, this.config) &&
-      this.isBreakble(node2, this.config)
+      manager.isNodeBroken(landingNode) &&
+      this.isAir(upNode) &&
+      this.isAir(node2)
     ) {
       neighbors.push({
         parent: landingNode,
-        blocks: [upNode, node2, landingNode],
+        blocks: [landingNode],
       });
     }
   }

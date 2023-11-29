@@ -21,8 +21,6 @@ bot.once("spawn", async () => {
   bot.on("chat", async (username, message) => {
     if (username === bot.username) return;
 
-    if (username !== "AshLikesFood") return;
-
     const args = message.split(" ");
     const command = args.shift();
 

@@ -206,15 +206,14 @@ function inject(bot) {
     const targetDistX = Math.abs(targetPoint.x - returnStateOffset.x);
     const targetDistZ = Math.abs(targetPoint.z - returnStateOffset.z);
     const jumpDist = Math.sqrt(xDist * xDist + zDist * zDist + yDist * yDist);
-    const targetDist = targetPoint.minus(returnStateOffset);
-
-    return (
-      jumpDist >= 3 &&
-      jumpDist < 3 &&
-      Math.abs(targetDist.x) <= 0.35 &&
-      Math.abs(targetDist.z) <= 0.35 &&
-      Math.abs(targetDist.y) < 1
+    const targetDist = Math.sqrt(
+      targetDistX * targetDistX + targetDistZ * targetDistZ
     );
+
+    console.log(targetDist)
+    if (jumpDist >= 3 && targetDist < 1) return true;
+
+    return false;
   }
 
   function canWalkJump(targetPoint) {

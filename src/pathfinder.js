@@ -162,7 +162,6 @@ async function Astar(start, endPos, bot, endFunc, config) {
 
   // Track the best node and associated backoff metric
   let bestNode = startNode;
-  let bestBackoffMetric = Infinity;
 
   return new Promise(async (resolve) => {
     let startTime = performance.now();
@@ -224,16 +223,6 @@ async function Astar(start, endPos, bot, endFunc, config) {
       }
 
       await new Promise((r) => setTimeout(r, 0));
-    }
-
-    if (bestNode && bestBackoffMetric < backoffThreshold) {
-      console.log("i reach here");
-
-      return resolve({
-        path: reconstructPath(bestNode),
-        status: "partial",
-        cost: bestNode.fCost,
-      });
     }
 
     return resolve({
