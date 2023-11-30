@@ -305,6 +305,13 @@ function inject(bot) {
     return false;
   }
 
+  function stopVel() {
+    bot.clearControlStates();
+
+    bot.entity.velocity.x = 0;
+    bot.entity.velocity.z = 0;
+  }
+
   async function straightPathTick() {
     if (!straightPathOptions) return false;
 
@@ -321,7 +328,6 @@ function inject(bot) {
       );
 
     if (cell.breakableNeighbors.length > 0) {
-      bot.clearControlStates();
       // console.log("Break targets:", targets)
       for (const target of cell.breakableNeighbors) {
         if (bot.ashfinder.debug)
@@ -331,6 +337,7 @@ function inject(bot) {
         const block = bot.blockAt(target, false);
 
         if (block.boundingBox === "block" && !digging) {
+          stopVel();
           digging = true;
 
           await autoTool(bot, block);
@@ -402,22 +409,6 @@ function inject(bot) {
     const dy = point.y - botPos.y;
     let dz = point.z - botPos.z;
 
-    if (!headLocked && !placing && !digging) {
-      const yaw = Math.atan2(-dx, -dz);
-      const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
-
-      bot.look(yaw, 0);
-      // bot.lookAt(point.offset(0, 1.1, 0), true);
-    }
-
-    if (!placing && !digging && !climbing && !bot.getControlState("forward")) {
-      bot.setControlState("forward", true);
-    }
-
-    if (!walkingUntillGround && !bot.getControlState("sprint")) {
-      bot.setControlState("sprint", true);
-    }
-
     if (isPlayerOnBlock(bot.entity.position, point) && !placing && !digging) {
       // bot.setControlState("forward", false);
       bot.setControlState("jump", false);
@@ -460,6 +451,22 @@ function inject(bot) {
 
     let shouldWalkJump = canWalkJump(point);
     let shouldSprintJump = canSprintJump(point);
+
+    if (!headLocked && !placing && !digging && !climbing) {
+      const yaw = Math.atan2(-dx, -dz);
+      const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
+
+      bot.look(yaw, 0);
+      // bot.lookAt(point.offset(0, 1.1, 0), true);
+    }
+
+    if (!placing && !digging && !climbing) {
+      bot.setControlState("forward", true);
+    }
+
+    if (!walkingUntillGround) {
+      bot.setControlState("sprint", true);
+    }
 
     if (!placing && !digging) {
       if (
@@ -580,6 +587,7 @@ function inject(bot) {
     if (bot.ashfinder.debug) console.log("called");
     let position = endPos.clone();
     let pathNumber = ++currentPathNumber;
+    let currentStatus = "";
     goal = position.clone();
     calculating = true;
     continuousPath = true;
@@ -595,6 +603,7 @@ function inject(bot) {
 
     if (bot.ashfinder.debug) console.log("Cost:", result.cost);
     if (bot.ashfinder.debug) console.log("Status:", result.status);
+    current = result.status;
 
     if (currentCalculatedPathNumber > pathNumber) return;
     else currentCalculatedPathNumber = pathNumber;
@@ -620,13 +629,17 @@ function inject(bot) {
     if (bot.ashfinder.debug) console.log("Break: ", breakBlocks);
 
     if (result.status === "partial") {
-      complexPathPoints = await pathStich(complexPathPoints, bot, endPos);
+      const { path, status } = await pathStich(complexPathPoints, bot, endPos);
+
+      complexPathPoints = path;
 
       if (!complexPathPoints) {
         if (bot.ashfinder.debug)
           console.log("Failed to stitch path. Terminating.");
         return;
       }
+
+      currentStatus = status;
 
       bot.ashfinder.path = complexPathPoints;
       vertical = complexPathPoints
@@ -721,7 +734,10 @@ function inject(bot) {
       if (bot.ashfinder.debug) console.log("New path stitched successfully!");
       // Combine the original path and the new path
       const combinedPath = originalPath.concat(newPath.path.slice(1));
-      return combinedPath;
+      return {
+        path: combinedPath,
+        status: newPath.status,
+      };
     } else {
       if (bot.ashfinder.debug) console.log("Failed to stitch a new path.");
       return originalPath;

@@ -12,7 +12,7 @@ class MoveBreakDown extends Move {
     // if the support node was already broken or its not air then we cant go there
     if (manager.isNodeBroken(supportNode)) return [];
 
-    if (this.isBreakble(supportNode, config)) {
+    if (this.isBreakble(landingNode, config)) {
       this.break = true;
       neighbors.push(this.makeBreakable(landingNode, 3.5));
     }

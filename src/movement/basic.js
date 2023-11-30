@@ -20,7 +20,7 @@ class MoveForward extends Move {
     // that means we broke blocks to reach here
     else if (
       !manager.isNodeBroken(standingNode) &&
-      this.isSolid(standingNode) &&
+      this.isSolid(standingNode) && 
       this.isBreakble(forwardNode, config) &&
       this.isBreakble(forwardUp, config)
     ) {
@@ -47,7 +47,7 @@ class MoveDiagonal extends Move {
     if (!this.isWalkable(forwardNode) && !this.isWalkable(rightNode)) return [];
 
     if (this.isStandable(targetNode)) {
-      neighbors.push(this.makeMovement(targetNode, 1.4))
+      neighbors.push(this.makeMovement(targetNode, 1.4));
     }
   }
 }
@@ -74,6 +74,15 @@ class MoveForwardUp extends Move {
     ) {
       this.break = true;
       neighbors.push(this.makeBreakable(landingNode, 3.5));
+    } else if (
+      !manager.isNodeBroken(standingNode) &&
+      this.isSolid(standingNode) &&
+      this.isAir(upNode) &&
+      this.isBreakble(landingNode, config) &&
+      this.isBreakble(node2, config)
+    ) {
+      this.break = true;
+      neighbors.push(this.makeBreakable(landingNode, 3.5));
     }
   }
 
@@ -93,6 +102,15 @@ class MoveForwardUp extends Move {
       neighbors.push({
         parent: landingNode,
         blocks: [upNode, node2, landingNode],
+      });
+    } else if (
+      this.isAir(upNode) &&
+      this.isBreakble(landingNode, config) &&
+      this.isBreakble(node2, config)
+    ) {
+      neighbors.push({
+        parent: landingNode,
+        blocks: [landingNode, node2],
       });
     }
   }

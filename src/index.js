@@ -109,7 +109,7 @@ bot.once("spawn", async () => {
         .clone()
         .offset(
           Math.floor(Math.random() * (50 - 20) + 20),
-          0.5,
+          1,
           Math.floor(Math.random() * (50 - 20) + 20)
         );
 
