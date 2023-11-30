@@ -1,5 +1,6 @@
 const requireDir = require("require-dir");
 const { Vec3 } = require("vec3");
+const nbt = require("prismarine-nbt");
 
 const cardinalDirections = [
   { x: -1, z: 0 }, // north
@@ -109,6 +110,11 @@ class Move {
     this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
     this.dir = dir;
     this.bot = bot;
+    this.COST_BREAK = 5;
+    this.COST_NORMAL = 1;
+    this.COST_DIAGONAL = 1.4;
+    this.COST_UP = 1.5;
+    this.COST_PLACE = 5;
   }
 
   makeMovement(position, cost) {
@@ -188,20 +194,25 @@ class Move {
     );
   }
 
-  getNodeDigTime(
-    node,
-    options = { heldItemID: null, creative: false, water: false, ground: true }
-  ) {
+  getNodeDigTime(node) {
     const block = this.world.getBlock(node);
 
     if (!block) return -1;
 
-    return block.digTime(
-      options.heldItemID,
-      options.creative,
-      options.water,
-      options.ground
+    const tool = bestHarvestTool(this.bot, block);
+    const enchants =
+      tool && tool.nbt ? nbt.simplify(tool.nbt).Enchantments : [];
+    const effects = this.bot.entity.effects;
+    const digTime = block.digTime(
+      tool ? tool.type : null,
+      false,
+      false,
+      false,
+      enchants,
+      effects
     );
+
+    return 1 + digTime / 1000;
   }
 
   isJumpable(node) {
@@ -288,6 +299,32 @@ function registerMoves(moves) {
   for (const moveClass of moves) {
     moveClasses.push(new moveClass());
   }
+}
+
+function bestHarvestTool(bot, block) {
+  const availableTools = bot.inventory.items();
+  const effects = bot.entity.effects;
+
+  let fastest = Number.MAX_VALUE;
+  let bestTool = null;
+  for (const tool of availableTools) {
+    const enchants =
+      tool && tool.nbt ? nbt.simplify(tool.nbt).Enchantments : [];
+    const digTime = block.digTime(
+      tool ? tool.type : null,
+      false,
+      false,
+      false,
+      enchants,
+      effects
+    );
+    if (digTime < fastest) {
+      fastest = digTime;
+      bestTool = tool;
+    }
+  }
+
+  return bestTool;
 }
 
 function getNeighbors2(world, node, config, manager, bot) {

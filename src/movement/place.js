@@ -15,7 +15,7 @@ class MovePlaceForward extends Move {
 
     if (this.isAir(placeNode)) {
       this.placeHorizontal = true;
-      neighbors.push(this.makeHorizontalPlace(landingNode, 3));
+      neighbors.push(this.makeHorizontalPlace(landingNode, this.COST_PLACE));
     }
   }
 

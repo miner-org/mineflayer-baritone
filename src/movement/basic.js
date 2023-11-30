@@ -14,18 +14,20 @@ class MoveForward extends Move {
     if (manager.isNodeBroken(standingNode)) return [];
 
     if (this.isStandable(forwardNode)) {
-      neighbors.push(this.makeMovement(forwardNode, 1));
+      neighbors.push(this.makeMovement(forwardNode, this.COST_NORMAL));
     }
 
     // that means we broke blocks to reach here
     else if (
       !manager.isNodeBroken(standingNode) &&
-      this.isSolid(standingNode) && 
+      this.isSolid(standingNode) &&
       this.isBreakble(forwardNode, config) &&
       this.isBreakble(forwardUp, config)
     ) {
       this.break = true;
-      neighbors.push(this.makeBreakable(forwardNode, 3));
+      const digTime1 = this.getNodeDigTime(forwardUp);
+      const digTime = this.getNodeDigTime(forwardNode) + digTime1;
+      neighbors.push(this.makeBreakable(forwardNode, this.COST_BREAK + digTime));
     }
   }
 
@@ -47,7 +49,7 @@ class MoveDiagonal extends Move {
     if (!this.isWalkable(forwardNode) && !this.isWalkable(rightNode)) return [];
 
     if (this.isStandable(targetNode)) {
-      neighbors.push(this.makeMovement(targetNode, 1.4));
+      neighbors.push(this.makeMovement(targetNode, this.COST_DIAGONAL));
     }
   }
 }
@@ -64,7 +66,7 @@ class MoveForwardUp extends Move {
     if (manager.isNodeBroken(standingNode)) return [];
 
     if (this.isAir(upNode) && this.isStandable(landingNode)) {
-      neighbors.push(this.makeMovement(landingNode, 1.5));
+      neighbors.push(this.makeMovement(landingNode, this.COST_UP));
     } else if (
       !manager.isNodeBroken(standingNode) &&
       this.isSolid(standingNode) &&
@@ -73,7 +75,10 @@ class MoveForwardUp extends Move {
       this.isBreakble(node2, config)
     ) {
       this.break = true;
-      neighbors.push(this.makeBreakable(landingNode, 3.5));
+      const digTime1 = this.getNodeDigTime(upNode);
+      const digTime2 = this.getNodeDigTime(node2);
+      const digTime = this.getNodeDigTime(landingNode) + digTime1 + digTime2;
+      neighbors.push(this.makeBreakable(landingNode, this.COST_BREAK + digTime));
     } else if (
       !manager.isNodeBroken(standingNode) &&
       this.isSolid(standingNode) &&
@@ -82,7 +87,19 @@ class MoveForwardUp extends Move {
       this.isBreakble(node2, config)
     ) {
       this.break = true;
-      neighbors.push(this.makeBreakable(landingNode, 3.5));
+      const digTime1 = this.getNodeDigTime(landingNode);
+      const digTime = this.getNodeDigTime(node2) + digTime1;
+      neighbors.push(this.makeBreakable(landingNode,  this.COST_BREAK + digTime));
+    } else if (
+      !manager.isNodeBroken(standingNode) &&
+      this.isSolid(standingNode) &&
+      this.isAir(upNode) &&
+      this.isAir(node2) &&
+      this.isBreakble(landingNode, config)
+    ) {
+      this.break = true;
+      const digTime = this.getNodeDigTime(landingNode);
+      neighbors.push(this.makeBreakable(landingNode,  this.COST_BREAK + digTime));
     }
   }
 
@@ -90,8 +107,6 @@ class MoveForwardUp extends Move {
     let landingNode = this.forward(1).up(1);
     let upNode = this.up(2);
     let node2 = this.forward(1).up(2);
-    let standingNode = this.forward(1);
-    const manager = this.manager;
     const config = this.config;
 
     if (
@@ -112,6 +127,15 @@ class MoveForwardUp extends Move {
         parent: landingNode,
         blocks: [landingNode, node2],
       });
+    } else if (
+      this.isAir(upNode) &&
+      this.isAir(node2, config) &&
+      this.isBreakble(landingNode, config) 
+    ) {
+      neighbors.push({
+        parent: landingNode,
+        blocks: [landingNode],
+      });
     }
   }
 }
@@ -120,7 +144,6 @@ class MoveForwardDown extends Move {
   addNeighbors(neighbors, config) {
     let landingNode = this.forward(1).down(1);
     let walkableNode = this.forward(1);
-    let upNode = this.forward(1).up(1);
 
     if (!this.isWalkable(walkableNode)) return [];
 
@@ -129,7 +152,7 @@ class MoveForwardDown extends Move {
     let isSafe = false;
     let cost = 0;
     for (let i = 0; i < config.maxFallDist; i++) {
-      if (this.isStandable(landingNode)) {
+      if (this.isStandable(landingNode) || this.isWater(landingNode)) {
         isSafe = true;
         break;
       }
@@ -141,9 +164,9 @@ class MoveForwardDown extends Move {
     if (
       isSafe &&
       this.isWalkable(walkableNode) &&
-      this.isStandable(landingNode)
+      (this.isStandable(landingNode) || this.isWater(landingNode))
     ) {
-      neighbors.push(this.makeMovement(landingNode, 1.5 + cost));
+      neighbors.push(this.makeMovement(landingNode, this.COST_UP + cost));
       return;
     }
   }
@@ -175,9 +198,9 @@ class MoveForwardDownWater extends Move {
       this.isWalkable(forwardNode)
     ) {
       if (this.isWater(landingNode)) {
-        neighbors.push(this.makeMovement(landingNode, 1.5));
+        neighbors.push(this.makeMovement(landingNode, this.COST_UP));
       } else if (this.isWaterLogged(landingNode)) {
-        neighbors.push(this.makeMovement(landingNode, 1.5));
+        neighbors.push(this.makeMovement(landingNode, this.COST_UP));
       }
     }
   }

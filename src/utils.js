@@ -65,21 +65,6 @@ function shouldAutoJump(bot) {
   );
 }
 
-function isPlayerOnBlock(playerPosition, blockPosition, onGround = false) {
-  // returns true if you can stand on the block
-
-  if (!blockPosition) return false; // theres no target position lmao
-
-  blockPosition = blockPosition.offset(0.5, 0, 0.5);
-  const xDistance = Math.abs(playerPosition.x - blockPosition.x);
-  const zDistance = Math.abs(playerPosition.z - blockPosition.z);
-  const yDistance = Math.abs(playerPosition.y - blockPosition.y);
-
-  const onBlock =
-    (xDistance < 0.7 && zDistance < 0.7 && yDistance < 1) ||
-    (onGround && xDistance < 0.8 && zDistance < 0.8 && yDistance == 0);
-  return onBlock;
-}
 
 function getControlState(bot) {
   return {
@@ -136,19 +121,6 @@ function getController(nextPoint, jump, sprint, jumpAfter = 0) {
     state.control.jump = jump && tick >= jumpAfter;
     state.control.sprint = sprint;
   };
-}
-
-function distanceFromLine(lineStart, lineEnd, point) {
-  let A = lineStart.distanceTo(point);
-  let B = lineEnd.distanceTo(point);
-  let C = lineStart.distanceTo(lineEnd);
-
-  if (B * B > A * A + C * C) return A;
-  else if (A * A > B * B + C * C) return B;
-  else {
-    s = (A + B + C) / 2;
-    return (2 / C) * Math.sqrt(s * (s - A) * (s - B) * (s - C));
-  }
 }
 
 function smoothPath(path, numInterpolations) {
@@ -364,8 +336,7 @@ function generateWeights() {
   return weights;
 }
 
-// const generatedWeights = generateWeights();
-// console.log(generatedWeights);
+
 
 module.exports = {
   vectorProjection,

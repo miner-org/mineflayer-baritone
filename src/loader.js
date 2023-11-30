@@ -349,61 +349,66 @@ function inject(bot) {
       }
     }
 
-    if (placing || cell.horizontalPlacable.length > 0) {
-      let placingBlock = null;
-      if (!placing) {
-        placing = true;
-        placingBlock = nextPoint.toPlace.shift();
-        bot.clearControlStates();
-      }
+    if (cell.horizontalPlacable.length > 0) {
+      for (const target of cell.horizontalPlacable) {
+        const blockBelow = bot.blockAt(
+          bot.entity.position.floored().offset(0, -1, 0)
+        );
 
-      const placeTarget = bot.blockAt(placingBlock, false);
+        let isAir = blockBelow.name === "air";
+        if (!isAir) {
+          function getViewVector(pitch, yaw) {
+            const cosPitch = Math.cos(pitch);
+            const sinPitch = Math.sin(pitch);
+            const cosYaw = Math.cos(yaw);
+            const sinYaw = Math.sin(yaw);
+            return new Vec3(-sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch);
+          }
 
-      if (!blockPlace) return false;
+          // Target viewing direction while approaching the edge
+          const targetBlockPos = target.offset(
+            target.dir.x + 0.5,
+            0,
+            target.dir.z + 0.5
+          );
+          const targetPosDelta = bot.entity.position
+            .clone()
+            .subtract(targetBlockPos);
+          const targetYaw = Math.atan2(-targetPosDelta.x, -targetPosDelta.z);
+          const targetPitch = -1.421;
+          const viewVector = getViewVector(targetPitch, targetYaw);
 
-      console.log("Cum2");
+          bot.lookAt(
+            bot.entity.position.offset(viewVector.x, viewVector.y, viewVector.z)
+          );
+          bot.setControlState("forward", false);
+          bot.setControlState("sneak", true);
+          bot.setControlState("back", true);
+          return;
+        }
 
-      if (bot.heldItem && !bot.heldItem.name.includes(blockPlace.name))
-        bot.equip(blockPlace, "hand");
-      // sneak to edge of block
-      placing = true;
-      if (
-        moveToEdge(
-          new Vec3(placingBlock.x, placingBlock.y, placingBlock.z),
-          new Vec3(placingBlock.dir.x, 0, placingBlock.dir.z)
-        )
-      )
-        return;
+        if (!placing) {
+          placing = true;
+          if (bot.heldItem && bot.heldItem !== blockPlace) {
+            await bot.equip(blockPlace);
+          }
 
-      await bot
-        .placeBlock(
-          placeTarget,
-          new Vec3(placingBlock.dir.x, 0, placingBlock.dir.z)
-        )
-        .then(() => {
+          const refBlock = bot.blockAt(target, false);
+
+          try {
+            await bot.placeBlock(
+              refBlock,
+              new Vec3(target.dir.x, 0, target.dir.z)
+            );
+            placing = false
+          } catch (err) {
+            placing = false
+            console.log("man i hate place block");
+          }
+
           bot.setControlState("sneak", false);
-        })
-        .catch((re) => {
-          console.log("fuck me");
-        })
-        .then(() => {
-          placing = false;
-        });
-
-      // await placeBlock(
-      //   bot,
-      //   placeTarget,
-      //   new Vec3(horizontalPlaceTarget.dir.x, 0, horizontalPlaceTarget.dir.z),
-      //   {
-      //     forceLook: "ignore",
-      //     showHand: true,
-      //     swingArm: "right",
-      //   }
-      // );
-      // placing = false;
-      // bot.setControlState("sneak", false);
-
-      // return true;
+        }
+      }
     }
     let dx = point.x - botPos.x;
     const dy = point.y - botPos.y;
@@ -456,7 +461,7 @@ function inject(bot) {
       const yaw = Math.atan2(-dx, -dz);
       const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
 
-      bot.look(yaw, 0);
+      bot.look(yaw, 0, true);
       // bot.lookAt(point.offset(0, 1.1, 0), true);
     }
 
@@ -495,13 +500,11 @@ function inject(bot) {
         bot.setControlState("sprint", false);
       } else if (bot.entity.onGround && shouldWalkJump) {
         if (bot.ashfinder.debug) console.log("walk jumped");
-        headLocked = true;
         walkingUntillGround = true;
         bot.setControlState("jump", true);
         bot.setControlState("sprint", false);
       } else if (bot.entity.onGround && shouldSprintJump) {
         if (bot.ashfinder.debug) console.log("sprint jumped!");
-        headLocked = true;
         bot.setControlState("sprint", true);
         bot.setControlState("jump", true);
       } else {
@@ -562,19 +565,11 @@ function inject(bot) {
     }
   }
 
-  function straightPath({
-    target,
-    horizontalPlaceTarget,
-    skip,
-    breakTargets,
-    verticalPlaceTarget,
-  }) {
+  function straightPath({ target, skip }) {
     straightPathOptions = {
       target,
-      horizontalPlaceTarget: horizontalPlaceTarget ?? null,
-      verticalPlaceTarget: verticalPlaceTarget ?? null,
+
       skip: skip ?? true,
-      breakTargets: breakTargets ?? [],
     };
     return new Promise((resolve, reject) => {
       if (straightPathOptions) straightPathOptions.resolve = resolve;
@@ -657,50 +652,9 @@ function inject(bot) {
 
     while (complexPathPoints.length > 0) {
       const movement = complexPathPoints[0];
-      // Array of blocks to place horizontally to reach this movement/node
-      const cellPlacableHori = movement.horizontalPlacable;
-      const cellBreak = movement.breakableNeighbors;
-      const cellPlacableVerti = movement.verticalPlacable;
-      let horizontalPlaceTarget = null;
-      let verticalPlaceTarget = null;
-      let breakTargets = [];
-
-      if (cellBreak.length > 0) {
-        for (const array of breakBlocks) {
-          if (arraysMatch(array, cellBreak)) {
-            breakTargets = breakBlocks.shift();
-            break;
-          }
-        }
-      }
-
-      if (cellPlacableHori.length > 0) {
-        for (const array of horizontal) {
-          // Check if the array in horizontal matches movement.horizontalPlacable
-          if (arraysMatch(array, cellPlacableHori)) {
-            horizontalPlaceTarget = array.shift();
-            console.log("adding vertical placements", horizontalPlaceTarget);
-            break;
-          }
-        }
-      }
-
-      if (cellPlacableVerti.length > 0) {
-        for (const array of vertical) {
-          // Check if the array in horizontal matches movement.horizontalPlacable
-          if (arraysMatch(array, cellPlacableVerti)) {
-            verticalPlaceTarget = array.shift();
-            console.log("adding vertical placements", verticalPlaceTarget);
-            break;
-          }
-        }
-      }
 
       await straightPath({
         target: movement,
-        horizontalPlaceTarget: horizontalPlaceTarget,
-        verticalPlaceTarget: verticalPlaceTarget,
-        breakTargets: breakTargets,
       });
 
       if (
@@ -734,10 +688,16 @@ function inject(bot) {
       if (bot.ashfinder.debug) console.log("New path stitched successfully!");
       // Combine the original path and the new path
       const combinedPath = originalPath.concat(newPath.path.slice(1));
-      return {
-        path: combinedPath,
-        status: newPath.status,
-      };
+
+      if (newPath.status === "partial") {
+        if (bot.ashfinder.debug)
+          console.log("New path was partial stiching again.");
+        return await pathStich(combinedPath, bot, endPos);
+      } else
+        return {
+          path: combinedPath,
+          status: newPath.status,
+        };
     } else {
       if (bot.ashfinder.debug) console.log("Failed to stitch a new path.");
       return originalPath;

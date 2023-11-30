@@ -13,7 +13,7 @@ class MoveParkour1 extends Move {
 
     let airNode = this.forward(1).down(1);
 
-    if (!this.isAir(airNode)) return [];
+    if (!this.isAir(airNode) || !this.isWater(airNode)) return [];
 
     let standingNode = this.forward(2).down(1);
     if (manager.isNodeBroken(standingNode)) return [];
@@ -65,7 +65,11 @@ class MoveForwardParkour2 extends Move {
     let airNode = this.forward(1).down(1);
     let airNode2 = this.forward(2).down(1);
 
-    if (!this.isAir(airNode) && !this.isAir(airNode2)) return [];
+    if (
+      (!this.isAir(airNode) && !this.isAir(airNode2)) ||
+      (!this.isWater(airNode) && !this.isWater(airNode))
+    )
+      return [];
 
     let standingNode = this.forward(3).down(1);
     if (manager.isNodeBroken(standingNode)) return [];
@@ -115,7 +119,14 @@ class MoveForwardParkour3 extends Move {
     let airNode2 = this.down(1, spaceNode2);
     let airNode3 = this.down(1, spaceNode3);
 
-    if (!this.isAir(airNode1) && !this.isAir(airNode2) && !this.isAir(airNode3))
+    if (
+      (!this.isAir(airNode1) &&
+        !this.isAir(airNode2) &&
+        !this.isAir(airNode3)) ||
+      (!this.isWater(airNode1) &&
+        !this.isWater(airNode2) &&
+        !this.isWater(airNode3))
+    )
       return [];
 
     let standingNode = this.forward(4).down(1);
@@ -293,8 +304,8 @@ class MoveForwardParkourDown1 extends Move {
 
     if (!shouldJump) return [];
 
-    let standingNode = this.forward(2).down(2)
-    if (manager.isNodeBroken(standingNode)) return []
+    let standingNode = this.forward(2).down(2);
+    if (manager.isNodeBroken(standingNode)) return [];
 
     if (!config.proParkour) {
       if (
@@ -340,8 +351,8 @@ class MoveForwardParkourDown2 extends Move {
 
     if (!shouldJump) return [];
 
-    let standingNode = this.forward(3).down(2)
-    if (manager.isNodeBroken(standingNode)) return []
+    let standingNode = this.forward(3).down(2);
+    if (manager.isNodeBroken(standingNode)) return [];
 
     if (!config.proParkour) {
       if (
@@ -392,8 +403,8 @@ class MoveForwardParkourDown3 extends Move {
       this.isAir(spaceNode3);
     if (!shouldJump) return [];
 
-    let standingNode = this.forward(4).down(2)
-    if (manager.isNodeBroken(standingNode)) return []
+    let standingNode = this.forward(4).down(2);
+    if (manager.isNodeBroken(standingNode)) return [];
 
     if (!config.proParkour) {
       if (

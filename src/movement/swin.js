@@ -40,19 +40,9 @@ class MoveUpSwim extends Move {
   }
 }
 
-class MoveDownSwim extends Move {
-  addNeighbors(neighbors) {
-    let landingNode = this.down(1);
-
-    if (this.isWater(landingNode))
-      neighbors.push(this.makeMovement(landingNode, 1.502));
-  }
-}
-
 registerMoves([
   MoveForwardSwim,
   MoveDiagonalSwim,
   MoveUpSwim,
-  MoveDownSwim,
   MoveForwardUpSwim,
 ]);

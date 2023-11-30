@@ -14,7 +14,9 @@ class MoveBreakDown extends Move {
 
     if (this.isBreakble(landingNode, config)) {
       this.break = true;
-      neighbors.push(this.makeBreakable(landingNode, 3.5));
+
+      const digTime = this.getNodeDigTime(landingNode);
+      neighbors.push(this.makeBreakable(landingNode, this.COST_BREAK + digTime));
     }
   }
 
@@ -28,4 +30,4 @@ class MoveBreakDown extends Move {
   }
 }
 
-registerMoves([MoveBreakDown]);
+// registerMoves([MoveBreakDown]);
