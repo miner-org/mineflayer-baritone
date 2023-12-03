@@ -329,6 +329,8 @@ function inject(bot) {
 
     if (cell.breakableNeighbors.length > 0) {
       // console.log("Break targets:", targets)
+      bot.setControlState("forward", false);
+      bot.setControlState("jump", false);
       for (const target of cell.breakableNeighbors) {
         if (bot.ashfinder.debug)
           bot.chat(
@@ -337,7 +339,6 @@ function inject(bot) {
         const block = bot.blockAt(target, false);
 
         if (block.boundingBox === "block" && !digging) {
-          stopVel();
           digging = true;
 
           await autoTool(bot, block);
@@ -400,9 +401,9 @@ function inject(bot) {
               refBlock,
               new Vec3(target.dir.x, 0, target.dir.z)
             );
-            placing = false
+            placing = false;
           } catch (err) {
-            placing = false
+            placing = false;
             console.log("man i hate place block");
           }
 
@@ -466,11 +467,9 @@ function inject(bot) {
     }
 
     if (!placing && !digging && !climbing) {
-      bot.setControlState("forward", true);
     }
 
     if (!walkingUntillGround) {
-      bot.setControlState("sprint", true);
     }
 
     if (!placing && !digging) {
@@ -496,17 +495,22 @@ function inject(bot) {
           bot.setControlState("jump", false);
         }
       } else if (bot.entity.isInWater) {
+        bot.setControlState("forward", true);
         bot.setControlState("jump", true);
         bot.setControlState("sprint", false);
       } else if (bot.entity.onGround && shouldWalkJump) {
         if (bot.ashfinder.debug) console.log("walk jumped");
         walkingUntillGround = true;
+        bot.setControlState("forward", true);
         bot.setControlState("jump", true);
         bot.setControlState("sprint", false);
+        bot.setControlState("forward", false);
       } else if (bot.entity.onGround && shouldSprintJump) {
         if (bot.ashfinder.debug) console.log("sprint jumped!");
+        bot.setControlState("forward", true);
         bot.setControlState("sprint", true);
         bot.setControlState("jump", true);
+        bot.setControlState("forward", false);
       } else {
         if (bot.entity.onGround) {
           walkingUntillGround = false;
@@ -514,6 +518,10 @@ function inject(bot) {
           headLocked = false;
         }
 
+        if (!bot.getControlState("forward")) {
+          bot.setControlState("forward", true);
+          bot.setControlState("sprint", true);
+        }
         bot.setControlState("jump", false);
       }
     }
