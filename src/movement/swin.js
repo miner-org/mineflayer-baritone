@@ -42,7 +42,7 @@ class MoveUpSwim extends Move {
 
 registerMoves([
   MoveForwardSwim,
-  MoveDiagonalSwim,
-  MoveUpSwim,
-  MoveForwardUpSwim,
+  // MoveDiagonalSwim,
+  // MoveUpSwim,
+  // MoveForwardUpSwim,
 ]);

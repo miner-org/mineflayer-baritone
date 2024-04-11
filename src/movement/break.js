@@ -2,6 +2,7 @@ const { Move, registerMoves } = require("./");
 
 class MoveBreakForward extends Move {
   addNeighbors(neighbors, config, manager) {
+    if (!config.breakBlocks) return;
     let forwardNode = this.forward(1);
     let standingNode = this.forward(1).down(1);
     this.config = config;
@@ -11,7 +12,7 @@ class MoveBreakForward extends Move {
     let forwardUp = this.forward(1).up(1);
 
     // cuz its air by now
-    if (manager.isNodeBroken(standingNode)) return [];
+    if (manager.isNodeBroken(standingNode)) return;
     if (
       !manager.isNodeBroken(standingNode) &&
       this.isSolid(standingNode) &&
@@ -22,7 +23,7 @@ class MoveBreakForward extends Move {
       const digTime1 = this.getNodeDigTime(forwardUp);
       const digTime = this.getNodeDigTime(forwardNode) + digTime1;
       neighbors.push(
-        this.makeBreakable(forwardNode, this.COST_BREAK + digTime)
+        this.makeBreakable(forwardNode, this.COST_BREAK * digTime)
       );
     }
   }
@@ -38,6 +39,8 @@ class MoveBreakForward extends Move {
 
 class MoveBreakForwardUp extends Move {
   addNeighbors(neighbors, config, manager) {
+    if (!config.breakBlocks) return;
+
     let standingNode = this.forward(1);
     let landingNode = this.forward(1).up(1);
     let node2 = this.forward(1).up(2);
@@ -45,7 +48,7 @@ class MoveBreakForwardUp extends Move {
 
     this.config = config;
     this.manager = manager;
-    if (manager.isNodeBroken(standingNode)) return [];
+    if (manager.isNodeBroken(standingNode)) return;
 
     if (
       !manager.isNodeBroken(standingNode) &&
@@ -59,7 +62,10 @@ class MoveBreakForwardUp extends Move {
       const digTime2 = this.getNodeDigTime(node2);
       const digTime = this.getNodeDigTime(landingNode) + digTime1 + digTime2;
       neighbors.push(
-        this.makeBreakable(landingNode, this.COST_BREAK + digTime)
+        this.makeBreakable(
+          landingNode,
+          this.COST_BREAK + this.COST_UP * digTime
+        )
       );
     } else if (
       !manager.isNodeBroken(standingNode) &&
@@ -72,7 +78,10 @@ class MoveBreakForwardUp extends Move {
       const digTime1 = this.getNodeDigTime(landingNode);
       const digTime = this.getNodeDigTime(node2) + digTime1;
       neighbors.push(
-        this.makeBreakable(landingNode, this.COST_BREAK + digTime)
+        this.makeBreakable(
+          landingNode,
+          this.COST_BREAK + this.COST_UP * digTime
+        )
       );
     } else if (
       !manager.isNodeBroken(standingNode) &&
@@ -84,7 +93,10 @@ class MoveBreakForwardUp extends Move {
       this.break = true;
       const digTime = this.getNodeDigTime(landingNode);
       neighbors.push(
-        this.makeBreakable(landingNode, this.COST_BREAK + digTime)
+        this.makeBreakable(
+          landingNode,
+          this.COST_BREAK + this.COST_UP * digTime
+        )
       );
     }
   }
@@ -126,4 +138,130 @@ class MoveBreakForwardUp extends Move {
   }
 }
 
-registerMoves([MoveBreakForward, MoveBreakForwardUp]);
+class MoveBreakForwardDown extends Move {
+  addNeighbors(neighbors, config, manager) {
+    if (!config.breakBlocks) return;
+
+    let standingNode = this.down(2).forward(1);
+    let landingNode = this.down(1).forward(1);
+    let forwardNode = this.forward(1);
+    let upNode = this.up(1).forward(1);
+
+    this.config = config;
+    this.manager = manager;
+
+    if (manager.isNodeBroken(landingNode)) return;
+
+    if (manager.isNodeBroken(standingNode)) return;
+
+    if (
+      !manager.isNodeBroken(standingNode) &&
+      this.isSolid(standingNode) &&
+      this.isBreakble(forwardNode, config) &&
+      this.isBreakble(upNode, config) &&
+      this.isBreakble(landingNode, config)
+    ) {
+      this.break = true;
+      const digTime =
+        this.getNodeDigTime(landingNode) +
+        this.getNodeDigTime(forwardNode) +
+        this.getNodeDigTime(upNode);
+      neighbors.push(
+        this.makeBreakable(landingNode, this.COST_BREAK * digTime)
+      );
+    } else if (
+      !manager.isNodeBroken(standingNode) &&
+      this.isSolid(standingNode) &&
+      this.isWalkable(forwardNode) &&
+      this.isBreakble(landingNode, config)
+    ) {
+      this.break = true;
+      const digTime = this.getNodeDigTime(landingNode);
+
+      neighbors.push(
+        this.makeBreakable(landingNode, this.COST_BREAK * digTime)
+      );
+    } else if (
+      !manager.isNodeBroken(standingNode) &&
+      this.isSolid(standingNode) &&
+      this.isBreakble(landingNode, config) &&
+      this.isBreakble(forwardNode, config)
+    ) {
+      this.break = true;
+      const digTime =
+        this.getNodeDigTime(landingNode) + this.getNodeDigTime(forwardNode);
+
+      neighbors.push(
+        this.makeBreakable(landingNode, this.COST_BREAK * digTime)
+      );
+    }
+  }
+
+  addBreakNeighbors(neighbors) {
+    let landingNode = this.down(1).forward(1);
+    let forwardNode = this.forward(1);
+    let upNode = this.up(1).forward(1);
+
+    const config = this.config;
+
+    if (
+      this.isBreakble(forwardNode, config) &&
+      this.isBreakble(upNode, config) &&
+      this.isBreakble(landingNode, config)
+    ) {
+      neighbors.push({
+        parent: landingNode,
+        blocks: [upNode, forwardNode, landingNode],
+      });
+    } else if (this.isBreakble(landingNode, config)) {
+      neighbors.push({
+        parent: landingNode,
+        blocks: [landingNode],
+      });
+    } else if (
+      this.isBreakble(landingNode, config) &&
+      this.isBreakble(forwardNode, config)
+    ) {
+      neighbors.push({
+        parent: landingNode,
+        blocks: [forwardNode, landingNode],
+      });
+    }
+  }
+}
+
+class MoveBreakDown extends Move {
+  addNeighbors(neighbors, config, manager) {
+    if (!config.breakBlocks) return;
+
+    let downNode = this.down(1);
+    let standingNode = this.down(1, downNode);
+
+    this.config = config;
+    this.manager = manager;
+
+    if (manager.isNodeBroken(standingNode)) return;
+
+    if (this.isBreakble(downNode, config)) {
+      this.break = true;
+      const digTime = this.getNodeDigTime(downNode);
+      neighbors.push(
+        this.makeBreakable(
+          downNode,
+          this.COST_BREAK + this.COST_NORMAL * digTime
+        )
+      );
+    }
+  }
+  addBreakNeighbors(neighbors) {
+    let downNode = this.down(1);
+
+    const config = this.config;
+    neighbors.push({
+      parent: downNode,
+      blocks: [downNode],
+    });
+  }
+}
+
+registerMoves([MoveBreakForward, MoveBreakForwardUp, MoveBreakDown]);

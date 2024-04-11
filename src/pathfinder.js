@@ -1,6 +1,6 @@
 const { Vec3 } = require("vec3");
 const { getNeighbors2 } = require("./movement");
-const { BinarySearchTree, MinHeap } = require("./heap");
+const { BinarySearchTree, MinHeap, BinaryHeapOpenSet } = require("./heap");
 const blockMapCost = require("./blockmap");
 
 // const sleep = (ms = 2000) => {
@@ -160,7 +160,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
   let end = endPos.clone().offset(0.5, 0.5, 0.5);
   start = start.floored().offset(0.5, 0.5, 0.5);
 
-  const openList = new MinHeap();
+  const openList = new BinaryHeapOpenSet();
   const openSet = new Map();
   const closedSet = new Set();
   const nodemanager = new NodeManager();
@@ -173,7 +173,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
   startNode.hCost = euclideanDistance(startNode.worldPos, end, blockID);
   startNode.fCost = startNode.gCost + startNode.hCost;
 
-  openList.insert(startNode);
+  openList.push(startNode);
   openSet.set(defaultHash(start), startNode);
 
   let path = [];
@@ -183,15 +183,20 @@ async function Astar(start, endPos, bot, endFunc, config) {
     let startTime = performance.now();
 
     while (!openList.isEmpty()) {
-      let currentNode = openList.extractMin();
+      let currentNode = openList.pop();
 
       if (endFunc(currentNode.worldPos, end, true)) {
         return resolve({
           path: reconstructPath(currentNode),
           cost: currentNode.fCost,
           status: "found",
+          openMap: openSet,
         });
       }
+
+      // bot.chat(
+      //   `/particle dust 1 0.51 0.93 1 ${currentNode.worldPos.x} ${currentNode.worldPos.y} ${currentNode.worldPos.z} 0.1 0.1 0.1 1 5 force`
+      // );
 
       openSet.delete(defaultHash(currentNode.worldPos));
       closedSet.add(defaultHash(currentNode.worldPos));
@@ -201,7 +206,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
         horizontalPlace: horPlace,
         verticalPlace: verPlace,
         neighbor: neighbors,
-      } = getNeighbors(currentNode, bot, config, nodemanager, bot);
+      } = getNeighbors(currentNode, bot, config, nodemanager);
 
       for (const neighborData of neighbors) {
         if (closedSet.has(defaultHash(neighborData))) continue;
@@ -244,7 +249,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
         if (update) {
           openList.update(neighbor, neighbor.fCost);
         } else {
-          openList.insert(neighbor);
+          openList.push(neighbor);
           openSet.set(defaultHash(neighborData), neighbor);
         }
 
@@ -257,28 +262,9 @@ async function Astar(start, endPos, bot, endFunc, config) {
         if (neighborData.placeHorizontal) {
           neighbor.placeHere = true;
           neighbor.horizontalPlacable = neighborData.blocks;
-          nodemanager.markNodes(neighborData.blocks, "placeHorizontal")
+          nodemanager.markNodes(neighborData.blocks, "placeHorizontal");
         }
       }
-
-      // const batchSize = 10;
-      // for (let i = 0; i < neighbors.length; i += batchSize) {
-      //   const batch = neighbors.slice(i, i + batchSize);
-      //   processBatch({
-      //     batch,
-      //     breakBlocks,
-      //     closedSet,
-      //     currentNode,
-      //     end,
-      //     horPlace,
-      //     openList,
-      //     openSet,
-      //     verPlace,
-      //     bestNode,
-      //     manager: nodemanager,
-      //     world: world,
-      //   });
-      // }
 
       let currentTime = performance.now();
       if (currentTime - startTime >= config.thinkTimeout) {
@@ -289,6 +275,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
             path: reconstructPath(bestNode),
             status: "partial",
             cost: bestNode.fCost,
+            openMap: openSet,
           });
         } else {
           return resolve({
@@ -375,7 +362,7 @@ function reconstructPath(node) {
   return path;
 }
 
-function getNeighbors(node, bot, config, manager, bot) {
+function getNeighbors(node, bot, config, manager) {
   let neighbor = [];
   const neighbors = getNeighbors2(bot.world, node, config, manager, bot);
   for (const dirVec of neighbors.neighbors) {

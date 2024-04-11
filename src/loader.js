@@ -14,6 +14,12 @@ const {
 const { Cell } = require("./pathfinder");
 const AABB = require("./aabb.js");
 
+const sleep = (ms = 2000) => {
+  return new Promise((r) => {
+    setTimeout(r, ms);
+  });
+};
+
 /**
  *
  * @param {import("mineflayer").Bot} bot
@@ -28,10 +34,10 @@ function inject(bot) {
     blocksToAvoid: ["crafting_table", "chest", "furnace", "gravel", "sand"],
     blocksToStayAway: ["cactus"],
     placeBlocks: false,
-    breakBlocks: true,
+    breakBlocks: false,
     parkour: true,
     checkBreakUpNodes: true,
-    proParkour: false,
+    proParkour: true,
     maxFallDist: 3,
     maxWaterDist: 256,
     disposableBlocks: [
@@ -327,29 +333,6 @@ function inject(bot) {
         bot.ashfinder.config.disposableBlocks.includes(item.name)
       );
 
-    if (cell.breakableNeighbors.length > 0) {
-      // console.log("Break targets:", targets)
-      bot.setControlState("forward", false);
-      bot.setControlState("jump", false);
-      for (const target of cell.breakableNeighbors) {
-        if (bot.ashfinder.debug)
-          bot.chat(
-            `/particle dust 1 0 0.93 1 ${target.x} ${target.y} ${target.z} 0.1 0.1 0.1 1 5 force`
-          );
-        const block = bot.blockAt(target, false);
-
-        if (block.boundingBox === "block" && !digging) {
-          digging = true;
-
-          await autoTool(bot, block);
-
-          await bot.dig(block, true).then(() => {
-            digging = false;
-          });
-        }
-      }
-    }
-
     if (cell.horizontalPlacable.length > 0) {
       for (const target of cell.horizontalPlacable) {
         const blockBelow = bot.blockAt(
@@ -416,7 +399,8 @@ function inject(bot) {
     let dz = point.z - botPos.z;
 
     if (isPlayerOnBlock(bot.entity.position, point) && !placing && !digging) {
-      // bot.setControlState("forward", false);
+      bot.setControlState("forward", false);
+      bot.setControlState("sprint", false);
       bot.setControlState("jump", false);
 
       if (straightPathOptions) straightPathOptions.resolve();
@@ -431,10 +415,10 @@ function inject(bot) {
     }
 
     // for debuging ingame
-    if (bot.ashfinder.debug)
-      bot.chat(
-        `/particle dust 0 1 0.93 1 ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 1 5 force`
-      );
+    // if (bot.ashfinder.debug)
+    //   bot.chat(
+    //     `/particle dust 0 1 0.93 1 ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 1 5 force`
+    //   );
 
     // Activate door if standing in front of it
     const block = point !== null ? bot.blockAt(point, false) : null;
@@ -462,8 +446,8 @@ function inject(bot) {
       const yaw = Math.atan2(-dx, -dz);
       const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
 
-      bot.look(yaw, 0, true);
-      // bot.lookAt(point.offset(0, 1.1, 0), true);
+      // bot.look(yaw, 0);
+      bot.lookAt(point.offset(0, 1.1, 0), true);
     }
 
     if (!placing && !digging && !climbing) {
@@ -495,46 +479,56 @@ function inject(bot) {
           bot.setControlState("jump", false);
         }
       } else if (bot.entity.isInWater) {
-        bot.setControlState("forward", true);
-        bot.setControlState("jump", true);
-        bot.setControlState("sprint", false);
+        const yDist = dy;
+        if (yDist > 0) {
+          bot.setControlState("jump", true);
+          bot.setControlState("sprint", false);
+        }
       } else if (bot.entity.onGround && shouldWalkJump) {
         if (bot.ashfinder.debug) console.log("walk jumped");
         walkingUntillGround = true;
-        bot.setControlState("forward", true);
-        bot.setControlState("jump", true);
         bot.setControlState("sprint", false);
-        bot.setControlState("forward", false);
+        bot.setControlState("jump", true);
       } else if (bot.entity.onGround && shouldSprintJump) {
         if (bot.ashfinder.debug) console.log("sprint jumped!");
-        bot.setControlState("forward", true);
         bot.setControlState("sprint", true);
         bot.setControlState("jump", true);
-        bot.setControlState("forward", false);
       } else {
         if (bot.entity.onGround) {
           walkingUntillGround = false;
           climbing = false;
           headLocked = false;
         }
-
-        if (!bot.getControlState("forward")) {
-          bot.setControlState("forward", true);
-          bot.setControlState("sprint", true);
-        }
         bot.setControlState("jump", false);
       }
     }
 
-    // if (isBotStuck()) {
-    //   console.log("bot is stuck");
-    //   straightPathOptions = null;
-    //   complexPathPoints = null;
-    //   lastNodeTime = 0;
-    //   bot.clearControlStates();
+    if (cell.breakableNeighbors.length > 0) {
+      // console.log("Break targets:", targets)
+      bot.clearControlStates();
+      for (const target of cell.breakableNeighbors) {
+        // if (bot.ashfinder.debug)
+        //   bot.chat(
+        //     `/particle dust 1 0 0.93 1 ${target.x} ${target.y} ${target.z} 0.1 0.1 0.1 1 5 force`
+        //   );
+        const block = bot.blockAt(target, false);
 
-    //   return await path(goal);
-    // }
+        if (block.boundingBox === "block" && !digging) {
+          digging = true;
+
+          await autoTool(bot, block);
+
+          await bot.dig(block, true).then(() => {
+            digging = false;
+          });
+        }
+      }
+    }
+
+    if (!bot.getControlState("forward")) {
+      bot.setControlState("forward", true);
+      bot.setControlState("sprint", true);
+    }
 
     return false;
   }
@@ -586,7 +580,6 @@ function inject(bot) {
   }
 
   async function path(endPos, options = {}) {
-    console.log(bot.ashfinder.debug);
     if (bot.ashfinder.debug) console.log("called");
     let position = endPos.clone();
     let pathNumber = ++currentPathNumber;
@@ -606,6 +599,7 @@ function inject(bot) {
 
     if (bot.ashfinder.debug) console.log("Cost:", result.cost);
     if (bot.ashfinder.debug) console.log("Status:", result.status);
+
     current = result.status;
 
     if (currentCalculatedPathNumber > pathNumber) return;
@@ -659,6 +653,14 @@ function inject(bot) {
     }
 
     while (complexPathPoints.length > 0) {
+      // for (const cell of complexPathPoints) {
+      //   const point = cell.worldPos;
+      //   bot.chat(
+      //     `/particle dust 0 1 0.93 1 ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 1 5 force`
+      //   );
+
+      //   await sleep(10);
+      // }
       const movement = complexPathPoints[0];
 
       await straightPath({
@@ -691,46 +693,21 @@ function inject(bot) {
       bot.ashfinder.config
     );
 
-    // Check if the new path was successfully calculated
-    if (newPath.status === "partial" || newPath.status === "found") {
-      if (bot.ashfinder.debug) console.log("New path stitched successfully!");
-      // Combine the original path and the new path
+    if (newPath.status === "no path") {
       const combinedPath = originalPath.concat(newPath.path.slice(1));
 
-      if (newPath.status === "partial") {
-        if (bot.ashfinder.debug)
-          console.log("New path was partial stiching again.");
-        return await pathStich(combinedPath, bot, endPos);
-      } else
-        return {
-          path: combinedPath,
-          status: newPath.status,
-        };
-    } else {
-      if (bot.ashfinder.debug) console.log("Failed to stitch a new path.");
-      return originalPath;
+      return {
+        status: newPath.status,
+        path: combinedPath,
+      };
     }
-  }
 
-  async function calculatePathSegment(startPos, endPos) {
-    // Perform A* pathfinding from startPos to endPos
-    console.log("Calculating path segment from", startPos, "to", endPos);
+    const combinedPath = originalPath.concat(newPath.path.slice(1));
 
-    console.time("astarSegment");
-    const result = await astar(
-      startPos,
-      endPos,
-      bot,
-      isPlayerOnBlock,
-      bot.ashfinder.config
-    );
-    console.timeEnd("astarSegment");
-
-    console.log("Cost:", result.cost);
-    console.log("Status:", result.status);
-
-    // Return the calculated path segment
-    return result.path;
+    return {
+      path: combinedPath,
+      status: newPath.status,
+    };
   }
 
   async function follow(entity, options) {

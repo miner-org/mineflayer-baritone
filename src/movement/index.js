@@ -3,10 +3,10 @@ const { Vec3 } = require("vec3");
 const nbt = require("prismarine-nbt");
 
 const cardinalDirections = [
-  { x: -1, z: 0 }, // north
-  { x: 1, z: 0 }, // south
-  { x: 0, z: -1 }, // east
-  { x: 0, z: 1 }, // west
+  { x: 0, z: -1 }, // north
+  { x: 0, z: 1 }, // south
+  { x: -1, z: 0 }, // west
+  { x: 1, z: 0 }, // east
 ];
 
 function hash(node) {
@@ -86,17 +86,6 @@ class DirectionalVec3 extends Vec3 {
 }
 
 const climbableBlocks = ["ladder", "vines"];
-const interactableBlocks = [
-  "oak_door",
-  "spruce_door",
-  "birch_door",
-  "jungle_door",
-  "acaica_door",
-  "dark_oak_door",
-  "mangrove_door",
-  "warped_door",
-  "crimson_door",
-];
 const unbreakableBlocks = [
   "bedrock",
   "barrier",
@@ -244,6 +233,15 @@ class Move {
     return this.isSolid(node.offset(0, -1, 0)) && this.isWalkable(node);
   }
 
+  isFence(node) {
+    const block = this.getBlock(node);
+
+    if (!block) return false;
+
+    if (block.name.includes("fence") && block.name.includes("wall"))
+      return true;
+  }
+
   isClimbable(node) {
     const block = this.getBlock(node);
     if (!block) return false;
@@ -256,40 +254,61 @@ class Move {
     return config.interactableBlocks.includes(block.name);
   }
 
+  /**
+   *
+   * @param {number} amount
+   * @param {DirectionalVec3} node
+   * @param {object} attributes
+   * @returns {DirectionalVec3}
+   */
   forward(amount = 1, node = null, attributes) {
     if (!node) node = this.origin;
-    return node.offset(this.dir.x * amount, 0, this.dir.z * amount, attributes);
+    return node.forward(amount, attributes);
   }
-
+  /**
+   *
+   * @param {number} amount
+   * @param {DirectionalVec3} node
+   * @param {object} attributes
+   * @returns {DirectionalVec3}
+   */
   right(amount = 1, node = null, attributes) {
     if (!node) node = this.origin;
-    let offset = node.offset(
-      this.dir.z * -amount,
-      0,
-      this.dir.x * amount,
-      attributes
-    );
+    let offset = node.right(amount, attributes);
     return offset;
   }
-
+  /**
+   *
+   * @param {number} amount
+   * @param {DirectionalVec3} node
+   * @param {object} attributes
+   * @returns {DirectionalVec3}
+   */
   left(amount = 1, node = null, attributes) {
     if (!node) node = this.origin;
-    return node.offset(
-      this.dir.z * amount,
-      0,
-      this.dir.x * -amount,
-      attributes
-    );
+    return node.left(amount, attributes);
   }
-
+  /**
+   *
+   * @param {number} amount
+   * @param {DirectionalVec3} node
+   * @param {object} attributes
+   * @returns {DirectionalVec3}
+   */
   up(amount = 1, node = null, attributes) {
     if (!node) node = this.origin;
-    return node.offset(0, amount, 0, attributes);
+    return node.up(amount, attributes);
   }
-
+  /**
+   *
+   * @param {number} amount
+   * @param {DirectionalVec3} node
+   * @param {object} attributes
+   * @returns {DirectionalVec3}
+   */
   down(amount = 1, node = null, attributes) {
     if (!node) node = this.origin;
-    return node.offset(0, -amount, 0, attributes);
+    return node.down(amount, attributes);
   }
 }
 
@@ -330,7 +349,7 @@ function bestHarvestTool(bot, block) {
 function getNeighbors2(world, node, config, manager, bot) {
   let neighbors = [];
   let breakNeighbors = [];
-  let verticalPlacaNeighbors = [];
+  let verticalPlaceNeighbors = [];
   let horizontalPlaceNeighbors = [];
 
   for (const move of moveClasses) {
@@ -343,7 +362,7 @@ function getNeighbors2(world, node, config, manager, bot) {
       }
 
       if (move.placeVertical) {
-        move.addPlaceNeighbors(verticalPlacaNeighbors);
+        move.addPlaceNeighbors(verticalPlaceNeighbors);
       }
 
       if (move.placeHorizontal) {
@@ -355,7 +374,7 @@ function getNeighbors2(world, node, config, manager, bot) {
   return {
     neighbors,
     breakNeighbors,
-    verticalPlacaNeighbors,
+    verticalPlacaNeighbors: verticalPlaceNeighbors,
     horizontalPlaceNeighbors,
   };
 }

@@ -30,4 +30,4 @@ class MovePlaceForward extends Move {
   }
 }
 
-registerMoves([MovePlaceForward]);
+// registerMoves([MovePlaceForward]);

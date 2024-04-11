@@ -200,7 +200,84 @@ class MinHeap {
   }
 }
 
+class BinaryHeapOpenSet {
+  constructor() {
+    // Initialing the array heap and adding a dummy element at index 0
+    this.heap = [null];
+    this.indexMap = new Map(); // Map to store index of each value
+  }
+
+  size() {
+    return this.heap.length - 1;
+  }
+
+  isEmpty() {
+    return this.heap.length === 1;
+  }
+
+  push(val) {
+    // Inserting the new node at the end of the heap array
+    this.heap.push(val);
+    const current = this.heap.length - 1;
+    this.indexMap.set(val, current);
+    this.bubbleUp(current);
+  }
+
+  bubbleUp(current) {
+    let parent = current >>> 1;
+    while (current > 1 && this.heap[parent].fCost > this.heap[current].fCost) {
+      this.swap(parent, current);
+      current = parent;
+      parent = current >>> 1;
+    }
+  }
+
+  update(val) {
+    const current = this.indexMap.get(val);
+    if (current === undefined) return; // Value not found
+    this.bubbleUp(current);
+  }
+
+  swap(a, b) {
+    [this.heap[a], this.heap[b]] = [this.heap[b], this.heap[a]];
+    this.indexMap.set(this.heap[a], a);
+    this.indexMap.set(this.heap[b], b);
+  }
+
+  pop() {
+    if (this.isEmpty()) return null;
+    const smallest = this.heap[1];
+    this.heap[1] = this.heap.pop();
+    if (!this.isEmpty()) {
+      this.indexMap.set(this.heap[1], 1);
+      this.bubbleDown(1);
+    }
+    this.indexMap.delete(smallest);
+    return smallest;
+  }
+
+  bubbleDown(index) {
+    const size = this.size();
+    let current = index;
+    let smallerChild = current * 2;
+    const cost = this.heap[current].fCost;
+    while (smallerChild <= size) {
+      if (
+        smallerChild < size &&
+        this.heap[smallerChild].fCost > this.heap[smallerChild + 1].fCost
+      ) {
+        smallerChild++;
+      }
+      if (cost <= this.heap[smallerChild].fCost) break;
+      this.swap(current, smallerChild);
+      current = smallerChild;
+      smallerChild *= 2;
+    }
+  }
+}
+
 module.exports = {
   BinarySearchTree,
   MinHeap,
+  BinaryHeapOpenSet,
 };

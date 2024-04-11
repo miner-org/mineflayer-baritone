@@ -19,4 +19,4 @@ class MoveClimbForward extends Move {
   }
 }
 
-registerMoves([MoveClimbUp, MoveClimbForward]);
+// registerMoves([MoveClimbUp, MoveClimbForward]);

@@ -24,7 +24,7 @@ bot.once("spawn", async () => {
     const args = message.split(" ");
     const command = args.shift();
 
-    if (command === "s!test") {
+    if (command === "f!test") {
       const x = parseInt(args[0]);
       const y = parseInt(args[1]);
       const z = parseInt(args[2]);
@@ -33,7 +33,7 @@ bot.once("spawn", async () => {
       await bot.ashfinder.goto(endPos);
     }
 
-    if (command === "s!find") {
+    if (command === "f!find") {
       const blockName = args[0];
 
       if (!blockName) return bot.chat("No");
@@ -50,7 +50,7 @@ bot.once("spawn", async () => {
       await bot.ashfinder.goto(pos);
     }
 
-    if (command === "s!binfo") {
+    if (command === "f!binfo") {
       const eyePos = bot.blockAtEntityCursor(bot.players[username].entity);
 
       if (eyePos) {
@@ -58,7 +58,7 @@ bot.once("spawn", async () => {
       } else bot.chat("too far");
     }
 
-    if (command === "s!pos") {
+    if (command === "f!pos") {
       const currentPos = bot.entity.position;
       const block = bot.blockAt(currentPos.floored());
 
@@ -74,7 +74,7 @@ bot.once("spawn", async () => {
       await bot.ashfinder.follow(target);
     }
 
-    if (command === "s!random") {
+    if (command === "f!random") {
       // Make bot pathfind to random ass locations ig?
 
       const isGood = (location) => {
@@ -121,7 +121,7 @@ bot.once("spawn", async () => {
       await bot.ashfinder.goto(location);
     }
 
-    if (command === "s!sugar") {
+    if (command === "f!sugar") {
       const sugarcanePositions = bot.findBlocks({
         matching: (block) => block.name === "sugar_cane",
         count: 6,
@@ -130,7 +130,7 @@ bot.once("spawn", async () => {
       });
 
       if (sugarcanePositions.length === 0) return console.log("nah im good");
-      let uniquePositions = new Map(); 
+      let uniquePositions = new Map();
       const hash = (pos) => {
         return `${pos.x}-${pos.y}-${pos.z}`;
       };
@@ -165,10 +165,27 @@ bot.once("spawn", async () => {
       if (uniquePositions.size === 0)
         return console.log("didnt not find any bruh");
 
-      const uniqueBlocks = Array.from(uniquePositions.values()); 
+      const uniqueBlocks = Array.from(uniquePositions.values());
 
       console.log(`i found ${uniqueBlocks.length} sugarcane blocks!`);
       console.log(uniqueBlocks);
+    }
+  });
+
+  bot.on("messagestr", (msg, pos) => {
+    console.log(msg, pos);
+
+    if (pos === "game_info") {
+      const regex = /Register with \/register <password>/;
+      const regex2 = /Log in with \/login <password>/;
+
+      if (regex.test(msg)) {
+        bot.chat("/register gayman1");
+      }
+
+      if (regex2.test(msg)) {
+        bot.chat("/login gayman1");
+      }
     }
   });
 });

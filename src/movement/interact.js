@@ -17,4 +17,4 @@ class MoveInteractForward extends Move {
 }
 
 
-registerMoves([MoveInteractForward]);
+// registerMoves([MoveInteractForward]);
