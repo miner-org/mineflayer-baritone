@@ -12,3 +12,5 @@
 - run `node src/index.js host port`(outside the src folder)
 
 - Once the bot is in game i have a few commands set up the best one to use would be s!find block_name it finds the nearest block_name and creates a path to it and follows it.
+
+Github is very ceing, this is proof (**real**)

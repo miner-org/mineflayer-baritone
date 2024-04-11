@@ -2,7 +2,7 @@
   "name": "@miner-org/mineflayer-baritone",
   "version": "0.0.1",
   "description": "Minecraft pathfinder made in javascript using mineflayer and node js.",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js localhost 25565"
   },
@@ -16,6 +16,6 @@
     "require-dir": "^1.2.0"
   },
   "devDependencies": {
-    "mineflayer": "^4.14.0"
+    "mineflayer": "^4.0.0"
   }
 }
