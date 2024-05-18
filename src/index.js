@@ -4,11 +4,11 @@ const Vec3 = require("vec3").Vec3;
 const { argv } = require("process");
 
 const bot = mineflayer.createBot({
-  host: argv[2],
-  username: "Frisk",
-  port: parseInt(argv[3]),
+  host: argv[2] || "localhost",
+  username: "asgas",
+  port: parseInt(argv[3]) || 25565,
   viewDistance: "tiny",
-  version: "1.20.1",
+  version: "1.19.4"
 });
 
 bot.loadPlugin(inject);
@@ -173,7 +173,7 @@ bot.once("spawn", async () => {
   });
 
   bot.on("messagestr", (msg, pos) => {
-    console.log(msg, pos);
+    // console.log(msg, pos);
 
     if (pos === "game_info") {
       const regex = /Register with \/register <password>/;

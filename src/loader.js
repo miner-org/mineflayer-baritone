@@ -20,6 +20,13 @@ const sleep = (ms = 2000) => {
   });
 };
 
+const {
+  default: loader,
+  EPhysicsCtx,
+  EntityPhysics,
+  EntityState,
+} = require("@nxg-org/mineflayer-physics-util");
+
 /**
  *
  * @param {import("mineflayer").Bot} bot
@@ -34,7 +41,7 @@ function inject(bot) {
     blocksToAvoid: ["crafting_table", "chest", "furnace", "gravel", "sand"],
     blocksToStayAway: ["cactus"],
     placeBlocks: false,
-    breakBlocks: false,
+    breakBlocks: true,
     parkour: true,
     checkBreakUpNodes: true,
     proParkour: true,
@@ -74,6 +81,7 @@ function inject(bot) {
     thinkTimeout: 5000,
   };
   bot.ashfinder.debug = true;
+  // bot.loadPlugin(loader);
 
   let headLocked = false;
   let walkingUntillGround = false;
@@ -522,10 +530,11 @@ function inject(bot) {
             digging = false;
           });
         }
+        await new Promise((r) => setTimeout(r, 0));
       }
     }
 
-    if (!bot.getControlState("forward")) {
+    if (!bot.getControlState("forward") && !digging) {
       bot.setControlState("forward", true);
       bot.setControlState("sprint", true);
     }

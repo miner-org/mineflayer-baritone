@@ -142,57 +142,22 @@ class MoveBreakForwardDown extends Move {
   addNeighbors(neighbors, config, manager) {
     if (!config.breakBlocks) return;
 
-    let standingNode = this.down(2).forward(1);
-    let landingNode = this.down(1).forward(1);
-    let forwardNode = this.forward(1);
-    let upNode = this.up(1).forward(1);
+    let downNode = this.down(1);
 
     this.config = config;
     this.manager = manager;
 
-    if (manager.isNodeBroken(landingNode)) return;
+    if (manager.isNodeBroken(downNode)) return; // Check if the block is already broken
 
-    if (manager.isNodeBroken(standingNode)) return;
-
-    if (
-      !manager.isNodeBroken(standingNode) &&
-      this.isSolid(standingNode) &&
-      this.isBreakble(forwardNode, config) &&
-      this.isBreakble(upNode, config) &&
-      this.isBreakble(landingNode, config)
-    ) {
+    if (this.isBreakble(downNode, config)) {
       this.break = true;
-      const digTime =
-        this.getNodeDigTime(landingNode) +
-        this.getNodeDigTime(forwardNode) +
-        this.getNodeDigTime(upNode);
-      neighbors.push(
-        this.makeBreakable(landingNode, this.COST_BREAK * digTime)
-      );
-    } else if (
-      !manager.isNodeBroken(standingNode) &&
-      this.isSolid(standingNode) &&
-      this.isWalkable(forwardNode) &&
-      this.isBreakble(landingNode, config)
-    ) {
-      this.break = true;
-      const digTime = this.getNodeDigTime(landingNode);
 
+      // Mark the target block for breaking
       neighbors.push(
-        this.makeBreakable(landingNode, this.COST_BREAK * digTime)
-      );
-    } else if (
-      !manager.isNodeBroken(standingNode) &&
-      this.isSolid(standingNode) &&
-      this.isBreakble(landingNode, config) &&
-      this.isBreakble(forwardNode, config)
-    ) {
-      this.break = true;
-      const digTime =
-        this.getNodeDigTime(landingNode) + this.getNodeDigTime(forwardNode);
-
-      neighbors.push(
-        this.makeBreakable(landingNode, this.COST_BREAK * digTime)
+        this.makeBreakable(
+          downNode,
+          this.COST_BREAK + this.COST_NORMAL * this.getNodeDigTime(downNode)
+        )
       );
     }
   }
@@ -240,7 +205,9 @@ class MoveBreakDown extends Move {
     this.config = config;
     this.manager = manager;
 
-    if (manager.isNodeBroken(standingNode)) return;
+    if (manager.isNodeBroken(standingNode)) {
+      return;
+    }
 
     if (this.isBreakble(downNode, config)) {
       this.break = true;

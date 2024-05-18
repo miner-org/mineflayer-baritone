@@ -297,7 +297,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
 
 function euclideanDistance(node, goal, blockID) {
   const dx = Math.abs(goal.x - node.x);
-  const dy = Math.abs(goal.y - node.y);
+  const dy = Math.abs(goal.y - node.y); 
   const dz = Math.abs(goal.z - node.z);
 
   const cost = blockMapCost.get(blockID) ?? 1;
