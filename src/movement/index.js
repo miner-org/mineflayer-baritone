@@ -14,7 +14,7 @@ function hash(node) {
 }
 
 class DirectionalVec3 extends Vec3 {
-  constructor(x, y, z, direction, attributes) {
+  constructor(x, y, z, direction, attributes = {}) {
     super();
     this.x = x;
     this.y = y;
@@ -202,6 +202,27 @@ class Move {
     );
 
     return 1 + digTime / 1000;
+  }
+
+  getStandingBlock() {
+    const position = this.bot.entity.position.offset(0, -1, 0);
+    const block = this.world.getBlock(position);
+
+    if (!block) return null;
+
+    return block
+  }
+
+  getStandingNode() {
+    const block = this.getStandingBlock();
+
+    if (!block) return null;
+
+    const { x, y, z } = block.position;
+
+    let node = new DirectionalVec3(x, y, z, cardinalDirections[2]);
+
+    return node;
   }
 
   isJumpable(node) {

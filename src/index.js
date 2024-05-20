@@ -5,10 +5,10 @@ const { argv } = require("process");
 
 const bot = mineflayer.createBot({
   host: argv[2] || "localhost",
-  username: "asgas",
+  username: "bombo",
   port: parseInt(argv[3]) || 25565,
   viewDistance: "tiny",
-  version: "1.19.4"
+  version: "1.20.1"
 });
 
 bot.loadPlugin(inject);
@@ -184,6 +184,7 @@ bot.once("spawn", async () => {
       }
 
       if (regex2.test(msg)) {
+        bot.chat("/login gayman1");
         bot.chat("/login gayman1");
       }
     }

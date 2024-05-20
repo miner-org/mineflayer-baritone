@@ -142,54 +142,48 @@ class MoveBreakForwardDown extends Move {
   addNeighbors(neighbors, config, manager) {
     if (!config.breakBlocks) return;
 
-    let downNode = this.down(1);
-
     this.config = config;
     this.manager = manager;
 
-    if (manager.isNodeBroken(downNode)) return; // Check if the block is already broken
+    let targetNode = this.forward(1).offset(0, -1, 0);
+    let forwardNode = this.forward(1);
+    let headNode = this.forward(1).offset(0, 1, 0);
 
-    if (this.isBreakble(downNode, config)) {
+    if (manager.isNodeBroken(targetNode)) return;
+
+    let standingNode = this.down(1, targetNode);
+
+    if (manager.isNodeBroken(standingNode)) return;
+
+    // if all 3 nodes are breakable
+    if (
+      this.isBreakble(targetNode, this.config) &&
+      this.isBreakble(forwardNode, this.config) &&
+      this.isBreakble(headNode, this.config)
+    ) {
       this.break = true;
-
-      // Mark the target block for breaking
+      const digTime1 = this.getNodeDigTime(targetNode);
+      const digTime2 = this.getNodeDigTime(forwardNode);
+      const digTime = this.getNodeDigTime(headNode) + digTime1 + digTime2;
       neighbors.push(
-        this.makeBreakable(
-          downNode,
-          this.COST_BREAK + this.COST_NORMAL * this.getNodeDigTime(downNode)
-        )
+        this.makeBreakable(targetNode, this.COST_BREAK + this.COST_UP * digTime)
       );
     }
   }
 
   addBreakNeighbors(neighbors) {
-    let landingNode = this.down(1).forward(1);
+    let targetNode = this.forward(1).offset(0, -1, 0);
     let forwardNode = this.forward(1);
-    let upNode = this.up(1).forward(1);
-
-    const config = this.config;
+    let headNode = this.forward(1).offset(0, 1, 0);
 
     if (
-      this.isBreakble(forwardNode, config) &&
-      this.isBreakble(upNode, config) &&
-      this.isBreakble(landingNode, config)
+      this.isBreakble(targetNode, this.config) &&
+      this.isBreakble(forwardNode, this.config) &&
+      this.isBreakble(headNode, this.config)
     ) {
       neighbors.push({
-        parent: landingNode,
-        blocks: [upNode, forwardNode, landingNode],
-      });
-    } else if (this.isBreakble(landingNode, config)) {
-      neighbors.push({
-        parent: landingNode,
-        blocks: [landingNode],
-      });
-    } else if (
-      this.isBreakble(landingNode, config) &&
-      this.isBreakble(forwardNode, config)
-    ) {
-      neighbors.push({
-        parent: landingNode,
-        blocks: [forwardNode, landingNode],
+        parent: targetNode,
+        blocks: [headNode, forwardNode, targetNode],
       });
     }
   }
@@ -200,7 +194,7 @@ class MoveBreakDown extends Move {
     if (!config.breakBlocks) return;
 
     let downNode = this.down(1);
-    let standingNode = this.down(1, downNode);
+    let standingNode = this.up(1, downNode);
 
     this.config = config;
     this.manager = manager;
@@ -231,4 +225,4 @@ class MoveBreakDown extends Move {
   }
 }
 
-registerMoves([MoveBreakForward, MoveBreakForwardUp, MoveBreakDown]);
+registerMoves([MoveBreakForward, MoveBreakForwardUp, MoveBreakForwardDown]);
