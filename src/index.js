@@ -5,7 +5,7 @@ const { argv } = require("process");
 
 const bot = mineflayer.createBot({
   host: argv[2] || "localhost",
-  username: "bombo",
+  username: "Chisomo",
   port: parseInt(argv[3]) || 25565,
   viewDistance: "tiny",
   version: "1.20.1"
