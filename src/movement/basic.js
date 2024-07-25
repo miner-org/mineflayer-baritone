@@ -3,7 +3,7 @@ const { Move, registerMoves } = require("./");
 class MoveForward extends Move {
   addNeighbors(neighbors, config, manager) {
     let forwardNode = this.forward(1);
-    let standingNode = this.down(1).forward(1);
+    let standingNode = this.down(1, forwardNode);
     this.config = config;
 
     // cuz its air by now
@@ -31,9 +31,9 @@ class MoveDiagonal extends Move {
 
 class MoveForwardUp extends Move {
   addNeighbors(neighbors, config, manager) {
-    let standingNode = this.forward(1);
     let landingNode = this.up(1).forward(1);
-    let node2 = this.up(2).forward(1);
+    let standingNode = this.down(1, landingNode);
+    let node2 = this.up(2, landingNode);
     let upNode = this.up(2);
 
     this.config = config;

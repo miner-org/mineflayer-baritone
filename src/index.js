@@ -8,7 +8,7 @@ const bot = mineflayer.createBot({
   username: "Chisomo",
   port: parseInt(argv[3]) || 25565,
   viewDistance: "tiny",
-  version: "1.20.1"
+  version: "1.18.2",
 });
 
 bot.loadPlugin(inject);
@@ -23,6 +23,12 @@ bot.once("spawn", async () => {
 
     const args = message.split(" ");
     const command = args.shift();
+
+    if (command === "f!stop") {
+      bot.clearControlStates();
+      bot.setControlState("forward", false);
+      bot.setControlState("sprint", false);
+    }
 
     if (command === "f!test") {
       const x = parseInt(args[0]);
@@ -48,6 +54,9 @@ bot.once("spawn", async () => {
       const pos = block.position.clone();
 
       await bot.ashfinder.goto(pos);
+      bot.clearControlStates();
+      bot.setControlState("forward", false);
+      bot.setControlState("sprint", false);
     }
 
     if (command === "f!binfo") {

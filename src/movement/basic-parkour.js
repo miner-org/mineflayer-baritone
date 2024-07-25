@@ -15,7 +15,7 @@ class MoveParkour1 extends Move {
 
     if (!this.isAir(airNode)) return;
 
-    let standingNode = this.forward(2).down(1);
+    let standingNode = this.down(1, landingNode)
     if (manager.isNodeBroken(standingNode)) return;
 
     if (

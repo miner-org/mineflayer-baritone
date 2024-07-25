@@ -687,6 +687,8 @@ function inject(bot) {
     if (bot.ashfinder.debug) console.log("Done!!");
     complexPathPoints = null;
     bot.clearControlStates();
+    bot.setControlState("forward", false);
+    bot.setControlState("sprint", false);
   }
 
   async function pathStich(originalPath, bot, endPos) {

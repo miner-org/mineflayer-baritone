@@ -303,7 +303,7 @@ function euclideanDistance(node, goal, blockID) {
   const cost = blockMapCost.get(blockID) ?? 1;
   // console.log(`Block: ${blockID}, Cost: ${cost}`)
 
-  return Math.sqrt(dx * dx + dy * dy + dz * dz) * cost;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz) * cost * 1.2;
 }
 
 function manhattanDistance(node, goal) {
