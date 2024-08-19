@@ -407,8 +407,8 @@ function inject(bot) {
     let dz = point.z - botPos.z;
 
     if (isPlayerOnBlock(bot.entity.position, point) && !placing && !digging) {
-      bot.setControlState("forward", false);
-      bot.setControlState("sprint", false);
+      // bot.setControlState("forward", false);
+      // bot.setControlState("sprint", false);
       bot.setControlState("jump", false);
 
       if (straightPathOptions) straightPathOptions.resolve();
@@ -445,7 +445,7 @@ function inject(bot) {
     }
 
     // ladders
-    let ladderBlock = await bot.world.getBlock(point);
+    let ladderBlock = bot.world.getBlock(point);
 
     let shouldWalkJump = canWalkJump(point);
     let shouldSprintJump = canSprintJump(point);
@@ -536,8 +536,9 @@ function inject(bot) {
 
     if (!bot.getControlState("forward") && !digging) {
       bot.setControlState("forward", true);
-      bot.setControlState("sprint", true);
     }
+
+    bot.setControlState("sprint", true);
 
     return false;
   }
@@ -620,46 +621,9 @@ function inject(bot) {
     complexPathPoints = result.path;
     bot.ashfinder.path = complexPathPoints;
 
-    vertical = complexPathPoints
-      .filter((cell) => cell.placeHere)
-      .map((cell) => cell.verticalPlacable);
-
-    horizontal = complexPathPoints
-      .filter((cell) => cell.placeHere)
-      .map((cell) => cell.horizontalPlacable);
-
-    breakBlocks = complexPathPoints
-      .filter((cell) => cell.breakThis)
-      .map((cell) => cell.breakableNeighbors);
+    extractPathPoints();
 
     if (bot.ashfinder.debug) console.log("Break: ", breakBlocks);
-
-    if (result.status === "partial") {
-      const { path, status } = await pathStich(complexPathPoints, bot, endPos);
-
-      complexPathPoints = path;
-
-      if (!complexPathPoints) {
-        if (bot.ashfinder.debug)
-          console.log("Failed to stitch path. Terminating.");
-        return;
-      }
-
-      currentStatus = status;
-
-      bot.ashfinder.path = complexPathPoints;
-      vertical = complexPathPoints
-        .filter((cell) => cell.placeHere)
-        .map((cell) => cell.verticalPlacable);
-
-      horizontal = complexPathPoints
-        .filter((cell) => cell.placeHere)
-        .map((cell) => cell.horizontalPlacable);
-
-      breakBlocks = complexPathPoints
-        .filter((cell) => cell.breakThis)
-        .map((cell) => cell.breakableNeighbors);
-    }
 
     while (complexPathPoints.length > 0) {
       // for (const cell of complexPathPoints) {
@@ -684,11 +648,40 @@ function inject(bot) {
       complexPathPoints.shift();
     }
 
+    if (result.status === "partial") {
+      bot.clearControlStates();
+      bot.setControlState("forward", false);
+      bot.setControlState("sprint", false);
+      // Recalculate path from current position
+      if (bot.ashfinder.debug)
+        console.log("Recalculating path from current position...");
+
+      return await path(endPos, options); // Recursively call path with the new starting position
+    }
+
     if (bot.ashfinder.debug) console.log("Done!!");
+    resetPathingState()
+  }
+
+  function resetPathingState() {
     complexPathPoints = null;
     bot.clearControlStates();
     bot.setControlState("forward", false);
     bot.setControlState("sprint", false);
+  }
+
+  function extractPathPoints() {
+    vertical = complexPathPoints
+      .filter((cell) => cell.placeHere)
+      .map((cell) => cell.verticalPlacable);
+
+    horizontal = complexPathPoints
+      .filter((cell) => cell.placeHere)
+      .map((cell) => cell.horizontalPlacable);
+
+    breakBlocks = complexPathPoints
+      .filter((cell) => cell.breakThis)
+      .map((cell) => cell.breakableNeighbors);
   }
 
   async function pathStich(originalPath, bot, endPos) {

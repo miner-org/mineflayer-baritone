@@ -314,38 +314,6 @@ function manhattanDistance(node, goal) {
   );
 }
 
-function combinedHeuristic(node, goal, weight) {
-  const euclidean = euclideanDistance(node, goal);
-  const manhattan = manhattanDistance(node, goal);
-  return weight * euclidean + (1 - weight) * manhattan;
-}
-
-function octileHeuristic3D(node, goal, cost) {
-  const dx = Math.abs(node.x - goal.x);
-  const dy = Math.abs(node.y - goal.y);
-  const dz = Math.abs(node.z - goal.z);
-
-  const minDeltaXY = Math.min(dx, dy);
-  const maxDeltaXY = Math.max(dx, dy);
-
-  // Octile Heuristic formula considering 3D distance
-  return (
-    cost * (maxDeltaXY + Math.sqrt(2) - 1) + dz + (minDeltaXY - maxDeltaXY)
-  );
-}
-
-function yoinkedHeuristic(node, endPos) {
-  const dx = endPos.x - node.x;
-  const dy = endPos.y - node.y;
-  const dz = endPos.z - node.z;
-  return distanceXZ(dx, dz) + Math.abs(dy);
-}
-
-function distanceXZ(dx, dz) {
-  dx = Math.abs(dx);
-  dz = Math.abs(dz);
-  return Math.abs(dx - dz) + Math.min(dx, dz) * Math.SQRT2;
-}
 
 function reconstructPath(node) {
   const path = [];
