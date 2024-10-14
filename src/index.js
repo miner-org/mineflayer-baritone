@@ -2,6 +2,8 @@ const mineflayer = require("mineflayer");
 const inject = require("./loader");
 const Vec3 = require("vec3").Vec3;
 const { argv } = require("process");
+const { elytrafly } = require("mineflayer-elytrafly");
+
 
 const bot = mineflayer.createBot({
   host: argv[2] || "localhost",
@@ -12,6 +14,7 @@ const bot = mineflayer.createBot({
 });
 
 bot.loadPlugin(inject);
+bot.loadPlugin(elytrafly);
 
 let endPos;
 bot.once("spawn", async () => {
@@ -128,6 +131,15 @@ bot.once("spawn", async () => {
       }
 
       await bot.ashfinder.goto(location);
+    }
+
+    if (command === "f!elytra") {
+      const x = parseInt(args[0]);
+      const y = parseInt(args[1]);
+      const z = parseInt(args[2]);
+      endPos = new Vec3(x, y, z);
+
+      await bot.elytrafly.elytraFlyTo(endPos);      
     }
 
     if (command === "f!sugar") {

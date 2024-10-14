@@ -68,6 +68,76 @@ class Cell {
     this.placeHere = false;
     this.breakThis = false;
   }
+
+  add(offset) {
+    return new Cell(this.worldPos.add(offset), this.cost);
+  }
+}
+
+class Goal {
+  constructor(worldPos) {
+    this.worldPos = worldPos;
+    this.x = worldPos.x;
+    this.y = worldPos.y;
+    this.z = worldPos.z;
+  }
+
+  equals(goal) {
+    return (
+      this.x === goal.x &&
+      this.y === goal.y &&
+      this.z === goal.z
+    );
+  }
+
+  clone() {
+    return new Goal(this.worldPos);
+  }
+
+  reached(position) {
+    return (
+      position.x === this.x &&
+      position.y === this.y &&
+      position.z === this.z
+    );
+  }
+}
+
+class GoalNear extends Goal {
+  constructor(x, y, z, range) {
+    super(new Vec3(x, y, z));
+    this.range = range;
+  }
+
+  clone() {
+    return new GoalNear(this.x, this.y, this.z, this.range);
+  }
+
+  reached(position) {
+    return (
+      position.x >= this.x - this.range &&
+      position.x <= this.x + this.range &&
+      position.y >= this.y - this.range &&
+      position.y <= this.y + this.range &&
+      position.z >= this.z - this.range &&
+      position.z <= this.z + this.range
+    );
+  }
+}
+
+class GoalXZ extends Goal {
+  constructor(x, z) {
+    super(new Vec3(x, 0, z));
+    this.x = x;
+    this.z = z;
+  }  
+
+  reached(position) {
+    return (
+      position.x === this.x &&
+      position.z === this.z
+    );
+  }
 }
 
 function processBatch({
@@ -181,8 +251,16 @@ async function Astar(start, endPos, bot, endFunc, config) {
 
   return new Promise(async (resolve) => {
     let startTime = performance.now();
+    let lastSleep = performance.now()
 
     while (!openList.isEmpty()) {
+      if (performance.now() - lastSleep >= 50) {
+				// need to do this so the bot doesnt lag
+				await new Promise(r => setTimeout(r, 0))
+				lastSleep = performance.now()
+			}
+
+
       let currentNode = openList.pop();
 
       if (endFunc(currentNode.worldPos, end, true)) {
@@ -284,8 +362,6 @@ async function Astar(start, endPos, bot, endFunc, config) {
           });
         }
       }
-
-      await new Promise((r) => setTimeout(r, 0));
     }
 
     return resolve({
@@ -294,6 +370,7 @@ async function Astar(start, endPos, bot, endFunc, config) {
     });
   });
 }
+
 
 function euclideanDistance(node, goal, blockID) {
   const dx = Math.abs(goal.x - node.x);
@@ -329,6 +406,8 @@ function reconstructPath(node) {
 
   return path;
 }
+
+
 
 function getNeighbors(node, bot, config, manager) {
   let neighbor = [];

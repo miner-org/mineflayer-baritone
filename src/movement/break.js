@@ -179,7 +179,7 @@ class MoveBreakForwardDown extends Move {
     this.config = config;
     this.manager = manager;
 
-    let targetNode = this.down(1).forward(1);
+    let targetNode = this.forward(1).offset(0, -1, 0);
     let forwardNode = this.up(1, targetNode);
     let headNode = this.up(2, targetNode);
 
@@ -196,10 +196,7 @@ class MoveBreakForwardDown extends Move {
       this.break = true;
       const digTime = this.getNodeDigTime(targetNode);
       neighbors.push(
-        this.makeBreakable(
-          targetNode,
-          (this.COST_BREAK + this.COST_UP) * digTime
-        )
+        this.makeBreakable(targetNode, this.COST_BREAK * this.COST_UP * digTime)
       );
     }
 
@@ -212,10 +209,7 @@ class MoveBreakForwardDown extends Move {
       const digTime =
         this.getNodeDigTime(forwardNode) + this.getNodeDigTime(targetNode);
       neighbors.push(
-        this.makeBreakable(
-          targetNode,
-          (this.COST_BREAK + this.COST_UP) * digTime
-        )
+        this.makeBreakable(targetNode, this.COST_BREAK * this.COST_UP * digTime)
       );
     }
   }

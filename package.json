@@ -15,6 +15,7 @@
   "dependencies": {
     "@nxg-org/mineflayer-physics-util": "github:nxg-org/mineflayer-physics-utils",
     "mineflayer": "^4.20.0",
+    "mineflayer-elytrafly": "^1.4.6",
     "require-dir": "^1.2.0"
   }
 }
