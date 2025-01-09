@@ -157,8 +157,8 @@ function processBatch({
 }
 
 async function Astar(start, endPos, bot, endFunc, config) {
-  let end = endPos.clone().offset(0.5, 0.5, 0.5);
-  start = start.floored().offset(0.5, 0.5, 0.5);
+  let end = endPos.clone().offset(0.5, 0, 0.5);
+  start = start.floored().offset(0.5, 0, 0.5);
 
   const openList = new BinaryHeapOpenSet();
   const openSet = new Map();
@@ -185,7 +185,10 @@ async function Astar(start, endPos, bot, endFunc, config) {
     while (!openList.isEmpty()) {
       let currentNode = openList.pop();
 
-      if (endFunc(currentNode.worldPos, end, true)) {
+      if (endFunc(currentNode.worldPos, end)) {
+        console.log(currentNode.worldPos);
+        console.log(end);
+
         return resolve({
           path: reconstructPath(currentNode),
           cost: currentNode.fCost,
@@ -306,12 +309,15 @@ function euclideanDistance(node, goal, blockID) {
   return Math.sqrt(dx * dx + dy * dy + dz * dz) * cost * 1.2;
 }
 
-function manhattanDistance(node, goal) {
-  return (
-    Math.abs(goal.x - node.x) +
-    Math.abs(goal.y - node.y) +
-    Math.abs(goal.z - node.z)
-  );
+function manhattanDistance(node, goal, blockID) {
+  const dx = Math.abs(goal.x - node.x);
+  const dy = Math.abs(goal.y - node.y);
+  const dz = Math.abs(goal.z - node.z);
+
+  const cost = blockMapCost.get(blockID) ?? 1;
+
+
+  return (dx + dy + dz) * cost;
 }
 
 

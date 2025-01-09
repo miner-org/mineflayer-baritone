@@ -15,10 +15,7 @@ function hash(node) {
 
 class DirectionalVec3 extends Vec3 {
   constructor(x, y, z, direction, attributes = {}) {
-    super();
-    this.x = x;
-    this.y = y;
-    this.z = z;
+    super(x, y, z); 
     this.dir = direction;
     this.attributes = attributes;
     this.blocks = [];
@@ -210,7 +207,7 @@ class Move {
 
     if (!block) return null;
 
-    return block
+    return block;
   }
 
   getStandingNode() {
@@ -391,6 +388,11 @@ function getNeighbors2(world, node, config, manager, bot) {
       }
     }
   }
+
+  neighbors = neighbors.filter(
+    (neighbor, index, self) =>
+      index === self.findIndex((n) => n.equals(neighbor))
+  );
 
   return {
     neighbors,

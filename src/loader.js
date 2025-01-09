@@ -13,6 +13,7 @@ const {
 } = require("./utils.js");
 const { Cell } = require("./pathfinder");
 const AABB = require("./aabb.js");
+const { Goal } = require("./goal.js");
 
 const sleep = (ms = 2000) => {
   return new Promise((r) => {
@@ -78,7 +79,7 @@ function inject(bot) {
       "warped_gate",
       "crimson_gate",
     ],
-    thinkTimeout: 5000,
+    thinkTimeout: 10000,
   };
   bot.ashfinder.debug = true;
   // bot.loadPlugin(loader);
@@ -95,13 +96,11 @@ function inject(bot) {
   let currentCalculatedPathNumber = 0;
   let complexPathPoints = [];
   let straightPathOptions = null;
+  let followOptions = null;
   let digging = false;
   let interacting = false;
-  let lastNodeTime = 0;
   let targetEntity = null;
-  let goal = null;
-  let lastFollowed = performance.now();
-  let calculating = false;
+  let following = false;
 
   /**
    * Checks if the player is on a given block position.
@@ -111,18 +110,21 @@ function inject(bot) {
    * @returns {boolean} - Whether the player is on the block or not.
    */
   function isPlayerOnBlock(playerPosition, blockPosition, onGround = false) {
-    if (!blockPosition) return false; // There's no target position
+    if (!blockPosition) return false;
 
     const delta = blockPosition.minus(playerPosition);
 
+    const horizontalTolerance = 0.5; // Loosen horizontal bounds
+    const verticalTolerance = 0.05; // Small epsilon for vertical checks
+
     const isOnBlock =
-      (Math.abs(delta.x) <= 0.35 &&
-        Math.abs(delta.z) < 0.35 &&
-        Math.abs(delta.y) <= 1) ||
+      (Math.abs(delta.x) <= horizontalTolerance &&
+        Math.abs(delta.z) <= horizontalTolerance &&
+        Math.abs(delta.y) <= 1) || // Allow standing above block by up to 1 block
       (onGround &&
-        Math.abs(delta.x) <= 0.35 &&
-        Math.abs(delta.z) <= 0.35 &&
-        Math.abs(delta.y) === 0);
+        Math.abs(delta.x) <= horizontalTolerance &&
+        Math.abs(delta.z) <= horizontalTolerance &&
+        Math.abs(delta.y) < verticalTolerance); // Use epsilon instead of strict equality
 
     return isOnBlock;
   }
@@ -589,21 +591,57 @@ function inject(bot) {
     });
   }
 
-  async function path(endPos, options = {}) {
+  /**
+   *@param {Goal} goal - The goal to reach.
+   *@return {function} A function that returns whether the goal has been reached.
+   */
+  function createEndFunc(goal) {
+    return (currentPosition, targetPosition) => {
+      return goal.isReached(currentPosition);
+    };
+  }
+
+	function refinePath(path, bot) {
+	  const refined = [];
+	  for (let i = 0; i < path.length - 1; i++) {
+		const current = path[i].worldPos;
+		const next = path[i + 1].worldPos;
+
+		const dx = Math.abs(current.x - next.x);
+		const dy = next.y - current.y; // Vertical difference
+		const dz = Math.abs(current.z - next.z);
+
+		// Add nodes where vertical changes occur or where large distances are present
+		if (dx > 1 || dz > 1 || Math.abs(dy) > 0) {
+		  refined.push(path[i]);
+
+		  // Add intermediate points for jumps or falls
+		  if (dy > 1) {
+			refined.push(new Cell(current.offset(0, 1, 0))); // Add jump step
+		  } else if (dy < 0) {
+			refined.push(new Cell(next.offset(0, -1, 0))); // Add fall step
+		  }
+		}
+	  }
+	  refined.push(path[path.length - 1]); // Ensure the last node is included
+	  return refined;
+	}
+
+  async function path(goal, options = {}) {
     if (bot.ashfinder.debug) console.log("called");
-    let position = endPos.clone();
+    let position = goal.position.clone().floored();
     let pathNumber = ++currentPathNumber;
     let currentStatus = "";
-    goal = position.clone();
     calculating = true;
     continuousPath = true;
-    const start = bot.entity.position.clone();
+    const start = bot.entity.position.clone().floored();
+    console.log("Start:", start.toString());
 
     const result = await astar(
       start,
       position,
       bot,
-      isPlayerOnBlock,
+      createEndFunc(goal),
       bot.ashfinder.config
     );
 
@@ -618,7 +656,7 @@ function inject(bot) {
 
     calculating = false;
 
-    complexPathPoints = result.path;
+    complexPathPoints = result.path
     bot.ashfinder.path = complexPathPoints;
 
     extractPathPoints();
@@ -649,18 +687,15 @@ function inject(bot) {
     }
 
     if (result.status === "partial") {
-      bot.clearControlStates();
-      bot.setControlState("forward", false);
-      bot.setControlState("sprint", false);
-      // Recalculate path from current position
+      resetPathingState();
       if (bot.ashfinder.debug)
         console.log("Recalculating path from current position...");
 
-      return await path(endPos, options); // Recursively call path with the new starting position
+      return await path(goal, options);
     }
 
     if (bot.ashfinder.debug) console.log("Done!!");
-    resetPathingState()
+    resetPathingState();
   }
 
   function resetPathingState() {
@@ -716,7 +751,38 @@ function inject(bot) {
 
   async function follow(entity, options) {
     targetEntity = entity;
-    bot.ashfinder.pathOptions = options;
+    followOptions = options;
+  }
+
+  async function followTick() {
+    if (!targetEntity) return;
+
+    //First we check distance to targetEntity
+    const distance = bot.entity.position.distanceTo(targetEntity.position);
+
+    if (distance <= followOptions.minDistance) {
+      bot.clearControlStates();
+      resetPathingState();
+      return;
+    }
+
+    if (distance >= followOptions.maxDistance) {
+      bot.clearControlStates();
+      resetPathingState();
+      return;
+    }
+
+    if (following) {
+      return;
+    }
+
+    following = true;
+
+    const goal = targetEntity.position.clone().floored();
+
+    await path(goal, {});
+
+    following = false;
   }
 
   function arraysMatch(arr1, arr2) {
@@ -736,13 +802,12 @@ function inject(bot) {
   }
 
   /**
-   * Generate the function comment for the given function body.
    *
-   * @param {Vec3} position - The position to go to.
+   * @param {Goal} goal - The goal to go to.
    * @return {Promise} A promise that resolves when the function is complete.
    */
-  bot.ashfinder.goto = async (position) => {
-    await path(position, {});
+  bot.ashfinder.goto = async (goal) => {
+    await path(goal, {});
   };
 
   bot.ashfinder.stop = async () => {
@@ -753,10 +818,14 @@ function inject(bot) {
     complexPathPoints = null;
     straightPathOptions = null;
     targetEntity = null;
+    followOptions = null;
     bot.clearControlStates();
   };
 
-  bot.ashfinder.follow = async (entity, options = {}) => {
+  bot.ashfinder.follow = async (
+    entity,
+    options = { minDistance: 3, maxDistance: 50 }
+  ) => {
     /*
 		Options:
 		- maxDistance
@@ -787,6 +856,7 @@ function inject(bot) {
   }
 
   bot.on("physicsTick", moveTick);
+  bot.on("physicsTick", followTick);
   // bot.on("move", getSpeed);
 }
 

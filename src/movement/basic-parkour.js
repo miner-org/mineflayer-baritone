@@ -15,7 +15,7 @@ class MoveParkour1 extends Move {
 
     if (!this.isAir(airNode)) return;
 
-    let standingNode = this.down(1, landingNode)
+    let standingNode = this.down(1, landingNode);
     if (manager.isNodeBroken(standingNode)) return;
 
     if (
@@ -91,11 +91,7 @@ class MoveForwardParkour3 extends Move {
     let airNode2 = this.down(1, spaceNode2);
     let airNode3 = this.down(1, spaceNode3);
 
-    if (
-      (!this.isAir(airNode1) &&
-        !this.isAir(airNode2) &&
-        !this.isAir(airNode3))
-    )
+    if (!this.isAir(airNode1) && !this.isAir(airNode2) && !this.isAir(airNode3))
       return;
 
     let standingNode = this.forward(4).down(1);
@@ -307,6 +303,104 @@ class MoveForwardParkourDown3 extends Move {
   }
 }
 
+class MoveDiagonalParkour extends Move {
+  addNeighbors(neighbors, config, manager) {
+    if (!config.parkour) return;
+    let landingNode = this.right(2).forward(2);
+    let standingNode = this.down(1, landingNode);
+
+    if (manager.isNodeBroken(standingNode)) return;
+
+    let isRightWalkable1 = this.isWalkable(this.right(1).up(1));
+    let isForwardWalkable1 = this.isWalkable(this.forward(1).up(1));
+    let isRightWalkable2 = this.isWalkable(this.right(2).forward(1).up(1));
+    let isForwardWalkable2 = this.isWalkable(this.right(1).forward(2).up(1));
+    if (
+      (!isRightWalkable1 && !isForwardWalkable1) ||
+      (!isRightWalkable2 && !isForwardWalkable2)
+    )
+      return [];
+
+    if (this.isStandable(landingNode)) {
+      neighbors.push(this.makeMovement(landingNode, 3));
+    }
+  }
+}
+
+class MoveDiagonalUpParkour extends Move {
+  addNeighbors(neighbors, config, manager) {
+    if (!config.parkour) return;
+    let landingNode = this.right(2).forward(2).up(1);
+
+    let standingNode = this.down(1, landingNode);
+    if (manager.isNodeBroken(standingNode)) return;
+
+    let spaceNode1 = this.right(1).forward(1).up(1);
+
+    let isRightWalkable1 = this.isWalkable(this.right(1).up(1));
+    let isForwardWalkable1 = this.isWalkable(this.forward(1).up(1));
+    let isRightWalkable2 = this.isWalkable(this.right(2).forward(1).up(2));
+    let isForwardWalkable2 = this.isWalkable(this.right(1).forward(2).up(2));
+    if (
+      this.isWalkable(spaceNode1) &&
+      (isRightWalkable1 || isForwardWalkable1) &&
+      (isRightWalkable2 || isForwardWalkable2) &&
+      this.isStandable(landingNode)
+    ) {
+      neighbors.push(this.makeMovement(landingNode, 3));
+    }
+  }
+}
+
+class MoveDiagonalDownParkour extends Move {
+  addNeighbors(neighbors, config, manager) {
+    if (!config.parkour) return;
+    let landingNode = this.right(2).forward(2).down(1);
+
+    let standingNode = this.down(1, landingNode);
+    if (manager.isNodeBroken(standingNode)) return;
+
+    let spaceNode1 = this.right(1).forward(1).down(1);
+
+    let isRightWalkable1 = this.isWalkable(this.right(1).up(1));
+    let isForwardWalkable1 = this.isWalkable(this.forward(1).up(1));
+    let isRightWalkable2 = this.isJumpable(this.right(2).forward(1).down(1));
+    let isForwardWalkable2 = this.isJumpable(this.right(1).forward(2).down(1));
+
+    if (
+      this.isWalkable(spaceNode1) &&
+      ((isRightWalkable1 && isRightWalkable2) ||
+        (isForwardWalkable1 && isForwardWalkable2)) &&
+      this.isStandable(landingNode)
+    ) {
+      neighbors.push(this.makeMovement(landingNode, 2));
+    }
+  }
+}
+
+class MoveSemiDiagonalParkour extends Move {
+  /*
+	-X
+	--
+	X-
+	(X is a solid block, - is air)
+	*/
+  addNeighbors(neighbors, config, manager) {
+    if (!config.parkour) return;
+    let landingNode = this.right(1).forward(2);
+    let standingNode = this.down(1, landingNode);
+    if (manager.isNodeBroken(standingNode)) return;
+
+    let isRightWalkable1 = this.isJumpable(this.right(1).up(1));
+    let isForwardWalkable1 = this.isJumpable(this.forward(1).up(1));
+    if (!isRightWalkable1 && !isForwardWalkable1) return [];
+
+    if (this.isStandable(landingNode)) {
+      neighbors.push(this.makeMovement(landingNode, 3));
+    }
+  }
+}
+
 registerMoves([
   // parkour
   MoveParkour1,
@@ -322,4 +416,10 @@ registerMoves([
   MoveForwardParkourDown1,
   MoveForwardParkourDown2,
   MoveForwardParkourDown3,
+
+  // diagonal parkour
+  MoveDiagonalParkour,
+  MoveDiagonalUpParkour,
+  MoveDiagonalDownParkour,
+  MoveSemiDiagonalParkour,
 ]);
