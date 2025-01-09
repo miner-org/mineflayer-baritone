@@ -17,11 +17,11 @@ class MoveForward extends Move {
 
 class MoveDiagonal extends Move {
   addNeighbors(neighbors, config, manager) {
-    let targetNode = this.right(1).forward(1);
     let forwardNode = this.forward(1);
     let rightNode = this.right(1);
+    let targetNode = this.right(1, forwardNode);
 
-    if (!this.isWalkable(forwardNode) && !this.isWalkable(rightNode)) return;
+    if (!this.isStandable(forwardNode) && !this.isStandable(rightNode)) return;
 
     if (this.isStandable(targetNode)) {
       neighbors.push(this.makeMovement(targetNode, this.COST_DIAGONAL));
@@ -33,15 +33,14 @@ class MoveForwardUp extends Move {
   addNeighbors(neighbors, config, manager) {
     let landingNode = this.up(1).forward(1);
     let standingNode = this.down(1, landingNode);
-    let node2 = this.up(2, landingNode);
-    let upNode = this.up(2);
+    let upNode = this.up(1);
 
     this.config = config;
     this.manager = manager;
     if (manager.isNodeBroken(standingNode)) return;
 
     if (
-      this.isAir(upNode) &&
+      this.isWalkable(upNode) &&
       this.isStandable(landingNode) &&
       !this.isFence(standingNode)
     ) {
@@ -52,23 +51,21 @@ class MoveForwardUp extends Move {
 
 class MoveForwardDown extends Move {
   addNeighbors(neighbors, config) {
-    let landingNode = this.down(1).forward(1);
     let walkableNode = this.forward(1);
+    let landingNode = walkableNode;
 
     if (!this.isWalkable(walkableNode)) return;
-
-    if (!this.isWalkable(landingNode)) return;
 
     let isSafe = false;
     let cost = 0;
     for (let i = 0; i < config.maxFallDist; i++) {
+      landingNode = landingNode.down(1);
+      cost += 1;
+
       if (this.isStandable(landingNode)) {
         isSafe = true;
         break;
       }
-
-      cost += 1;
-      landingNode = landingNode.down(1);
     }
 
     if (
@@ -118,10 +115,26 @@ class MoveForwardDownWater extends Move {
   }
 }
 
+class MoveDiagonalUp extends Move {
+  addNeighbors(neighbors) {
+    let upNode = this.up(1);
+    let landingNode = this.up(1).forward(1).right(1);
+
+    let isRightWalkable = this.isJumpable(this.right(1).up(1));
+    let isForwardWalkable = this.isJumpable(this.forward(1).up(1));
+    if (!isRightWalkable && !isForwardWalkable) return [];
+
+    if (this.isWalkable(upNode) && this.isStandable(landingNode)) {
+      neighbors.push(this.makeMovement(landingNode, this.COST_DIAGONAL * this.COST_UP));
+    }
+  }
+}
+
 registerMoves([
   MoveForward,
   MoveForwardUp,
   MoveForwardDown,
   MoveDiagonal,
   MoveForwardDownWater,
+  MoveDiagonalUp
 ]);

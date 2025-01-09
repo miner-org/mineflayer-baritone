@@ -10,6 +10,7 @@ const {
   simulateUntil,
   isPointOnPath,
   getController,
+  distanceFromLine,
 } = require("./utils.js");
 const { Cell } = require("./pathfinder");
 const AABB = require("./aabb.js");
@@ -91,6 +92,7 @@ function inject(bot) {
   let breakBlocks = [];
   let vertical = [];
   let horizontal = [];
+  let flying = false;
 
   let currentPathNumber = 0;
   let currentCalculatedPathNumber = 0;
@@ -127,6 +129,48 @@ function inject(bot) {
         Math.abs(delta.y) < verticalTolerance); // Use epsilon instead of strict equality
 
     return isOnBlock;
+  }
+
+  function isPointOnPath(point, { max = null, onGround = false } = {}) {
+    // console.log(point)
+    // returns true if a point is on the current path
+    if (!complexPathPoints) return false;
+
+    if (complexPathPoints.length == 1)
+      return isPlayerOnBlock(point, complexPathPoints[0].worldPos, onGround);
+    let pathIndex;
+    for (
+      pathIndex = 1;
+      pathIndex < Math.min(complexPathPoints.length, max ?? 100);
+      ++pathIndex
+    ) {
+      let segmentStart = complexPathPoints[pathIndex - 1];
+      let segmentEnd = complexPathPoints[pathIndex];
+
+      if (
+        isPlayerOnBlock(point, segmentStart.worldPos, onGround) ||
+        isPlayerOnBlock(point, segmentEnd.worldPos, onGround)
+      ) {
+        return true;
+      }
+
+      let calculatedDistance = distanceFromLine(
+        segmentStart.worldPos,
+        segmentEnd.worldPos,
+        point.offset(-0.5, 0, -0.5)
+      );
+      if (
+        calculatedDistance < 0.7 &&
+        (bot.entity.onGround || willBeOnGround())
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function willBeOnGround(ticks = 1) {
+    return simulateUntil(bot, (state) => state.onGround, null, ticks);
   }
 
   function moveToEdge(referenceBlock, edge) {
@@ -206,26 +250,11 @@ function inject(bot) {
 
     if (reached(returnStateWithoutJump)) return false;
 
-    const returnStateOffset = returnState.pos.offset(0.5, 0, 0.5);
+    const isOnPath = isPointOnPath(returnState.pos, { onGround: true });
 
-    const xDist = Math.abs(bot.entity.position.x - returnStateOffset.x);
-    const zDist = Math.abs(bot.entity.position.z - returnStateOffset.z);
+    if (!isOnPath) return false;
 
-    const yDist = Math.abs(bot.entity.position.y - returnStateOffset.y);
-
-    const targetDistX = Math.abs(targetPoint.x - returnStateOffset.x);
-    const targetDistZ = Math.abs(targetPoint.z - returnStateOffset.z);
-    const targetDistY = Math.abs(targetPoint.y - returnStateOffset.y);
-    const jumpDist = Math.floor(Math.sqrt(xDist * xDist + zDist * zDist));
-
-    const fallDist = Math.floor(Math.sqrt(yDist * yDist));
-    const targetDist = Math.sqrt(
-      targetDistX * targetDistX +
-        targetDistZ * targetDistZ +
-        targetDistY * targetDistY
-    );
-
-    return reached(returnState);
+    return true;
   }
 
   function between(x, min, max) {
@@ -408,7 +437,22 @@ function inject(bot) {
     const dy = point.y - botPos.y;
     let dz = point.z - botPos.z;
 
-    if (isPlayerOnBlock(bot.entity.position, point) && !placing && !digging) {
+    //debug bot
+    // console.log("VELOCITY", bot.entity.velocity);
+    // console.log("ONGROUND", bot.entity.onGround);
+    // const bb = bot.entity.boundingBox;
+    // console.log("BB", bb);
+
+    if (bot.entity.isCollidedVertically) {
+      // Apply a small correction to ensure the entity is not stuck
+      bot.entity.velocity.y = 0;
+      bot.entity.position.y = Math.floor(bot.entity.position.y) + 0.01;
+    }
+
+    if (
+      (isPlayerOnBlock(bot.entity.position, point) && !placing && !digging) ||
+      isPointOnPath(bot.entity.position)
+    ) {
       // bot.setControlState("forward", false);
       // bot.setControlState("sprint", false);
       bot.setControlState("jump", false);
@@ -458,6 +502,29 @@ function inject(bot) {
 
       // bot.look(yaw, 0);
       bot.lookAt(point.offset(0, 1.1, 0), true);
+    }
+
+    if (cell.breakableNeighbors.length > 0) {
+      // console.log("Break targets:", targets)
+      bot.clearControlStates();
+      for (const target of cell.breakableNeighbors) {
+        // if (bot.ashfinder.debug)
+        //   bot.chat(
+        //     `/particle dust 1 0 0.93 1 ${target.x} ${target.y} ${target.z} 0.1 0.1 0.1 1 5 force`
+        //   );
+        const block = bot.blockAt(target, false);
+
+        if (block.boundingBox === "block" && !digging) {
+          digging = true;
+
+          await autoTool(bot, block);
+
+          await bot.dig(block, true).then(() => {
+            digging = false;
+          });
+        }
+        await new Promise((r) => setTimeout(r, 0));
+      }
     }
 
     if (!placing && !digging && !climbing) {
@@ -513,29 +580,6 @@ function inject(bot) {
       }
     }
 
-    if (cell.breakableNeighbors.length > 0) {
-      // console.log("Break targets:", targets)
-      bot.clearControlStates();
-      for (const target of cell.breakableNeighbors) {
-        // if (bot.ashfinder.debug)
-        //   bot.chat(
-        //     `/particle dust 1 0 0.93 1 ${target.x} ${target.y} ${target.z} 0.1 0.1 0.1 1 5 force`
-        //   );
-        const block = bot.blockAt(target, false);
-
-        if (block.boundingBox === "block" && !digging) {
-          digging = true;
-
-          await autoTool(bot, block);
-
-          await bot.dig(block, true).then(() => {
-            digging = false;
-          });
-        }
-        await new Promise((r) => setTimeout(r, 0));
-      }
-    }
-
     if (!bot.getControlState("forward") && !digging) {
       bot.setControlState("forward", true);
     }
@@ -543,6 +587,121 @@ function inject(bot) {
     bot.setControlState("sprint", true);
 
     return false;
+  }
+
+  function isNearTarget(currentPos, targetPos, tolerance = 1.5) {
+    const deltaX = targetPos.x - currentPos.x;
+    const deltaY = targetPos.y - currentPos.y;
+    const deltaZ = targetPos.z - currentPos.z;
+
+    // Calculate the distance between the current position and the target
+    const distance = Math.sqrt(deltaX ** 2 + deltaY ** 2 + deltaZ ** 2);
+
+    // Return true if the distance is less than or equal to the tolerance
+    return distance <= tolerance;
+  }
+
+  async function elytraPathTick() {
+    if (!elytraPathOptions) return;
+
+    const { target } = elytraPathOptions;
+
+    if (isNearTarget(bot.entity.position, target, 1.5)) {
+      elytraPathOptions.resolve?.(); // Resolve the promise when the target is reached
+      elytraPathOptions = null;
+      flying = false; // Reset flying state
+      console.log("Reached target");
+      return;
+    }
+
+    // Recalculate yaw and pitch for current waypoint
+    const lookVector = calculateLookVector(bot.entity.position, target);
+
+    // Rotate the bot towards the target
+    await bot.look(lookVector.yaw, lookVector.pitch, true);
+
+    if (!flying) {
+      flying = true;
+
+      // Equip Elytra if not already equipped
+      const elytraSlot = bot.inventory.slots[bot.getEquipmentDestSlot("torso")];
+      if (!elytraSlot || elytraSlot.name !== "elytra") {
+        const elytra = bot.inventory
+          .items()
+          .find((item) => item.name.includes("elytra"));
+        if (elytra) {
+          await bot.equip(elytra, "torso");
+        }
+      }
+
+      await bot.elytraFly();
+    }
+
+    // Activate firework for boost if needed
+    if (!bot.entity.elytraFlying) {
+      const fireworkItem = bot.inventory
+        .items()
+        .find((item) => item.name === "firework_rocket");
+      if (fireworkItem) {
+        await bot.equip(fireworkItem, "hand");
+        await sleep(100); // Small delay to ensure the item is equipped
+        bot.activateItem(); // Fire the rocket
+      }
+    }
+  }
+
+  function setElytraPath({ target }) {
+    elytraPathOptions = {
+      target,
+    };
+
+    return new Promise((resolve) => {
+      elytraPathOptions.resolve = resolve;
+    });
+  }
+
+  async function elytraPath(endPos) {
+    const start = bot.entity.position.clone();
+
+    // Generate the flight path
+    const result = createFlightPath(start, endPos);
+    elytraPathPoints = result.positions;
+
+    // Start the Elytra flight
+    bot.setControlState("jump", true); // Jump to initiate flight
+    await sleep(50);
+    bot.setControlState("jump", false);
+
+    await sleep(50); // Small delay to ensure bot jumps
+
+    while (elytraPathPoints.length > 0) {
+      const nextPoint = elytraPathPoints[0];
+
+      // Set the next waypoint
+      await setElytraPath({
+        target: nextPoint,
+      });
+
+      // Wait for the bot to reach the current waypoint before moving to the next one
+      await new Promise((resolve) => setTimeout(resolve, 200)); // Adjust delay based on flight speed
+
+      elytraPathPoints.shift(); // Remove the reached waypoint
+    }
+
+    console.log("Flight path completed");
+  }
+
+  function calculateLookVector(fromPos, toPos) {
+    const deltaX = toPos.x - fromPos.x;
+    const deltaY = toPos.y - fromPos.y;
+    const deltaZ = toPos.z - fromPos.z;
+
+    const yaw = (Math.atan2(deltaX, deltaZ) * 180) / Math.PI;
+    const pitch =
+      (Math.atan2(deltaY, Math.sqrt(deltaX ** 2 + deltaZ ** 2)) * 180) /
+      Math.PI;
+
+    return { yaw, pitch };
   }
 
   let initialPos = null;
@@ -700,6 +859,8 @@ function inject(bot) {
 
   function resetPathingState() {
     complexPathPoints = null;
+    elytraPathPoints = null;
+    flying = false;
     bot.clearControlStates();
     bot.setControlState("forward", false);
     bot.setControlState("sprint", false);
@@ -801,6 +962,10 @@ function inject(bot) {
     return true;
   }
 
+  bot.ashfinder.elytraPath = async (endPos, options = {}) => {
+    await elytraPath(endPos, options);
+  };
+
   /**
    *
    * @param {Goal} goal - The goal to go to.
@@ -853,6 +1018,7 @@ function inject(bot) {
 
   async function moveTick() {
     if (straightPathOptions !== null) await straightPathTick();
+    if (elytraPathOptions !== null) await elytraPathTick();
   }
 
   bot.on("physicsTick", moveTick);

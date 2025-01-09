@@ -98,7 +98,7 @@ class Move {
     this.bot = bot;
     this.COST_BREAK = 5;
     this.COST_NORMAL = 1;
-    this.COST_DIAGONAL = 1.4;
+    this.COST_DIAGONAL = Math.SQRT2;
     this.COST_UP = 1.5;
     this.COST_PLACE = 5;
   }
@@ -248,7 +248,11 @@ class Move {
   }
 
   isStandable(node) {
-    return this.isSolid(node.offset(0, -1, 0)) && this.isWalkable(node);
+    return (
+      this.isSolid(node.offset(0, -1, 0)) &&
+      this.isWalkable(node) &&
+      !this.isFence(node.offset(0, -1, 0))
+    );
   }
 
   isFence(node) {
@@ -327,6 +331,19 @@ class Move {
   down(amount = 1, node = null, attributes) {
     if (!node) node = this.origin;
     return node.down(amount, attributes);
+  }
+
+  /**
+   *
+   * @param {number} dx
+   * @param {number} dy
+   * @param {number} dz
+   * @param {DirectionalVec3} [node=null]
+   * @returns {DirectionalVec3}
+   */
+  offset(dx, dy, dz, node = null) {
+    if (!node) node = this.origin;
+    return node.offset(dx, dy, dz);
   }
 }
 

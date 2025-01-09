@@ -65,7 +65,6 @@ function shouldAutoJump(bot) {
   );
 }
 
-
 function getControlState(bot) {
   return {
     forward: bot.controlState.forward,
@@ -89,7 +88,7 @@ function getControlState(bot) {
 function simulateUntil(
   bot,
   satisfyFunction,
-  controller,
+  controller = null,
   ticks = 1,
   state = null
 ) {
@@ -100,7 +99,7 @@ function simulateUntil(
   }
 
   for (let i = 0; i < ticks; i++) {
-    controller(state, i);
+    if (controller !== null) controller(state, i);
     bot.physics.simulatePlayer(state, bot.world);
 
     if (state.isInLava) return state;
@@ -303,23 +302,6 @@ function calculateEuclideanDistance(point1, point2) {
   );
 }
 
-// Function to check if a point is on a given path
-function isPointOnPath(pointToCheck, path, options = {}) {
-  const { onGround, max = 10 } = options;
-
-  return path.some((point) => {
-    const distance = calculateManhattanDistance(pointToCheck, point.worldPos);
-    const withinMaxDistance = distance <= max;
-
-    if (onGround) {
-      const verticalDistance = Math.abs(pointToCheck.y - point.worldPos.y);
-      return withinMaxDistance && verticalDistance <= max;
-    }
-
-    return withinMaxDistance;
-  });
-}
-
 // Generate weights for combined heuristic function
 function generateWeights() {
   const weights = [];
@@ -336,7 +318,18 @@ function generateWeights() {
   return weights;
 }
 
+function distanceFromLine(lineStart, lineEnd, point) {
+  let A = lineStart.distanceTo(point);
+  let B = lineEnd.distanceTo(point);
+  let C = lineStart.distanceTo(lineEnd);
 
+  if (B * B > A * A + C * C) return A;
+  else if (A * A > B * B + C * C) return B;
+  else {
+    s = (A + B + C) / 2;
+    return (2 / C) * Math.sqrt(s * (s - A) * (s - B) * (s - C));
+  }
+}
 
 module.exports = {
   vectorProjection,
@@ -348,7 +341,7 @@ module.exports = {
   bestHarvestTool,
   getItem,
   autoTool,
-  isPointOnPath,
   simulateUntil,
   getController,
+  distanceFromLine,
 };

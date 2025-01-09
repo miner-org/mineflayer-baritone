@@ -201,10 +201,7 @@ class MoveBreakForwardDown extends Move {
       this.break = true;
       const digTime = this.getNodeDigTime(breakNode);
       neighbors.push(
-        this.makeBreakable(
-          targetNode,
-          (this.COST_BREAK + this.COST_UP) * digTime
-        )
+        this.makeBreakable(targetNode, this.COST_BREAK * this.COST_UP * digTime)
       );
     }
 
@@ -217,10 +214,7 @@ class MoveBreakForwardDown extends Move {
       const digTime =
         this.getNodeDigTime(forwardNode) + this.getNodeDigTime(breakNode);
       neighbors.push(
-        this.makeBreakable(
-          targetNode,
-          (this.COST_BREAK + this.COST_UP) * digTime
-        )
+        this.makeBreakable(targetNode, this.COST_BREAK * this.COST_UP * digTime)
       );
     }
   }
