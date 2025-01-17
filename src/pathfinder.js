@@ -264,8 +264,8 @@ async function Astar(start, endPos, bot, endFunc, config) {
       let currentNode = openList.pop();
 
       if (endFunc(currentNode.worldPos, end)) {
-        console.log(currentNode.worldPos);
-        console.log(end);
+        // console.log(currentNode.worldPos);
+        // console.log(end);
 
         return resolve({
           path: reconstructPath(currentNode),

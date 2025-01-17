@@ -93,6 +93,7 @@ function inject(bot) {
   let vertical = [];
   let horizontal = [];
   let flying = false;
+  let lastNodeTime = 0;
 
   let currentPathNumber = 0;
   let currentCalculatedPathNumber = 0;
@@ -433,9 +434,9 @@ function inject(bot) {
         }
       }
     }
-    let dx = point.x - botPos.x;
-    const dy = point.y - botPos.y;
-    let dz = point.z - botPos.z;
+    let dx = Math.abs(point.x - botPos.x);
+    const dy = Math.abs(point.y - botPos.y);
+    let dz = Math.abs(point.z - botPos.z);
 
     //debug bot
     // console.log("VELOCITY", bot.entity.velocity);
@@ -443,15 +444,15 @@ function inject(bot) {
     // const bb = bot.entity.boundingBox;
     // console.log("BB", bb);
 
-    if (bot.entity.isCollidedVertically) {
-      // Apply a small correction to ensure the entity is not stuck
-      bot.entity.velocity.y = 0;
-      bot.entity.position.y = Math.floor(bot.entity.position.y) + 0.01;
-    }
+    // if (bot.entity.isCollidedVertically) {
+    //   // Apply a small correction to ensure the entity is not stuck
+    //   bot.entity.velocity.y = 0;
+    //   bot.entity.position.y = Math.floor(bot.entity.position.y) + 0.01;
+    // }
 
     if (
       (isPlayerOnBlock(bot.entity.position, point) && !placing && !digging) ||
-      isPointOnPath(bot.entity.position)
+      isPointOnPath(bot.entity.position, { max: 1 })
     ) {
       // bot.setControlState("forward", false);
       // bot.setControlState("sprint", false);
@@ -501,7 +502,7 @@ function inject(bot) {
       const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
 
       // bot.look(yaw, 0);
-      bot.lookAt(point.offset(0, 1.1, 0), true);
+      bot.lookAt(point.offset(0, 1.21, 0), true);
     }
 
     if (cell.breakableNeighbors.length > 0) {
@@ -760,31 +761,31 @@ function inject(bot) {
     };
   }
 
-	function refinePath(path, bot) {
-	  const refined = [];
-	  for (let i = 0; i < path.length - 1; i++) {
-		const current = path[i].worldPos;
-		const next = path[i + 1].worldPos;
+  function refinePath(path, bot) {
+    const refined = [];
+    for (let i = 0; i < path.length - 1; i++) {
+      const current = path[i].worldPos;
+      const next = path[i + 1].worldPos;
 
-		const dx = Math.abs(current.x - next.x);
-		const dy = next.y - current.y; // Vertical difference
-		const dz = Math.abs(current.z - next.z);
+      const dx = Math.abs(current.x - next.x);
+      const dy = next.y - current.y; // Vertical difference
+      const dz = Math.abs(current.z - next.z);
 
-		// Add nodes where vertical changes occur or where large distances are present
-		if (dx > 1 || dz > 1 || Math.abs(dy) > 0) {
-		  refined.push(path[i]);
+      // Add nodes where vertical changes occur or where large distances are present
+      if (dx > 1 || dz > 1 || Math.abs(dy) > 0) {
+        refined.push(path[i]);
 
-		  // Add intermediate points for jumps or falls
-		  if (dy > 1) {
-			refined.push(new Cell(current.offset(0, 1, 0))); // Add jump step
-		  } else if (dy < 0) {
-			refined.push(new Cell(next.offset(0, -1, 0))); // Add fall step
-		  }
-		}
-	  }
-	  refined.push(path[path.length - 1]); // Ensure the last node is included
-	  return refined;
-	}
+        // Add intermediate points for jumps or falls
+        if (dy > 1) {
+          refined.push(new Cell(current.offset(0, 1, 0))); // Add jump step
+        } else if (dy < 0) {
+          refined.push(new Cell(next.offset(0, -1, 0))); // Add fall step
+        }
+      }
+    }
+    refined.push(path[path.length - 1]); // Ensure the last node is included
+    return refined;
+  }
 
   async function path(goal, options = {}) {
     if (bot.ashfinder.debug) console.log("called");
@@ -794,7 +795,7 @@ function inject(bot) {
     calculating = true;
     continuousPath = true;
     const start = bot.entity.position.clone().floored();
-    console.log("Start:", start.toString());
+    // console.log("Start:", start.toString());
 
     const result = await astar(
       start,
@@ -815,7 +816,7 @@ function inject(bot) {
 
     calculating = false;
 
-    complexPathPoints = result.path
+    complexPathPoints = result.path;
     bot.ashfinder.path = complexPathPoints;
 
     extractPathPoints();
@@ -823,6 +824,12 @@ function inject(bot) {
     if (bot.ashfinder.debug) console.log("Break: ", breakBlocks);
 
     while (complexPathPoints.length > 0) {
+      // We are probably stuck
+      if (lastNodeTime + 1000 < performance.now()) {
+        if (bot.ashfinder.debug) console.log("Stuck, recalculating path...");
+        resetPathingState();
+        return await path(goal, options);
+      }
       // for (const cell of complexPathPoints) {
       //   const point = cell.worldPos;
       //   bot.chat(
@@ -1018,7 +1025,6 @@ function inject(bot) {
 
   async function moveTick() {
     if (straightPathOptions !== null) await straightPathTick();
-    if (elytraPathOptions !== null) await elytraPathTick();
   }
 
   bot.on("physicsTick", moveTick);

@@ -59,7 +59,7 @@ class MoveForwardDown extends Move {
     let isSafe = false;
     let cost = 0;
     for (let i = 0; i < config.maxFallDist; i++) {
-      landingNode = landingNode.down(1);
+      landingNode = walkableNode.down(1);
       cost += 1;
 
       if (this.isStandable(landingNode)) {
@@ -82,23 +82,23 @@ class MoveForwardDown extends Move {
 class MoveForwardDownWater extends Move {
   addNeighbors(neighbors, config) {
     let forwardNode = this.forward(1);
-    let forwardNode2 = this.down(1).forward(1);
+    let forwardNode2 = this.down(1, forwardNode);
     let landingNode = forwardNode;
 
-    if (!this.isAir(forwardNode2)) return;
-
-    if (!this.isAir(forwardNode)) return;
+    if (!this.isWalkable(forwardNode)) return;
 
     let isSafe = false;
+    let cost = 0;
     for (let i = 0; i < config.maxWaterDist; i++) {
       if (!this.isWaterLogged(landingNode) && this.isSolid(landingNode)) break;
+
+      landingNode = forwardNode.down(1);
 
       if (this.isWater(landingNode) || this.isWaterLogged(landingNode)) {
         isSafe = true;
         break;
       }
-
-      landingNode = landingNode.down(1);
+      cost += 1;
     }
 
     if (
@@ -107,9 +107,9 @@ class MoveForwardDownWater extends Move {
       this.isWalkable(forwardNode)
     ) {
       if (this.isWater(landingNode)) {
-        neighbors.push(this.makeMovement(landingNode, this.COST_UP));
+        neighbors.push(this.makeMovement(landingNode, this.COST_UP * cost));
       } else if (this.isWaterLogged(landingNode)) {
-        neighbors.push(this.makeMovement(landingNode, this.COST_UP));
+        neighbors.push(this.makeMovement(landingNode, this.COST_UP * cost));
       }
     }
   }
@@ -117,15 +117,16 @@ class MoveForwardDownWater extends Move {
 
 class MoveDiagonalUp extends Move {
   addNeighbors(neighbors) {
-    let upNode = this.up(1);
-    let landingNode = this.up(1).forward(1).right(1);
+    let fowardUpNode = this.forward(1).up(1);
+    let rightUpNode = this.right(1).up(1);
+    let landingNode = this.right(1, fowardUpNode);
 
-    let isRightWalkable = this.isJumpable(this.right(1).up(1));
-    let isForwardWalkable = this.isJumpable(this.forward(1).up(1));
-    if (!isRightWalkable && !isForwardWalkable) return [];
+    if (!this.isStandable(fowardUpNode) && !this.isStandable(rightUpNode)) return;
 
-    if (this.isWalkable(upNode) && this.isStandable(landingNode)) {
-      neighbors.push(this.makeMovement(landingNode, this.COST_DIAGONAL * this.COST_UP));
+    if (this.isStandable(landingNode)) {
+      neighbors.push(
+        this.makeMovement(landingNode, this.COST_DIAGONAL * this.COST_UP)
+      );
     }
   }
 }
@@ -136,5 +137,5 @@ registerMoves([
   MoveForwardDown,
   MoveDiagonal,
   MoveForwardDownWater,
-  MoveDiagonalUp
+  MoveDiagonalUp,
 ]);

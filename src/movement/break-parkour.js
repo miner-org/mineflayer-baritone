@@ -12,7 +12,7 @@ class MoveBreakParkour1 extends Move {
 
     let landingNode = this.forward(2);
     let spaceNode1 = this.forward(1);
-    let spaceNode2 = this.forward(1).up(1);
+    let spaceNode2 = this.up(1, spaceNode1);
 
     let airNode = this.forward(1).down(1);
 
