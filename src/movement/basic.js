@@ -4,14 +4,38 @@ class MoveForward extends Move {
   addNeighbors(neighbors, config, manager) {
     let forwardNode = this.forward(1);
     let standingNode = this.down(1, forwardNode);
-    this.config = config;
 
-    // cuz its air by now
+    // Water movement handling
+    if (this.isWater(this.origin)) {
+      if (this.isWater(forwardNode)) {
+        neighbors.push(this.makeMovement(forwardNode, this.COST_SWIM));
+      }
+      return;
+    }
+
+    // Prevent moving into broken nodes
     if (manager.isNodeBroken(standingNode)) return;
 
+    // Handle half blocks like slabs and stairs
+    if (this.isHalfBlock(forwardNode)) {
+      let adjustedNode = this.getAdjustedNode(forwardNode);
+      neighbors.push(this.makeMovement(adjustedNode, this.COST_NORMAL));
+      return;
+    }
+
+    // Handle regular movement
     if (this.isStandable(forwardNode)) {
       neighbors.push(this.makeMovement(forwardNode, this.COST_NORMAL));
     }
+  }
+
+  // Helper to adjust Y-level for half blocks
+  getAdjustedNode(node) {
+    if (this.isStair(node) || this.isSlab(node)) {
+      // Adjust the Y-level dynamically for half blocks
+      return node.up(0.5);
+    }
+    return node;
   }
 }
 
@@ -21,6 +45,21 @@ class MoveDiagonal extends Move {
     let rightNode = this.right(1);
     let targetNode = this.right(1, forwardNode);
 
+    if (manager.isNodeBroken(targetNode.down(1))) return;
+
+    //water movements
+    // if (this.isWater(this.origin)) {
+    //   if (
+    //     this.isWater(forwardNode) &&
+    //     this.isWater(rightNode) &&
+    //     this.isWater(targetNode)
+    //   ) {
+    //     neighbors.push(this.makeMovement(targetNode, this.COST_DIAGONAL));
+    //   }
+
+    //   return;
+    // }
+
     if (!this.isStandable(forwardNode) && !this.isStandable(rightNode)) return;
 
     if (this.isStandable(targetNode)) {
@@ -29,101 +68,136 @@ class MoveDiagonal extends Move {
   }
 }
 
+// class MoveForwardUp extends Move {
+//   addNeighbors(neighbors, config, manager) {
+//     let landingNode = this.up(1).forward(1);
+//     let standingNode = this.down(1, landingNode);
+//     let upNode = this.up(1);
+
+//     this.config = config;
+//     this.manager = manager;
+//     if (manager.isNodeBroken(standingNode)) return;
+
+//     if (
+//       this.isWalkable(upNode) &&
+//       this.isStandable(landingNode) &&
+//       !this.isFence(standingNode)
+//     ) {
+//       neighbors.push(this.makeMovement(landingNode, this.COST_UP));
+//     }
+//   }
+// }
+
 class MoveForwardUp extends Move {
   addNeighbors(neighbors, config, manager) {
-    let landingNode = this.up(1).forward(1);
-    let standingNode = this.down(1, landingNode);
-    let upNode = this.up(1);
+    let targetNode = this.forward(1).up(1);
+    let standingNode = this.forward(1);
 
-    this.config = config;
-    this.manager = manager;
+    let headRoomNode = this.up(1);
+
     if (manager.isNodeBroken(standingNode)) return;
 
+    if (!this.isSolid(standingNode)) return;
+
     if (
-      this.isWalkable(upNode) &&
-      this.isStandable(landingNode) &&
-      !this.isFence(standingNode)
+      this.isWalkable(headRoomNode) &&
+      (this.isStandable(targetNode) || this.isStair(targetNode))
     ) {
-      neighbors.push(this.makeMovement(landingNode, this.COST_UP));
+      neighbors.push(this.makeMovement(targetNode, this.COST_UP));
     }
   }
 }
 
 class MoveForwardDown extends Move {
-  addNeighbors(neighbors, config) {
+  addNeighbors(neighbors, config, manager) {
+    const maxFallDist = config.maxFallDist || 3;
     let walkableNode = this.forward(1);
-    let landingNode = walkableNode;
 
+    // Check if the initial node is walkable
     if (!this.isWalkable(walkableNode)) return;
 
-    let isSafe = false;
-    let cost = 0;
-    for (let i = 0; i < config.maxFallDist; i++) {
-      landingNode = walkableNode.down(1);
-      cost += 1;
+    if (this.isStair(this.down(1, walkableNode))) {
+      neighbors.push(
+        this.makeMovement(this.down(1, walkableNode), this.COST_FALL)
+      );
 
-      if (this.isStandable(landingNode)) {
-        isSafe = true;
-        break;
-      }
+      return;
     }
 
-    if (
-      isSafe &&
-      this.isWalkable(walkableNode) &&
-      this.isStandable(landingNode)
-    ) {
-      neighbors.push(this.makeMovement(landingNode, this.COST_UP * cost));
-      return;
+    let landingNode = walkableNode;
+    let cost = 0;
+
+    // Loop through downward nodes within the max fall distance
+    for (let i = 0; i < maxFallDist; i++) {
+      landingNode = landingNode.down(1); // Go down one level
+      cost += 1; // Increment cost
+
+      // If a standable node is found, add it as a valid neighbor
+      if (
+        this.isStandable(landingNode) &&
+        !this.isStandable(walkableNode) &&
+        !manager.isNodeBroken(landingNode.down(1))
+      ) {
+        neighbors.push(this.makeMovement(landingNode, this.COST_FALL * cost));
+        return; // Exit early since we found a valid path
+      }
     }
   }
 }
 
+//for entering water
 class MoveForwardDownWater extends Move {
   addNeighbors(neighbors, config) {
-    let forwardNode = this.forward(1);
-    let forwardNode2 = this.down(1, forwardNode);
-    let landingNode = forwardNode;
+    const maxFallDist = config.maxWaterDist || 256;
 
-    if (!this.isWalkable(forwardNode)) return;
+    let walkableNode = this.forward(1);
 
-    let isSafe = false;
+    if (!this.isWalkable(walkableNode)) return;
+
+    let landingNode = walkableNode.clone();
     let cost = 0;
-    for (let i = 0; i < config.maxWaterDist; i++) {
-      if (!this.isWaterLogged(landingNode) && this.isSolid(landingNode)) break;
-
-      landingNode = forwardNode.down(1);
-
-      if (this.isWater(landingNode) || this.isWaterLogged(landingNode)) {
-        isSafe = true;
-        break;
-      }
+    for (let i = 0; i < maxFallDist; i++) {
       cost += 1;
-    }
 
-    if (
-      isSafe &&
-      (this.isWater(landingNode) || this.isWaterLogged(landingNode)) &&
-      this.isWalkable(forwardNode)
-    ) {
-      if (this.isWater(landingNode)) {
-        neighbors.push(this.makeMovement(landingNode, this.COST_UP * cost));
-      } else if (this.isWaterLogged(landingNode)) {
-        neighbors.push(this.makeMovement(landingNode, this.COST_UP * cost));
+      if (
+        this.isWater(landingNode) &&
+        this.isSolid(landingNode.down(1)) &&
+        this.isAir(landingNode.up(1))
+      ) {
+        neighbors.push(this.makeMovement(landingNode, this.COST_FALL * cost));
+        return;
       }
     }
   }
 }
 
 class MoveDiagonalUp extends Move {
-  addNeighbors(neighbors) {
-    let fowardUpNode = this.forward(1).up(1);
-    let rightUpNode = this.right(1).up(1);
-    let landingNode = this.right(1, fowardUpNode);
+  addNeighbors(neighbors, config, manager) {
+    // Node diagonally up (forward and right)
+    let landingNode = this.forward(1).right(1).up(1);
 
-    if (!this.isStandable(fowardUpNode) && !this.isStandable(rightUpNode)) return;
+    // Clearance checks
+    let forwardNode = this.forward(1); // Node directly forward
+    let rightNode = this.right(1); // Node directly right
+    let headNode1 = forwardNode.up(1); // Space above forward
+    let headNode2 = rightNode.up(1); // Space above right
+    let air = this.up(1);
 
-    if (this.isStandable(landingNode)) {
+    if (manager.isNodeBroken(landingNode.down(1))) return;
+
+    if (!this.isWalkable(forwardNode) && !this.isWalkable(rightNode)) return;
+
+    if (!this.isWalkable(air)) return;
+
+    // Check if there's enough headroom and clearance
+    if (!this.isWalkable(headNode1) || !this.isWalkable(headNode2)) return;
+
+    // Ensure the landing node is standable
+    if (
+      this.isWalkable(headNode1) &&
+      this.isStandable(landingNode) &&
+      this.isWalkable(headNode2)
+    ) {
       neighbors.push(
         this.makeMovement(landingNode, this.COST_DIAGONAL * this.COST_UP)
       );

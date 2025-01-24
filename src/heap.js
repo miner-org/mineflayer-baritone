@@ -201,14 +201,15 @@ class MinHeap {
 }
 
 class BinaryHeapOpenSet {
-  constructor() {
-    // Initialing the array heap and adding a dummy element at index 0
+  constructor(compare = (a, b) => a.fCost - b.fCost) {
+    // Initialize the heap array with a dummy element at index 0
     this.heap = [null];
-    this.indexMap = new Map(); // Map to store index of each value
+    this.indexMap = new Map(); // Map to store the index of each value
+    this.compare = compare; // Comparison function for custom priorities
   }
 
   size() {
-    return this.heap.length - 1;
+    return this.heap.length - 1; // Exclude the dummy element
   }
 
   isEmpty() {
@@ -216,17 +217,20 @@ class BinaryHeapOpenSet {
   }
 
   push(val) {
-    // Inserting the new node at the end of the heap array
+    // Insert the new node at the end of the heap
     this.heap.push(val);
     const current = this.heap.length - 1;
-    this.indexMap.set(val, current);
-    this.bubbleUp(current);
+    this.indexMap.set(val, current); // Track the index of the value
+    this.bubbleUp(current); // Restore the heap property
   }
 
   bubbleUp(current) {
-    let parent = current >>> 1;
-    while (current > 1 && this.heap[parent].fCost > this.heap[current].fCost) {
-      this.swap(parent, current);
+    let parent = current >>> 1; // Integer division by 2
+    while (
+      current > 1 &&
+      this.compare(this.heap[current], this.heap[parent]) < 0
+    ) {
+      this.swap(current, parent);
       current = parent;
       parent = current >>> 1;
     }
@@ -234,8 +238,55 @@ class BinaryHeapOpenSet {
 
   update(val) {
     const current = this.indexMap.get(val);
-    if (current === undefined) return; // Value not found
-    this.bubbleUp(current);
+    if (current === undefined) return; // Value not found in the heap
+    this.bubbleUp(current); // Try to move up
+    this.bubbleDown(current); // Try to move down
+  }
+
+  pop() {
+    if (this.isEmpty()) return null;
+    if (this.size() === 1) {
+      const smallest = this.heap.pop(); // Remove the only element
+      this.indexMap.delete(smallest);
+      return smallest;
+    }
+
+    const smallest = this.heap[1]; // Root of the heap
+    this.heap[1] = this.heap.pop(); // Move the last element to the root
+    this.indexMap.set(this.heap[1], 1); // Update index of the new root
+    this.bubbleDown(1); // Restore the heap property
+    this.indexMap.delete(smallest); // Remove from indexMap
+    return smallest;
+  }
+
+  bubbleDown(index) {
+    const size = this.size();
+    let current = index;
+    const value = this.heap[current];
+    while (true) {
+      const leftChild = current * 2;
+      const rightChild = leftChild + 1;
+      let smallest = current;
+
+      if (
+        leftChild <= size &&
+        this.compare(this.heap[leftChild], this.heap[smallest]) < 0
+      ) {
+        smallest = leftChild;
+      }
+
+      if (
+        rightChild <= size &&
+        this.compare(this.heap[rightChild], this.heap[smallest]) < 0
+      ) {
+        smallest = rightChild;
+      }
+
+      if (smallest === current) break;
+
+      this.swap(current, smallest);
+      current = smallest;
+    }
   }
 
   swap(a, b) {
@@ -244,37 +295,27 @@ class BinaryHeapOpenSet {
     this.indexMap.set(this.heap[b], b);
   }
 
-  pop() {
-    if (this.isEmpty()) return null;
-    const smallest = this.heap[1];
-    this.heap[1] = this.heap.pop();
-    if (!this.isEmpty()) {
-      this.indexMap.set(this.heap[1], 1);
-      this.bubbleDown(1);
-    }
-    this.indexMap.delete(smallest);
-    return smallest;
-  }
-
-  bubbleDown(index) {
-    const size = this.size();
-    let current = index;
-    let smallerChild = current * 2;
-    const cost = this.heap[current].fCost;
-    while (smallerChild <= size) {
+  validateHeap() {
+    // Debugging method to check the integrity of the heap
+    for (let i = 1; i <= this.size(); i++) {
+      const left = i * 2;
+      const right = i * 2 + 1;
       if (
-        smallerChild < size &&
-        this.heap[smallerChild].fCost > this.heap[smallerChild + 1].fCost
+        left <= this.size() &&
+        this.compare(this.heap[i], this.heap[left]) > 0
       ) {
-        smallerChild++;
+        console.error("Heap property violated at index:", i);
       }
-      if (cost <= this.heap[smallerChild].fCost) break;
-      this.swap(current, smallerChild);
-      current = smallerChild;
-      smallerChild *= 2;
+      if (
+        right <= this.size() &&
+        this.compare(this.heap[i], this.heap[right]) > 0
+      ) {
+        console.error("Heap property violated at index:", i);
+      }
     }
   }
 }
+
 
 module.exports = {
   BinarySearchTree,

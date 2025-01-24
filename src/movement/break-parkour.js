@@ -28,7 +28,8 @@ class MoveBreakParkour1 extends Move {
       this.isWalkable(spaceNode1) &&
       this.isWalkable(spaceNode2) &&
       this.isBreakble(breakNode1, config) &&
-      !this.isSolid(breakNode2)
+      !this.isSolid(breakNode2) &&
+      this.isStandable(landingNode)
     ) {
       this.break = true;
       const digTime = this.getNodeDigTime(breakNode1);
@@ -41,7 +42,8 @@ class MoveBreakParkour1 extends Move {
       this.isWalkable(spaceNode1) &&
       this.isWalkable(spaceNode2) &&
       this.isBreakble(breakNode1, config) &&
-      this.isBreakble(breakNode2, config)
+      this.isBreakble(breakNode2, config) &&
+      this.isStandable(landingNode)
     ) {
       this.break = true;
       const digTime1 = this.getNodeDigTime(breakNode1);
@@ -77,4 +79,4 @@ class MoveBreakParkour1 extends Move {
   }
 }
 
-registerMoves([MoveBreakParkour1]);
+// registerMoves([MoveBreakParkour1]);

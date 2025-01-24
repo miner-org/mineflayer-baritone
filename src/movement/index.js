@@ -7,15 +7,15 @@ const cardinalDirections = [
   { x: 0, z: 1 }, // south
   { x: -1, z: 0 }, // west
   { x: 1, z: 0 }, // east
+  // { x: 1, z: -1 },
+  // { x: 1, z: 1 },
+  // { x: -1, z: -1 },
+  // { x: -1, z: 1 },
 ];
-
-function hash(node) {
-  return `${node.x}-${node.y}-${node.z}`;
-}
 
 class DirectionalVec3 extends Vec3 {
   constructor(x, y, z, direction, attributes = {}) {
-    super(x, y, z); 
+    super(x, y, z);
     this.dir = direction;
     this.attributes = attributes;
     this.blocks = [];
@@ -80,6 +80,16 @@ class DirectionalVec3 extends Vec3 {
       attributes
     );
   }
+
+  clone() {
+    return new DirectionalVec3(
+      this.x,
+      this.y,
+      this.z,
+      this.dir,
+      this.attributes
+    );
+  }
 }
 
 const climbableBlocks = ["ladder", "vines"];
@@ -91,16 +101,20 @@ const unbreakableBlocks = [
 ];
 
 class Move {
-  setValues(world, origin, dir, bot) {
+  setValues(world, origin, dir, bot, config) {
     this.world = world;
     this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
     this.dir = dir;
     this.bot = bot;
+    this.config = config;
     this.COST_BREAK = 5;
     this.COST_NORMAL = 1;
     this.COST_DIAGONAL = Math.SQRT2;
-    this.COST_UP = 1.5;
+    this.COST_UP = 1;
     this.COST_PLACE = 5;
+    this.COST_PARKOUR = 3;
+    this.COST_FALL = 1.2;
+    this.COST_SWIM = 2.02;
   }
 
   makeMovement(position, cost) {
@@ -125,6 +139,18 @@ class Move {
     position.placeVertical = true;
     position.cost = costToPlace;
     return position;
+  }
+
+  isStair(node) {
+    const block = this.world.getBlock(node);
+    if (!block) return false;
+    return block.name.includes("stairs");
+  }
+
+  isSlab(node) {
+    const block = this.world.getBlock(node);
+    if (!block) return false;
+    return block.name.includes("slab");
   }
 
   isNearBaddie(node, config, range) {
@@ -163,9 +189,11 @@ class Move {
     if (!block) return false;
     const blockAbove = this.world.getBlock(node.offset(0, 1, 0));
     return (
+      !this.isStair(node) &&
       block.boundingBox === "empty" &&
       blockAbove.boundingBox === "empty" &&
-      block.name !== "water"
+      block.name !== "water" &&
+      !this.config.blocksToStayAway.includes(block.name)
     );
   }
 
@@ -176,6 +204,7 @@ class Move {
       this.isSolid(node) &&
       !unbreakableBlocks.includes(block.name) &&
       !climbableBlocks.includes(block.name) &&
+      !config.blocksToAvoid.includes(block.name) &&
       !this.isInteractable(node, config)
     );
   }
@@ -251,8 +280,40 @@ class Move {
     return (
       this.isSolid(node.offset(0, -1, 0)) &&
       this.isWalkable(node) &&
-      !this.isFence(node.offset(0, -1, 0))
+      !this.isFence(node.offset(0, -1, 0)) &&
+      !this.config.blocksToAvoid.includes(this.getBlock(node).name) &&
+      this.isFullBlock(node.offset(0, -1, 0))
     );
+  }
+
+  isFullBlock(node) {
+    const block = this.getBlock(node);
+
+    if (!block) return false;
+
+    const shapes = block.shapes;
+    const firstShapeArray = shapes[0];
+
+    if (!firstShapeArray) return false;
+
+    const maxY = firstShapeArray[4];
+
+    if (maxY === 1) return true;
+  }
+
+  isHalfBlock(node) {
+    const block = this.getBlock(node);
+
+    if (!block) return false;
+
+    const shapes = block.shapes;
+    const firstShapeArray = shapes[0];
+
+    if (!firstShapeArray) return false;
+
+    const maxY = firstShapeArray[4];
+
+    if (maxY === 0.5) return true;
   }
 
   isFence(node) {
@@ -347,6 +408,9 @@ class Move {
   }
 }
 
+/**
+ * @type {Array<Move>}
+ */
 const moveClasses = [];
 
 function registerMoves(moves) {
@@ -383,26 +447,11 @@ function bestHarvestTool(bot, block) {
 
 function getNeighbors2(world, node, config, manager, bot) {
   let neighbors = [];
-  let breakNeighbors = [];
-  let verticalPlaceNeighbors = [];
-  let horizontalPlaceNeighbors = [];
 
   for (const move of moveClasses) {
     for (const dir of cardinalDirections) {
-      move.setValues(world, node.worldPos, dir, bot);
+      move.setValues(world, node.worldPos, dir, bot, config);
       move.addNeighbors(neighbors, config, manager);
-
-      if (move.break) {
-        move.addBreakNeighbors(breakNeighbors);
-      }
-
-      if (move.placeVertical) {
-        move.addPlaceNeighbors(verticalPlaceNeighbors);
-      }
-
-      if (move.placeHorizontal) {
-        move.addPlaceNeighbors(horizontalPlaceNeighbors);
-      }
     }
   }
 
@@ -413,9 +462,6 @@ function getNeighbors2(world, node, config, manager, bot) {
 
   return {
     neighbors,
-    breakNeighbors,
-    verticalPlacaNeighbors: verticalPlaceNeighbors,
-    horizontalPlaceNeighbors,
   };
 }
 
@@ -426,6 +472,6 @@ function getXZDist(nodeA, nodeB) {
   return Math.sqrt(xDist * xDist + zDist * zDist);
 }
 
-module.exports = { getNeighbors2, Move, registerMoves };
+module.exports = { getNeighbors2, Move, registerMoves, DirectionalVec3 };
 
 requireDir("./");

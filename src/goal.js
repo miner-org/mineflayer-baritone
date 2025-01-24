@@ -1,6 +1,6 @@
 class Goal {
   constructor(position) {
-    this.position = position;
+    this.position = position.floored();
     this.x = Math.floor(position.x);
     this.y = Math.floor(position.y);
     this.z = Math.floor(position.z);
@@ -10,7 +10,9 @@ class Goal {
     return false;
   }
 }
-
+/**
+ * This goal is used to reach a position within a certain distance
+ */
 class GoalNear extends Goal {
   constructor(position, distance) {
     super(position);
@@ -24,17 +26,28 @@ class GoalNear extends Goal {
     const yDistance = Math.abs(this.y - otherPosition.y);
     const zDistance = Math.abs(this.z - otherPosition.z);
 
-    return xDistance <= this.distance && yDistance <= this.distance && zDistance <= this.distance;
-  }
+    const distanceSq = this.distance * this.distance;
 
+    return (
+      (xDistance * xDistance + yDistance * yDistance + zDistance * zDistance) <=
+      distanceSq
+    );
+  }
 }
 
 class GoalExact extends Goal {
   isReached(otherPosition) {
     if (!otherPosition) return false;
-    return this.x === otherPosition.x && this.y === otherPosition.y && this.z === otherPosition.z;
+    return (
+      this.x === otherPosition.x &&
+      this.y === otherPosition.y &&
+      this.z === otherPosition.z
+    );
   }
 }
+/**
+ * This goal is used to reach a specific Y level
+ */
 
 class GoalYLevel extends Goal {
   isReached(otherPosition) {
@@ -43,6 +56,9 @@ class GoalYLevel extends Goal {
   }
 }
 
+/**
+ * This goal is used to reach a region
+ */
 class GoalRegion extends Goal {
   constructor(position1, position2) {
     super(position1);
@@ -68,6 +84,9 @@ class GoalRegion extends Goal {
   }
 }
 
+/**
+ * This goal is used to avoid a position
+ */
 class GoalAvoid extends Goal {
   constructor(position, minDistance) {
     super(position);
@@ -82,26 +101,33 @@ class GoalAvoid extends Goal {
     const zDistance = Math.abs(this.z - otherPosition.z);
 
     return (
-      Math.sqrt(xDistance ** 2 + yDistance ** 2 + zDistance ** 2) > this.minDistance
+      Math.sqrt(xDistance ** 2 + yDistance ** 2 + zDistance ** 2) >
+      this.minDistance
     );
   }
 }
 
+/**
+ * This goal is used to combine multiple goals
+ */
 class GoalComposite extends Goal {
-  constructor(goals, mode = 'all') {
+  constructor(goals, mode = "all") {
     super(goals[0].position); // Default position from the first goal
     this.goals = goals;
     this.mode = mode; // 'all' or 'any'
   }
 
   isReached(otherPosition) {
-    if (this.mode === 'all') {
-      return this.goals.every(goal => goal.isReached(otherPosition));
+    if (this.mode === "all") {
+      return this.goals.every((goal) => goal.isReached(otherPosition));
     }
-    return this.goals.some(goal => goal.isReached(otherPosition));
+    return this.goals.some((goal) => goal.isReached(otherPosition));
   }
 }
 
+/**
+ * This goal is used to compare the inverse of another goal
+ */
 class GoalInvert extends Goal {
   constructor(goal) {
     super(goal.position);
@@ -113,6 +139,20 @@ class GoalInvert extends Goal {
   }
 }
 
+/**
+ * This goal is used to compare only the X and Z coordinates
+ */
+class GoalXZ extends Goal {
+  constructor(position) {
+    super(position);
+  }
+
+  isReached(otherPosition) {
+    if (!otherPosition) return false;
+    return this.x === otherPosition.x && this.z === otherPosition.z;
+  }
+}
+
 module.exports = {
   Goal,
   GoalNear,
@@ -121,6 +161,6 @@ module.exports = {
   GoalRegion,
   GoalAvoid,
   GoalComposite,
-  GoalInvert
+  GoalInvert,
+  GoalXZ,
 };
-

@@ -3,14 +3,14 @@ const inject = require("./loader");
 const Vec3 = require("vec3").Vec3;
 const { argv } = require("process");
 const { elytrafly } = require("mineflayer-elytrafly");
-
+const { GoalNear } = require("./goal");
 
 const bot = mineflayer.createBot({
   host: argv[2] || "localhost",
-  username: "Chisomo",
-  port: parseInt(argv[3]) || 25565,
+  username: "Frisk",
+  port: parseInt(argv[3]) || 39065,
   viewDistance: "tiny",
-  version: "1.18.2",
+  version: "1.20.4",
 });
 
 bot.loadPlugin(inject);
@@ -39,7 +39,9 @@ bot.once("spawn", async () => {
       const z = parseInt(args[2]);
       endPos = new Vec3(x, y, z);
 
-      await bot.ashfinder.goto(endPos);
+      const goal = new GoalNear(endPos, 2);
+
+      await bot.ashfinder.goto(goal);
     }
 
     if (command === "f!find") {
@@ -56,7 +58,9 @@ bot.once("spawn", async () => {
 
       const pos = block.position.clone();
 
-      await bot.ashfinder.goto(pos);
+      const goal = new GoalNear(pos, 2);
+
+      await bot.ashfinder.goto(goal);
       bot.clearControlStates();
       bot.setControlState("forward", false);
       bot.setControlState("sprint", false);
@@ -139,7 +143,7 @@ bot.once("spawn", async () => {
       const z = parseInt(args[2]);
       endPos = new Vec3(x, y, z);
 
-      await bot.elytrafly.elytraFlyTo(endPos);      
+      await bot.elytrafly.elytraFlyTo(endPos);
     }
 
     if (command === "f!sugar") {

@@ -41,13 +41,13 @@ function inject(bot) {
   bot.ashfinder.config = {
     //blocks to avoid breaking
     blocksToAvoid: ["crafting_table", "chest", "furnace", "gravel", "sand"],
-    blocksToStayAway: ["cactus"],
+    blocksToStayAway: ["cactus", "cobweb"],
     placeBlocks: false,
     breakBlocks: true,
     parkour: true,
     checkBreakUpNodes: true,
     proParkour: true,
-    maxFallDist: 3,
+    maxFallDist: 4,
     maxWaterDist: 256,
     disposableBlocks: [
       "dirt",
@@ -117,7 +117,7 @@ function inject(bot) {
 
     const delta = blockPosition.minus(playerPosition);
 
-    const horizontalTolerance = 0.5; // Loosen horizontal bounds
+    const horizontalTolerance = 0.35; // Loosen horizontal bounds
     const verticalTolerance = 0.05; // Small epsilon for vertical checks
 
     const isOnBlock =
@@ -174,52 +174,6 @@ function inject(bot) {
     return simulateUntil(bot, (state) => state.onGround, null, ticks);
   }
 
-  function moveToEdge(referenceBlock, edge) {
-    const allowInstantTurn = false;
-
-    // Function to calculate the view vector based on pitch and yaw angles
-    function getViewVector(pitch, yaw) {
-      const cosPitch = Math.cos(pitch);
-      const sinPitch = Math.sin(pitch);
-      const cosYaw = Math.cos(yaw);
-      const sinYaw = Math.sin(yaw);
-      return new Vec3(-sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch);
-    }
-
-    // Target viewing direction while approaching the edge
-    const targetBlockPos = referenceBlock.offset(
-      edge.x + 0.5,
-      edge.y,
-      edge.z + 0.5
-    );
-    const targetPosDelta = bot.entity.position.clone().subtract(targetBlockPos);
-    const targetYaw = Math.atan2(-targetPosDelta.x, -targetPosDelta.z);
-    const targetPitch = -1.421;
-    const viewVector = getViewVector(targetPitch, targetYaw);
-
-    // Calculate distance to the targeted position
-    const distanceThreshold = 0.3;
-    const targetPosition = referenceBlock.clone().offset(0.5, 1, 0.5);
-    const distance = bot.entity.position.distanceTo(targetPosition);
-
-    if (
-      bot.entity.position.distanceTo(
-        referenceBlock.clone().offset(edge.x + 0.5, 1, edge.z + 0.5)
-      ) > 0.4
-    ) {
-      bot.lookAt(
-        bot.entity.position.offset(viewVector.x, viewVector.y, viewVector.z),
-        allowInstantTurn
-      );
-      bot.setControlState("forward", false);
-      bot.setControlState("sneak", true);
-      bot.setControlState("back", true);
-      return false;
-    }
-    bot.setControlState("back", false);
-    return true;
-  }
-
   /**
    * @param {Vec3} targetPoint
    */
@@ -251,7 +205,10 @@ function inject(bot) {
 
     if (reached(returnStateWithoutJump)) return false;
 
-    const isOnPath = isPointOnPath(returnState.pos, { onGround: true });
+    const isOnPath = isPointOnPath(returnState.pos, {
+      max: 1.12,
+      onGround: true,
+    });
 
     if (!isOnPath) return false;
 
@@ -304,7 +261,7 @@ function inject(bot) {
       targetDistX * targetDistX + targetDistZ * targetDistZ
     );
 
-    if (jumpDist <= 2.5 && targetDist <= 1) return true;
+    if (jumpDist <= 2.5 && targetDist <= 0.5) return true;
 
     return false;
   }
@@ -367,117 +324,263 @@ function inject(bot) {
     let cell = straightPathOptions.target;
     let point = cell.worldPos;
     const botPos = bot.entity.position;
-    const blockPlace = bot.inventory
+
+    const blockPlace = getBlockToPlace();
+    const blockBelow = bot.blockAt(
+      bot.entity.position.floored().offset(0, -1, 0)
+    );
+
+    if (isAtTarget(botPos, point)) {
+      resetMovementState();
+      straightPathOptions = null;
+      return true;
+    }
+
+    if (cell.horizontalPlacable.length > 0) {
+      await handleHorizontalPlacables(cell, blockPlace, blockBelow);
+    }
+
+    if (cell.breakableNeighbors.length > 0) {
+      await handleBreakingBlocks(cell.breakableNeighbors);
+    }
+
+    await updateBotLookDirection(botPos, point);
+
+    if (!bot.getControlState("forward")) {
+      bot.setControlState("forward", true);
+      bot.setControlState("sprint", true);
+    }
+    // Debugging: show particle effect for path
+    if (bot.ashfinder.debug) showPathParticleEffect(point);
+
+    // Door handling
+    await handleDoorInteraction(point);
+
+    // Handle climbing and jumping logic
+    await handleClimbingAndJumping(point, botPos);
+
+    return false;
+  }
+
+  // Get the block for placing
+  function getBlockToPlace() {
+    return bot.inventory
       .items()
       .find((item) =>
         bot.ashfinder.config.disposableBlocks.includes(item.name)
       );
+  }
 
-    if (cell.horizontalPlacable.length > 0) {
-      for (const target of cell.horizontalPlacable) {
-        const blockBelow = bot.blockAt(
-          bot.entity.position.floored().offset(0, -1, 0)
-        );
+  /**
+   *
+   * @param {Cell} cell
+   * @param {import("prismarine-item").Item} blockPlace
+   * @param {import("prismarine-block").Block} blockBelow
+   * @returns
+   */
+  async function handleHorizontalPlacables(cell, blockPlace, blockBelow) {
+    if (blockBelow.name !== "air") return;
 
-        let isAir = blockBelow.name === "air";
-        if (!isAir) {
-          function getViewVector(pitch, yaw) {
-            const cosPitch = Math.cos(pitch);
-            const sinPitch = Math.sin(pitch);
-            const cosYaw = Math.cos(yaw);
-            const sinYaw = Math.sin(yaw);
-            return new Vec3(-sinYaw * cosPitch, sinPitch, -cosYaw * cosPitch);
-          }
+    bot.clearControlStates();
 
-          // Target viewing direction while approaching the edge
-          const targetBlockPos = target.offset(
-            target.dir.x + 0.5,
-            0,
-            target.dir.z + 0.5
-          );
-          const targetPosDelta = bot.entity.position
-            .clone()
-            .subtract(targetBlockPos);
-          const targetYaw = Math.atan2(-targetPosDelta.x, -targetPosDelta.z);
-          const targetPitch = -1.421;
-          const viewVector = getViewVector(targetPitch, targetYaw);
+    for (const target of cell.horizontalPlacable) {
+      // try {
+      //   await moveToEdge(target);
+      // } catch (error) {
+      //   console.log(error);
+      // }
 
-          bot.lookAt(
-            bot.entity.position.offset(viewVector.x, viewVector.y, viewVector.z)
-          );
-          bot.setControlState("forward", false);
-          bot.setControlState("sneak", true);
-          bot.setControlState("back", true);
-          return;
-        }
-
-        if (!placing) {
-          placing = true;
-          if (bot.heldItem && bot.heldItem !== blockPlace) {
-            await bot.equip(blockPlace);
-          }
-
-          const refBlock = bot.blockAt(target, false);
-
-          try {
-            await bot.placeBlock(
-              refBlock,
-              new Vec3(target.dir.x, 0, target.dir.z)
-            );
-            placing = false;
-          } catch (err) {
-            placing = false;
-            console.log("man i hate place block");
-          }
-
-          bot.setControlState("sneak", false);
-        }
+      if (!placing) {
+        placing = true;
+        await equipBlockIfNeeded(blockPlace);
+        await placeBlockAtTarget(target, target.dir);
+        placing = false;
       }
     }
-    let dx = Math.abs(point.x - botPos.x);
-    const dy = Math.abs(point.y - botPos.y);
-    let dz = Math.abs(point.z - botPos.z);
+  }
 
-    //debug bot
-    // console.log("VELOCITY", bot.entity.velocity);
-    // console.log("ONGROUND", bot.entity.onGround);
-    // const bb = bot.entity.boundingBox;
-    // console.log("BB", bb);
+  async function moveToEdge(target) {
+    return new Promise(async (resolve, reject) => {
+      const targetBlockPos = target.offset(
+        target.dir.x + 0.5,
+        0,
+        target.dir.z + 0.5
+      );
+      const targetPosDelta = bot.entity.position
+        .clone()
+        .subtract(targetBlockPos);
+      const targetYaw = Math.atan2(-targetPosDelta.x, -targetPosDelta.z);
+      const targetPitch = -1.421;
+      const viewVector = getViewVector(targetPitch, targetYaw);
 
-    // if (bot.entity.isCollidedVertically) {
-    //   // Apply a small correction to ensure the entity is not stuck
-    //   bot.entity.velocity.y = 0;
-    //   bot.entity.position.y = Math.floor(bot.entity.position.y) + 0.01;
-    // }
+      await bot.lookAt(viewVector, true);
+      bot.setControlState("back", true);
+      bot.setControlState("sneak", true);
+      const interval = setInterval(async () => {
+        const distance = bot.entity.position.distanceTo(targetBlockPos);
+        if (distance < 0.5) {
+          clearInterval(interval);
+          resolve();
+        } else {
+          await bot.lookAt(viewVector, true);
+          bot.setControlState("back", true);
+          bot.setControlState("sneak", true);
+        }
+      }, 100);
 
-    if (
-      (isPlayerOnBlock(bot.entity.position, point) && !placing && !digging) ||
-      isPointOnPath(bot.entity.position, { max: 1 })
-    ) {
-      // bot.setControlState("forward", false);
-      // bot.setControlState("sprint", false);
-      bot.setControlState("jump", false);
+      setTimeout(() => {
+        clearInterval(interval);
+        bot.setControlState("forward", false);
+        bot.clearControlStates();
+        reject(new Error("Failed to move to edge within time limit"));
+      }, 5000); // Timeout after 5 seconds
+    });
+  }
 
-      if (straightPathOptions) straightPathOptions.resolve();
+  /**
+   * Performs a raycast from a given point in a specified direction.
+   * @param {Vec3} point - The starting point of the raycast.
+   * @param {Vec3} direction - The direction of the raycast.
+   * @returns {Block|null} The block hit by the raycast, or null if no block is hit.
+   */
+  async function raycast(point, direction) {
+    const maxDistance = 5; // Maximum distance to raycast
+    const stepSize = 0.1; // Step size for each iteration
+    let currentPos = point.clone();
 
-      straightPathOptions = null;
-      headLocked = false;
-      walkingUntillGround = false;
-      climbing = false;
-      placing = false;
-      lastNodeTime = performance.now();
-      return true;
+    for (let i = 0; i < maxDistance / stepSize; i++) {
+      currentPos.add(direction.scaled(stepSize));
+      const block = bot.blockAt(currentPos);
+      if (block && block.name !== "air") {
+        return block;
+      }
     }
 
-    // for debuging ingame
-    // if (bot.ashfinder.debug)
-    //   bot.chat(
-    //     `/particle dust 0 1 0.93 1 ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 1 5 force`
-    //   );
+    return null;
+  }
 
-    // Activate door if standing in front of it
-    const block = point !== null ? bot.blockAt(point, false) : null;
+  /**
+   * Calculates the view vector based on pitch and yaw angles.
+   * @param {number} pitch - The pitch angle in radians.
+   * @param {number} yaw - The yaw angle in radians.
+   * @returns {Vec3} The view vector with x, y, and z components.
+   */
+  function getViewVector(pitch, yaw) {
+    return new Vec3(
+      -Math.cos(pitch) * Math.sin(yaw),
+      Math.sin(pitch),
+      -Math.cos(pitch) * Math.cos(yaw)
+    );
+  }
 
+  /**
+   * @param {DirectionalVec3} cell
+   */
+  async function placeBlockAtTarget(cell, dir) {
+    const pos = cell;
+    const block = bot.blockAt(pos);
+
+    const dirVec = new Vec3(dir.x, 0, dir.z);
+
+    try {
+      await bot.placeBlock(block, dirVec);
+    } catch (error) {
+      console.error(`Error placing block at ${block.position}:`, error);
+    }
+  }
+
+  async function equipBlockIfNeeded(item) {
+    if (!item) {
+      console.log("guh");
+      return;
+    }
+
+    await bot.equip(item, "hand");
+  }
+
+  async function handleBreakingBlocks(positions) {
+    let promises = [];
+    bot.clearControlStates();
+
+    for (const pos of positions) {
+      const block = bot.blockAt(pos);
+      if (block.boundingBox === "block") {
+        promises.push(
+          (async () => {
+            try {
+              if (!digging) {
+                digging = true;
+                await autoTool(bot, block);
+                await bot.lookAt(block.position.offset(0.5, 0, 0.5), true);
+                await bot.dig(block, true);
+                digging = false;
+              }
+            } catch (error) {
+              console.error(`Error digging block at ${block.position}:`, error);
+              digging = false;
+            }
+          })()
+        );
+      }
+    }
+
+    await Promise.all(promises);
+  }
+
+  // Check if the bot has reached the target position
+  function isAtTarget(botPos, point) {
+    return (
+      (isPlayerOnBlock(bot.entity.position, point, true) &&
+        !placing &&
+        !digging) ||
+      isPointOnPath(bot.entity.position, { max: 1, onGround: true })
+    );
+  }
+
+  function smartAutoJump() {
+    const botPos = bot.entity.position;
+    const yaw = bot.entity.yaw;
+
+    // Calculate the forward direction based on the bot's yaw
+    const forwardX = Math.round(Math.sin(yaw));
+    const forwardZ = Math.round(Math.cos(yaw));
+
+    const forwardBlock = bot.blockAt(botPos.offset(forwardX, 0, forwardZ));
+    const aboveForwardBlock = bot.blockAt(botPos.offset(forwardX, 1, forwardZ));
+
+    return (
+      forwardBlock &&
+      forwardBlock.boundingBox === "block" &&
+      (!aboveForwardBlock || aboveForwardBlock.boundingBox !== "block")
+    );
+  }
+
+  // Reset movement state when the bot reaches the target
+  function resetMovementState() {
+    bot.setControlState("sprint", false);
+    bot.setControlState("jump", false);
+    bot.setControlState("forward", false);
+    if (straightPathOptions) straightPathOptions.resolve();
+    headLocked = false;
+    walkingUntillGround = false;
+    climbing = false;
+    placing = false;
+    lastNodeTime = performance.now();
+  }
+
+  // Show path particle effect for debugging
+  function showPathParticleEffect(point) {
+    // bot.chat(
+    //   `/particle dust{color:[0.2,0.82,0.48],scale:1} ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 1 4 force`
+    // );
+    bot.chat(
+      `/particle dust 0.2 0.82 0.48 1 ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 2 10 force`
+    );
+  }
+
+  // Handle door interaction when standing in front of a door
+  async function handleDoorInteraction(point) {
+    const block = bot.blockAt(point, false);
     if (
       block &&
       block.name.includes("door") &&
@@ -490,104 +593,92 @@ function inject(bot) {
         interacting = false;
       });
     }
+  }
 
-    // ladders
+  /**
+   *
+   * @param {Vec3} point
+   * @param {Vec3} botPos
+   * @returns
+   */
+  async function handleClimbingAndJumping(point, botPos) {
+    if (digging) return;
     let ladderBlock = bot.world.getBlock(point);
-
     let shouldWalkJump = canWalkJump(point);
     let shouldSprintJump = canSprintJump(point);
+    let shouldAutoJump = smartAutoJump();
 
-    if (!headLocked && !placing && !digging && !climbing) {
-      const yaw = Math.atan2(-dx, -dz);
-      const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
-
-      // bot.look(yaw, 0);
-      bot.lookAt(point.offset(0, 1.21, 0), true);
+    if (
+      (ladderBlock && ladderBlock.name === "ladder") ||
+      bot.entity.isOnLadder
+    ) {
+      handleLadderMovement(ladderBlock);
+    } else if (bot.entity.isInWater) {
+      handleWaterMovement(botPos);
+    } else if (bot.entity.onGround && shouldWalkJump) {
+      await handleWalkJump(point, botPos);
+      if (bot.ashfinder.debug) console.log("walk jumped");
+    } else if (bot.entity.onGround && shouldSprintJump) {
+      await handleSprintJump();
+      if (bot.ashfinder.debug) console.log("sprint jumped");
+    } else {
+      if (!bot.entity.isInWater) bot.setControlState("jump", false);
     }
+  }
 
-    if (cell.breakableNeighbors.length > 0) {
-      // console.log("Break targets:", targets)
+  // Handle movement when on ladder
+  function handleLadderMovement(ladderBlock) {
+    const yDist = Math.abs(bot.entity.position.y - ladderBlock.position.y);
+    if (yDist > 0) {
+      headLocked = true;
+      climbing = true;
       bot.clearControlStates();
-      for (const target of cell.breakableNeighbors) {
-        // if (bot.ashfinder.debug)
-        //   bot.chat(
-        //     `/particle dust 1 0 0.93 1 ${target.x} ${target.y} ${target.z} 0.1 0.1 0.1 1 5 force`
-        //   );
-        const block = bot.blockAt(target, false);
-
-        if (block.boundingBox === "block" && !digging) {
-          digging = true;
-
-          await autoTool(bot, block);
-
-          await bot.dig(block, true).then(() => {
-            digging = false;
-          });
-        }
-        await new Promise((r) => setTimeout(r, 0));
-      }
+      bot.lookAt(ladderBlock.position.offset(0.5, 1, 0.5), true);
+      bot.setControlState("forward", false);
+      bot.setControlState("jump", true);
+    } else if (yDist < 0) {
+      headLocked = true;
+      climbing = true;
+      bot.setControlState("forward", false);
+      bot.setControlState("jump", false);
     }
+  }
 
-    if (!placing && !digging && !climbing) {
+  // Handle movement when in water
+  function handleWaterMovement(botPos) {
+    const yDist = Math.abs(botPos.y);
+    if (yDist > 0) {
+      bot.setControlState("jump", true);
+      bot.setControlState("sprint", false);
     }
+  }
 
-    if (!walkingUntillGround) {
-    }
+  // Handle normal walking jump
+  async function handleWalkJump(point) {
+    walkingUntillGround = true;
+    bot.setControlState("sprint", false);
+    bot.setControlState("jump", true);
 
-    if (!placing && !digging) {
-      if (
-        (ladderBlock && ladderBlock.name === "ladder") ||
-        bot.entity.isOnLadder
-      ) {
-        const yDist = Math.abs(bot.entity.position.y - ladderBlock.position.y);
+    bot.setControlState("forward", false);
+  }
 
-        // up
-        if (yDist > 0) {
-          headLocked = true;
-          climbing = true;
-          bot.clearControlStates();
-          bot.lookAt(ladderBlock.position.offset(0.5, 1, 0.5), true);
-          bot.setControlState("forward", false);
-          bot.setControlState("jump", true);
-        } else if (yDist < 0) {
-          // down
-          headLocked = true;
-          climbing = true;
-          bot.setControlState("forward", false);
-          bot.setControlState("jump", false);
-        }
-      } else if (bot.entity.isInWater) {
-        const yDist = dy;
-        if (yDist > 0) {
-          bot.setControlState("jump", true);
-          bot.setControlState("sprint", false);
-        }
-      } else if (bot.entity.onGround && shouldWalkJump) {
-        if (bot.ashfinder.debug) console.log("walk jumped");
-        walkingUntillGround = true;
-        bot.setControlState("sprint", false);
-        bot.setControlState("jump", true);
-      } else if (bot.entity.onGround && shouldSprintJump) {
-        if (bot.ashfinder.debug) console.log("sprint jumped!");
-        bot.setControlState("sprint", true);
-        bot.setControlState("jump", true);
-      } else {
-        if (bot.entity.onGround) {
-          walkingUntillGround = false;
-          climbing = false;
-          headLocked = false;
-        }
-        bot.setControlState("jump", false);
-      }
-    }
-
-    if (!bot.getControlState("forward") && !digging) {
-      bot.setControlState("forward", true);
-    }
-
+  // Handle sprint jumping
+  async function handleSprintJump() {
     bot.setControlState("sprint", true);
+    bot.setControlState("jump", true);
+  }
 
-    return false;
+  // Update the bot's direction to look at the target
+  async function updateBotLookDirection(botPos, point) {
+    if (digging) return;
+    const dx = Math.abs(point.x - botPos.x);
+    const dy = Math.abs(point.y - botPos.y);
+    const dz = Math.abs(point.z - botPos.z);
+
+    const yaw = Math.atan2(-dx, -dz);
+    const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
+
+    await bot.lookAt(point.offset(0, 1.56, 0), true);
   }
 
   function isNearTarget(currentPos, targetPos, tolerance = 1.5) {
@@ -756,7 +847,7 @@ function inject(bot) {
    *@return {function} A function that returns whether the goal has been reached.
    */
   function createEndFunc(goal) {
-    return (currentPosition, targetPosition) => {
+    return (currentPosition) => {
       return goal.isReached(currentPosition);
     };
   }
@@ -822,14 +913,9 @@ function inject(bot) {
     extractPathPoints();
 
     if (bot.ashfinder.debug) console.log("Break: ", breakBlocks);
+    if (bot.ashfinder.debug) console.log("Place: ", horizontal);
 
     while (complexPathPoints.length > 0) {
-      // We are probably stuck
-      if (lastNodeTime + 1000 < performance.now()) {
-        if (bot.ashfinder.debug) console.log("Stuck, recalculating path...");
-        resetPathingState();
-        return await path(goal, options);
-      }
       // for (const cell of complexPathPoints) {
       //   const point = cell.worldPos;
       //   bot.chat(
@@ -844,6 +930,13 @@ function inject(bot) {
         target: movement,
       });
 
+      // We are probably stuck
+      if (lastNodeTime + 1000 < performance.now()) {
+        if (bot.ashfinder.debug) console.log("Stuck, recalculating path...");
+        resetPathingState();
+        return await path(goal, options);
+      }
+
       if (
         currentCalculatedPathNumber > pathNumber ||
         complexPathPoints === null
@@ -853,6 +946,8 @@ function inject(bot) {
     }
 
     if (result.status === "partial") {
+      if (bot.ashfinder.debug)
+        console.log(`Remaining nodes: ${result.remainingNodes}`);
       resetPathingState();
       if (bot.ashfinder.debug)
         console.log("Recalculating path from current position...");
@@ -871,6 +966,10 @@ function inject(bot) {
     bot.clearControlStates();
     bot.setControlState("forward", false);
     bot.setControlState("sprint", false);
+
+    if (bot.getControlState("forward")) {
+      bot.clearControlStates();
+    }
   }
 
   function extractPathPoints() {
@@ -980,6 +1079,8 @@ function inject(bot) {
    */
   bot.ashfinder.goto = async (goal) => {
     await path(goal, {});
+
+    resetPathingState();
   };
 
   bot.ashfinder.stop = async () => {
@@ -1029,6 +1130,7 @@ function inject(bot) {
 
   bot.on("physicsTick", moveTick);
   bot.on("physicsTick", followTick);
+  bot.on("death", resetPathingState);
   // bot.on("move", getSpeed);
 }
 
