@@ -2,6 +2,12 @@ const { Vec3 } = require("vec3");
 const { PlayerState } = require("prismarine-physics");
 const nbt = require("prismarine-nbt");
 const mcData = require("minecraft-data")("1.18.2");
+const {
+  EntityState,
+  // BaseSimulator,
+  EPhysicsCtx,
+  // BotcraftPhysics,
+} = require("@nxg-org/mineflayer-physics-util");
 
 /**
  * @param {Vec3} pos
@@ -83,7 +89,7 @@ function getControlState(bot) {
  * @param {Function} satisfyFunction
  * @param {Function} controller
  * @param {number} ticks
- * @param {import('prismarine-physics').PlayerState} state
+ * @param {PlayerState} state
  */
 function simulateUntil(
   bot,
@@ -92,14 +98,28 @@ function simulateUntil(
   ticks = 1,
   state = null
 ) {
+  // const physics = new BotcraftPhysics(bot.registry);
+  // let ctx = EPhysicsCtx.FROM_BOT(bot.physicsEngine, bot, bot.physicsSettings);
+
   if (!state) {
     const controls = getControlState(bot);
 
     state = new PlayerState(bot, controls);
   }
 
+  // console.log("problem is here");
+  // console.log(bot);
+
+  // console.log(state)
+
   for (let i = 0; i < ticks; i++) {
     if (controller !== null) controller(state, i);
+
+    // console.log("before", state.pos);
+    // state = bot.physicsEngine.simulate(ctx, bot.world);
+    // console.log("after", state.pos);
+    // console.log(state.control);
+
     bot.physics.simulatePlayer(state, bot.world);
 
     if (state.isInLava) return state;
@@ -109,9 +129,41 @@ function simulateUntil(
 
   return state;
 }
+// function simulateUntil(bot, satisfyFunction, controller = null, ticks = 1) {
+//   // const physics = new BotcraftPhysics(bot.registry);
+//   let ctx = EPhysicsCtx.FROM_BOT(bot.physicsEngine, bot, bot.physicsSettings);
+//   let state = ctx.state;
+
+//   // console.log("problem is here");
+//   // console.log(bot);
+
+//   // console.log(state)
+
+//   if (controller !== null) controller(state, 1);
+
+//   for (let i = 0; i < ticks; i++) {
+//     if (controller !== null) controller(state, i);
+
+//     // console.log("before", state.pos);
+//     bot.physicsEngine.simulate(ctx, bot.world);
+//     state = ctx.state;
+//     // console.log("after", state.pos);
+//     // console.log(state.control);
+
+//     if (state.isInLava) return state;
+
+//     if (satisfyFunction(state)) return state;
+//   }
+
+//   return state;
+// }
 
 function getController(nextPoint, jump, sprint, jumpAfter = 0) {
+  /**
+   * @param {EntityState} state
+   */
   return (state, tick) => {
+    // console.log(state)
     const dx = nextPoint.x - state.pos.x;
     const dz = nextPoint.z - state.pos.z;
     state.yaw = Math.atan2(-dx, -dz);

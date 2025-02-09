@@ -40,13 +40,21 @@ function inject(bot) {
   bot.ashfinder.stopped = false;
   bot.ashfinder.config = {
     //blocks to avoid breaking
-    blocksToAvoid: ["crafting_table", "chest", "furnace", "gravel", "sand"],
+    blocksToAvoid: [
+      "crafting_table",
+      "chest",
+      "furnace",
+      "gravel",
+      "sand",
+      "farmland",
+    ],
     blocksToStayAway: ["cactus", "cobweb"],
     placeBlocks: false,
     breakBlocks: true,
     parkour: true,
     checkBreakUpNodes: true,
     proParkour: true,
+    fly: false,
     maxFallDist: 4,
     maxWaterDist: 256,
     disposableBlocks: [
@@ -82,7 +90,7 @@ function inject(bot) {
     ],
     thinkTimeout: 10000,
   };
-  bot.ashfinder.debug = true;
+  bot.ashfinder.debug = false;
   // bot.loadPlugin(loader);
 
   let headLocked = false;
@@ -104,6 +112,11 @@ function inject(bot) {
   let interacting = false;
   let targetEntity = null;
   let following = false;
+  let breakingState = false;
+  /**
+   * @type {Goal}
+   */
+  let currentGoal = null;
 
   /**
    * Checks if the player is on a given block position.
@@ -170,6 +183,12 @@ function inject(bot) {
     return false;
   }
 
+  function msToTicks(ms) {
+    //if 1 second(1000ms) = 20 minecraft ticks
+
+    return Math.floor(ms / (1000 / 20));
+  }
+
   function willBeOnGround(ticks = 1) {
     return simulateUntil(bot, (state) => state.onGround, null, ticks);
   }
@@ -205,25 +224,38 @@ function inject(bot) {
 
     if (reached(returnStateWithoutJump)) return false;
 
-    const isOnPath = isPointOnPath(returnState.pos, {
-      max: 1.12,
-      onGround: true,
-    });
+    // if (canWalkJump(targetPoint)) return false;
 
-    if (!isOnPath) return false;
+    const xDist = Math.abs(returnState.pos.x - bot.entity.position.x);
+    const zDist = Math.abs(returnState.pos.z - bot.entity.position.z);
 
-    return true;
-  }
+    const targetDistX = Math.abs(returnState.pos.x - targetPoint.x);
+    const targetDistZ = Math.abs(returnState.pos.z - targetPoint.z);
 
-  function between(x, min, max) {
-    return x >= min && x <= max;
+    const jumpDist = Math.sqrt(xDist * xDist + zDist * zDist);
+    const targetDist = Math.sqrt(
+      targetDistX * targetDistX + targetDistZ * targetDistZ
+    );
+
+    //check y distance fo xtra precision
+    const yDist = Math.abs(returnState.pos.y - bot.entity.position.y);
+
+    const targetDistY = Math.abs(returnState.pos.y - targetPoint.y);
+
+    if (yDist > 0.5) return false;
+
+    if (jumpDist >= 2.5 && jumpDist <= 4 && targetDist <= 0.5) return true;
+
+    return false;
   }
 
   function canWalkJump(targetPoint) {
     const reached = (state) => {
       if (!state) return false;
       const isonBlock = isPlayerOnBlock(state.pos, targetPoint, true);
-
+      // console.log(isonBlock)
+      // console.log(state.pos, "stte");
+      // console.log(targetPoint,"tar")
       return isonBlock && state.onGround;
     };
 
@@ -240,6 +272,9 @@ function inject(bot) {
       getController(targetPoint, false, true),
       20
     );
+
+    // console.log(returnState.pos, "turn state")
+    // console.log(targetPoint, "target")
 
     if (!returnState) return false; // never landed on ground
 
@@ -261,7 +296,7 @@ function inject(bot) {
       targetDistX * targetDistX + targetDistZ * targetDistZ
     );
 
-    if (jumpDist <= 2.5 && targetDist <= 0.5) return true;
+    if (jumpDist <= 2 && targetDist <= 0.5) return true;
 
     return false;
   }
@@ -323,14 +358,60 @@ function inject(bot) {
      */
     let cell = straightPathOptions.target;
     let point = cell.worldPos;
-    const botPos = bot.entity.position;
+    let botPos = bot.entity.position;
 
     const blockPlace = getBlockToPlace();
     const blockBelow = bot.blockAt(
       bot.entity.position.floored().offset(0, -1, 0)
     );
 
+    // if we have taken more than 5 seconds to reach a node, we should recalculate
+    // if (performance.now() - lastNodeTime > 5000) {
+    //   const goal = currentGoal;
+    //   resetPathingState();
+    //   straightPathOptions.resolve();
+    //   await path(goal, {});
+    //   return;
+    // }
+
+    if (cell.fly) {
+      if (bot.ashfinder.debug) showPathParticleEffect(point);
+      //we gotta creative fly
+
+      if (!bot.physics.gravity !== 0) {
+        bot.creative.startFlying();
+      }
+
+      //if the point is directly above us, we can just fly up
+      if (point.y > botPos.y) {
+        if (!bot.getControlState("jump")) bot.setControlState("jump", true);
+        bot.setControlState("forward", false);
+      } else {
+        bot.setControlState("jump", false);
+        // we do this cuz mineflayers fly is weird
+        bot.creative.stopFlying();
+      }
+
+      await updateBotLookDirection(botPos, point);
+
+      if (isAtTarget(botPos, point)) {
+        resetMovementState();
+        straightPathOptions = null;
+        return true;
+      }
+
+      bot.setControlState("forward", true);
+      bot.setControlState("sprint", true);
+
+      return false;
+    } else {
+      // if (bot.physics.gravity === 0) {
+      //   bot.creative.stopFlying();
+      // }
+    }
+
     if (isAtTarget(botPos, point)) {
+      await updateBotLookDirection(botPos, point);
       resetMovementState();
       straightPathOptions = null;
       return true;
@@ -346,10 +427,17 @@ function inject(bot) {
 
     await updateBotLookDirection(botPos, point);
 
-    if (!bot.getControlState("forward")) {
+    if (
+      !breakingState &&
+      !bot.getControlState("forward") &&
+      straightPathOptions !== null &&
+      !digging
+    ) {
       bot.setControlState("forward", true);
       bot.setControlState("sprint", true);
     }
+
+    botPos = bot.entity.position;
     // Debugging: show particle effect for path
     if (bot.ashfinder.debug) showPathParticleEffect(point);
 
@@ -358,6 +446,21 @@ function inject(bot) {
 
     // Handle climbing and jumping logic
     await handleClimbingAndJumping(point, botPos);
+
+    if (bot.entity.onGround) {
+      headLocked = false;
+    }
+
+    botPos = bot.entity.position;
+
+    if (isAtTarget(botPos, point, true)) {
+      await updateBotLookDirection(botPos, point);
+      resetMovementState();
+      straightPathOptions = null;
+      return true;
+    }
+
+    await new Promise((r) => setTimeout(r, 0));
 
     return false;
   }
@@ -502,6 +605,7 @@ function inject(bot) {
     let promises = [];
     bot.clearControlStates();
 
+    breakingState = true;
     for (const pos of positions) {
       const block = bot.blockAt(pos);
       if (block.boundingBox === "block") {
@@ -525,15 +629,16 @@ function inject(bot) {
     }
 
     await Promise.all(promises);
+    breakingState = false;
   }
 
   // Check if the bot has reached the target position
-  function isAtTarget(botPos, point) {
+  function isAtTarget(botPos, point, checkGround = false) {
     return (
-      (isPlayerOnBlock(bot.entity.position, point, true) &&
+      (isPlayerOnBlock(bot.entity.position, point, checkGround) &&
         !placing &&
         !digging) ||
-      isPointOnPath(bot.entity.position, { max: 1, onGround: true })
+      isPointOnPath(bot.entity.position, { max: 1, onGround: checkGround })
     );
   }
 
@@ -622,6 +727,11 @@ function inject(bot) {
       await handleSprintJump();
       if (bot.ashfinder.debug) console.log("sprint jumped");
     } else {
+      if (bot.entity.onGround) {
+        headLocked = false;
+        walkingUntillGround = false;
+      }
+
       if (!bot.entity.isInWater) bot.setControlState("jump", false);
     }
   }
@@ -656,21 +766,31 @@ function inject(bot) {
   // Handle normal walking jump
   async function handleWalkJump(point) {
     walkingUntillGround = true;
+    headLocked = true;
     bot.setControlState("sprint", false);
     bot.setControlState("jump", true);
 
-    bot.setControlState("forward", false);
+    // make everything wait abit
+    await sleep(40);
+    // bot.setControlState("forward", false);
   }
 
   // Handle sprint jumping
   async function handleSprintJump() {
+    headLocked = true;
     bot.setControlState("sprint", true);
     bot.setControlState("jump", true);
+
+    // await sleep(100);
+
+    // bot.setControlState("forward", false);
   }
 
   // Update the bot's direction to look at the target
   async function updateBotLookDirection(botPos, point) {
     if (digging) return;
+
+    if (headLocked) return;
     const dx = Math.abs(point.x - botPos.x);
     const dy = Math.abs(point.y - botPos.y);
     const dz = Math.abs(point.z - botPos.z);
@@ -678,7 +798,7 @@ function inject(bot) {
     const yaw = Math.atan2(-dx, -dz);
     const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
 
-    await bot.lookAt(point.offset(0, 1.56, 0), true);
+    await bot.lookAt(point.offset(0, 1.6, 0), true);
   }
 
   function isNearTarget(currentPos, targetPos, tolerance = 1.5) {
@@ -885,6 +1005,7 @@ function inject(bot) {
     let currentStatus = "";
     calculating = true;
     continuousPath = true;
+    currentGoal = goal;
     const start = bot.entity.position.clone().floored();
     // console.log("Start:", start.toString());
 
@@ -893,7 +1014,8 @@ function inject(bot) {
       position,
       bot,
       createEndFunc(goal),
-      bot.ashfinder.config
+      bot.ashfinder.config,
+      options.excludedPositions
     );
 
     if (bot.ashfinder.debug) console.log("Cost:", result.cost);
@@ -929,13 +1051,6 @@ function inject(bot) {
       await straightPath({
         target: movement,
       });
-
-      // We are probably stuck
-      if (lastNodeTime + 1000 < performance.now()) {
-        if (bot.ashfinder.debug) console.log("Stuck, recalculating path...");
-        resetPathingState();
-        return await path(goal, options);
-      }
 
       if (
         currentCalculatedPathNumber > pathNumber ||
@@ -1077,8 +1192,8 @@ function inject(bot) {
    * @param {Goal} goal - The goal to go to.
    * @return {Promise} A promise that resolves when the function is complete.
    */
-  bot.ashfinder.goto = async (goal) => {
-    await path(goal, {});
+  bot.ashfinder.goto = async (goal, excludedPositions = []) => {
+    await path(goal, { excludedPositions });
 
     resetPathingState();
   };
@@ -1128,6 +1243,16 @@ function inject(bot) {
     if (straightPathOptions !== null) await straightPathTick();
   }
 
+  // async function lookTick() {
+  //   if (!straightPathOptions) return;
+
+  //   const { target } = straightPathOptions;
+  //   const botPos = bot.entity.position;
+
+  //   await updateBotLookDirection(botPos, target.worldPos);
+  // }
+
+  // bot.on("physicsTick", lookTick);
   bot.on("physicsTick", moveTick);
   bot.on("physicsTick", followTick);
   bot.on("death", resetPathingState);

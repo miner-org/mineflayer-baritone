@@ -39,9 +39,11 @@ bot.once("spawn", async () => {
       const z = parseInt(args[2]);
       endPos = new Vec3(x, y, z);
 
-      const goal = new GoalNear(endPos, 2);
+      bot.creative.startFlying();
 
-      await bot.ashfinder.goto(goal);
+      // const goal = new GoalNear(endPos, 2);
+
+      // await bot.ashfinder.goto(goal);
     }
 
     if (command === "f!find") {
@@ -214,6 +216,17 @@ bot.once("spawn", async () => {
       }
     }
   });
+
+  // bot.on("physicsTick", () => {
+  //   //help us minotr bots velocirt
+  //   const velocityString = `x: ${bot.entity.velocity.x.toFixed(
+  //     2
+  //   )} y: ${bot.entity.velocity.y.toFixed(
+  //     2
+  //   )} z: ${bot.entity.velocity.z.toFixed(2)}`;
+
+  //   process.stdout.write(`\r${velocityString}`);
+  // });
 });
 
 bot.on("error", console.log);

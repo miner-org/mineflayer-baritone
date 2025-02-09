@@ -1,16 +1,57 @@
-# Minecraft Pathfinder Using Mineflayer
+# 🏃‍♂️ Mineflayer Pathfinder (WIP)
 
 ## Overview
-- Bot go brrr real
 
+This is a **basic pathfinder** for [Mineflayer](https://github.com/PrismarineJS/mineflayer) that includes:
 
-# Warning very buggy and still in dev
+- ✅ **Basic Pathfinding**
+- ✅ **Parkour Moves**
+- ✅ **Breaking Blocks**
+- 🚧 **Placing Blocks (Work in Progress)**
 
-# how to test/use
-- make sure to change whatever you want in `src/index.js`
+Bot goes **brrr** and sometimes does things **correctly**. Sometimes.
 
-- run `node src/index.js host port`(outside the src folder)
+---
 
-- Once the bot is in game i have a few commands set up the best one to use would be s!find block_name it finds the nearest block_name and creates a path to it and follows it.
+## ⚠️ Warning: Very Buggy!
 
-Github is very ceing, this is proof (**real**)
+This is still in **active development**. Expect weird movement, unintended falls, and occasional bot existential crises.
+
+---
+
+## 📦 Installation
+
+To install, run:
+
+```sh
+npm install @miner-org/mineflayer-baritone
+```
+
+Example:
+
+```js
+const mineflayer = require("mineflayer");
+const pathfinder = require("@miner-org/mineflayer-baritone").loader;
+const goals = require("@miner-org/mineflayer-baritone").goals;
+const { Vec3 } = require("vec3");
+
+const bot = mineflayer.createBot({ username: "PathfinderBot" });
+
+bot.loadPlugin(pathfinder);
+
+bot.once("spawn", async () => {
+  const goal = new goals.GoalExact(new Vec3(100, 65, 100));
+
+  await bot.ashfinder.goto(goal);
+});
+```
+
+(Yes, it might fail, but that’s part of the experience.)
+
+# Known issues
+
+- Tends to get stuck when parkouring so if your are using this for short distance stuff disable parkour.
+
+# Contributing
+
+Pull requests are welcome! If you encounter issues, feel free to report them.

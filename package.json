@@ -1,8 +1,8 @@
 {
   "name": "@miner-org/mineflayer-baritone",
-  "version": "0.0.1",
+  "version": "0.4.1",
   "description": "Minecraft pathfinder made in javascript using mineflayer and node js.",
-  "main": "src/index.js",
+  "main": "index.js",
   "scripts": {
     "start": "node src/index.js localhost 25565"
   },
@@ -13,9 +13,14 @@
   "author": "Ash",
   "license": "ISC",
   "dependencies": {
-    "@nxg-org/mineflayer-physics-util": "github:nxg-org/mineflayer-physics-utils",
-    "mineflayer": "^4.20.0",
-    "mineflayer-elytrafly": "^1.4.6",
+    "@nxg-org/mineflayer-physics-util": "^1.7.11",
     "require-dir": "^1.2.0"
+  },
+  "repository": {
+    "url": "https://github.com/miner-org/mineflayer-baritone.git",
+    "type": "git"
+  },
+  "devDependencies": {
+    "mineflayer": "^4.25.0"
   }
 }

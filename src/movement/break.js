@@ -1,12 +1,13 @@
 const { Move, registerMoves } = require("./");
-const divideFactor = 2;
+const divideFactor = 1;
 
 class MoveBreakForward extends Move {
   addNeighbors(neighbors, config, manager) {
     if (!config.breakBlocks) return;
 
     let targetNode = this.forward(1);
-
+    
+    this.manager = manager;
     // Define forward and upward nodes
     let forwardNode = targetNode.clone();
     let forwardUpNode = this.forward(1).up(1);
@@ -67,6 +68,7 @@ class MoveBreakForwardUp extends Move {
     if (!config.breakBlocks) return;
 
     this.config = config;
+    this.manager = manager;
 
     // Define relevant nodes
     const landingNode = this.up(1).forward(1);
@@ -119,11 +121,13 @@ class MoveBreakForwardDown extends Move {
   addNeighbors(neighbors, config, manager) {
     if (!config.breakBlocks) return;
     let targetNode = this.forward(1).down(1);
+    this.manager = manager;
 
     let breakNode = targetNode.clone();
     let forwardNode = this.forward(1);
     let forwardUpNode = this.up(1, forwardNode);
     let standingNode = this.down(1, targetNode);
+    
 
     if (manager.isNodeBroken(standingNode)) return;
 
@@ -160,11 +164,26 @@ class MoveBreakForwardDown extends Move {
     );
 
     this.break = true;
-    if (this.isBreakble(forwardUpNode, config))
+    if (
+      this.isBreakble(forwardNode, config) &&
+      this.isBreakble(breakNode, config) &&
+      this.isBreakble(forwardUpNode, config)
+    ) {
       targetNode.blocks.push(forwardUpNode);
-    if (this.isBreakble(forwardNode, config))
       targetNode.blocks.push(forwardNode);
-    if (this.isBreakble(breakNode, config)) targetNode.blocks.push(breakNode);
+      targetNode.blocks.push(breakNode);
+    }
+
+    if (
+      this.isBreakble(forwardNode, config) &&
+      this.isAir(forwardUpNode) &&
+      this.isBreakble(breakNode, config)
+    ) {
+      targetNode.blocks.push(forwardNode);
+      targetNode.blocks.push(breakNode);
+    }
+    if (this.isBreakble(breakNode, config) && this.isWalkable(forwardNode))
+      targetNode.blocks.push(breakNode);
 
     neighbors.push(
       this.makeBreakable(

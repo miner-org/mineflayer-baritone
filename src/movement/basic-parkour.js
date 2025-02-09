@@ -124,10 +124,10 @@ class MoveForwardParkourUp1 extends Move {
   addNeighbors(neighbors, config, manager) {
     if (!config.parkour) return;
 
-    let jumpNode = this.up(2);
-
     let landingNode = this.forward(2).up(1);
     let gapNode1 = this.forward(1);
+
+    if (this.isSolid(gapNode1)) return;
 
     let shouldJump =
       this.isAir(this.down(1).forward(1)) ||
@@ -157,6 +157,10 @@ class MoveForwardParkourUp2 extends Move {
     let gapNode1 = this.forward(1);
     let gapNode2 = this.forward(2);
 
+    if (this.isSolid(gapNode1)) return;
+
+    if (this.isSolid(gapNode2)) return;
+
     let shouldJump =
       (this.isAir(this.down(1).forward(1)) ||
         this.isWater(this.down(1).forward(1))) &&
@@ -177,47 +181,6 @@ class MoveForwardParkourUp2 extends Move {
     if (
       this.isWalkable(gapNode1) &&
       this.isWalkable(gapNode2) &&
-      this.isStandable(landingNode)
-    ) {
-      neighbors.push(this.makeMovement(landingNode, this.COST_PARKOUR));
-    }
-  }
-}
-
-class MoveForwardParkourUp3 extends Move {
-  addNeighbors(neighbors, config, manager) {
-    if (!config.parkour) return;
-
-    let jumpNode = this.up(2);
-
-    let landingNode = this.forward(4).up(1);
-    let gapNode1 = this.forward(1);
-    let gapNode2 = this.forward(2);
-    let gapNode3 = this.forward(3);
-
-    let shouldJump =
-      (this.isAir(this.down(1).forward(1)) ||
-        this.isWater(this.down(1).forward(1))) &&
-      (this.isAir(this.down(1).forward(2)) ||
-        this.isWater(this.down(1).forward(2))) &&
-      (this.isAir(this.down(1).forward(3)) ||
-        this.isWater(this.down(1).forward(3)));
-
-    let shouldJump2 =
-      this.isWalkable(this.up(1, gapNode1)) &&
-      this.isWalkable(this.up(1, gapNode2)) &&
-      this.isWalkable(this.up(1, gapNode3));
-
-    if (!shouldJump) return;
-    if (!shouldJump2) return;
-
-    let standingNode = this.forward(4);
-    if (manager.isNodeBroken(standingNode)) return;
-
-    if (
-      this.isWalkable(gapNode1) &&
-      this.isWalkable(gapNode2) &&
-      this.isWalkable(gapNode3) &&
       this.isStandable(landingNode)
     ) {
       neighbors.push(this.makeMovement(landingNode, this.COST_PARKOUR));
@@ -399,55 +362,19 @@ class MoveDiagonalParkour extends Move {
 
     if (manager.isNodeBroken(standingNode)) return;
 
-    let shouldJump1 =
-      this.isAir(this.forward(1).down(1)) &&
-      this.isAir(this.forward(1).down(1).right(1));
+    if (!this.isSolid(standingNode)) return;
 
-    if (!shouldJump1) return;
-    let shouldJump2 =
-      this.isAir(this.forward(2).down(1)) &&
-      this.isAir(this.forward(2).down(1).right(1));
-    if (!shouldJump2) return;
+    let spaceNode1 = this.right(1).forward(1);
 
-    let shouldJump3 =
-      this.isWalkable(this.up(1)) && this.isWalkable(this.forward(1).up(1));
-
-    if (!shouldJump3) return;
-
-    let shouldJump4 =
-      this.isWalkable(this.forward(1).right(1)) &&
-      this.isWalkable(this.forward(1).right(2));
-
-    if (!shouldJump4) return;
-
-    let shouldJump5 = this.isWalkable(this.forward(1).up(1));
-
-    if (!shouldJump5) return;
-
-    if (this.isStandable(landingNode)) {
-      neighbors.push(
-        this.makeMovement(landingNode, this.COST_PARKOUR * this.COST_DIAGONAL)
-      );
-    }
-  }
-}
-
-class MoveDiagonalUpParkour extends Move {
-  addNeighbors(neighbors, config, manager) {
-    if (!config.parkour) return;
-    let landingNode = this.right(2).forward(2).up(1);
-
-    let standingNode = this.down(1, landingNode);
-    if (manager.isNodeBroken(standingNode)) return;
-
-    if (!this.isStandable(standingNode)) return;
-
-    let spaceNode1 = this.right(1).forward(1).up(1);
+    if (!this.isWalkable(spaceNode1)) return;
 
     let isRightWalkable1 = this.isWalkable(this.right(1).up(1));
+
     let isForwardWalkable1 = this.isWalkable(this.forward(1).up(1));
-    let isRightWalkable2 = this.isWalkable(this.right(2).forward(1).up(2));
-    let isForwardWalkable2 = this.isWalkable(this.right(1).forward(2).up(2));
+
+    let isRightWalkable2 = this.isWalkable(this.right(2).forward(1).up(1));
+
+    let isForwardWalkable2 = this.isWalkable(this.right(1).forward(2).up(1));
 
     let airNode = this.forward(1).down(1).right(1);
 
@@ -459,9 +386,56 @@ class MoveDiagonalUpParkour extends Move {
       (isRightWalkable2 || isForwardWalkable2) &&
       this.isStandable(landingNode)
     ) {
-      neighbors.push(
-        this.makeMovement(landingNode, this.COST_PARKOUR * this.COST_DIAGONAL)
-      );
+      neighbors.push(this.makeMovement(landingNode, this.COST_PARKOUR));
+    }
+  }
+}
+
+class MoveDiagonalUpParkour extends Move {
+  addNeighbors(neighbors, config, manager) {
+    if (!config.parkour) return;
+    let landingNode = this.right(2).forward(2).up(1);
+    let standingNode = this.down(1, landingNode);
+
+    if (manager.isNodeBroken(standingNode)) return;
+
+    if (!this.isSolid(standingNode)) return;
+
+    let spaceNode1 = this.right(1).forward(1);
+
+    if (!this.isWalkable(spaceNode1)) return;
+
+    let isRightWalkable1 = this.isWalkable(this.right(1));
+    let isRightWalkable2 = this.isWalkable(this.right(1).up(1));
+
+    let isForwardWalkable1 = this.isWalkable(this.forward(1));
+    let isForwardWalkable2 = this.isWalkable(this.forward(1).up(1));
+
+    let isRightForwardWalkable1 = this.isWalkable(this.right(2).forward(1));
+    let isRightForwardWalkable2 = this.isWalkable(
+      this.right(2).forward(1).up(1)
+    );
+
+    let isForwardWalkable3 = this.isWalkable(this.forward(2).right(1));
+    let isForwardWalkable4 = this.isWalkable(this.forward(2).right(1).up(1));
+
+    let airNode = this.forward(1).right(1);
+
+    if (!(this.isAir(airNode) || this.isWater(airNode))) return;
+
+    if (
+      this.isWalkable(spaceNode1) &&
+      isRightWalkable1 &&
+      isRightWalkable2 &&
+      isForwardWalkable1 &&
+      isForwardWalkable2 &&
+      isRightForwardWalkable1 &&
+      isRightForwardWalkable2 &&
+      isForwardWalkable3 &&
+      isForwardWalkable4 &&
+      this.isStandable(landingNode)
+    ) {
+      neighbors.push(this.makeMovement(landingNode, this.COST_PARKOUR));
     }
   }
 }
@@ -505,22 +479,34 @@ class MoveSemiDiagonalParkour extends Move {
     if (!config.parkour) return;
     let landingNode = this.right(1).forward(2);
     let standingNode = this.down(1, landingNode);
+
     if (manager.isNodeBroken(standingNode)) return;
 
-    let isRightWalkable1 = this.isWalkable(this.forward(1).right(1));
-    let isForwardWalkable1 = this.isWalkable(this.forward(1));
-    let shouldJump =
-      this.isAir(this.forward(1).right(1).down(1)) ||
-      this.isWater(this.forward(1).right(1).down(1));
-    let shouldJump2 =
-      this.isAir(this.forward(1).down(1)) ||
-      this.isWater(this.forward(1).down(1));
+    if (!this.isSolid(standingNode)) return;
 
-    if (!isRightWalkable1 && !isForwardWalkable1) return;
+    let spaceNode1 = this.right(1).forward(1);
 
-    if (!shouldJump && !shouldJump2) return;
+    if (!this.isWalkable(spaceNode1)) return;
 
-    if (this.isStandable(landingNode)) {
+    let isRightWalkable = this.isWalkable(this.right(1).up(1));
+    let isForwardWalkable = this.isWalkable(this.forward(1).up(1));
+    let isRightWalkable2 = this.isWalkable(this.right(1).forward(1).up(1));
+    let isForwardWalkable2 = this.isWalkable(this.right(1).forward(1).up(1));
+
+    let airNode = this.forward(1).down(1).right(1);
+    let airNode2 = this.forward(1).down(1);
+    let airNode3 = this.forward(2).down(1);
+
+    if (!(this.isAir(airNode) || this.isWater(airNode))) return;
+    if (!(this.isAir(airNode2) || this.isWater(airNode2))) return;
+    if (!(this.isAir(airNode3) || this.isWater(airNode3))) return;
+
+    if (
+      this.isWalkable(spaceNode1) &&
+      (isRightWalkable || isForwardWalkable) &&
+      (isRightWalkable2 || isForwardWalkable2) &&
+      this.isStandable(landingNode)
+    ) {
       neighbors.push(this.makeMovement(landingNode, this.COST_PARKOUR));
     }
   }
@@ -535,7 +521,6 @@ registerMoves([
   // up parkour
   MoveForwardParkourUp1,
   MoveForwardParkourUp2,
-  MoveForwardParkourUp3,
 
   // down parkour
   MoveForwardParkourDown1,
@@ -543,10 +528,10 @@ registerMoves([
   MoveForwardParkourDown3,
 
   // diagonal parkour
-  MoveDiagonalParkour,
-  MoveDiagonalUpParkour,
-  MoveDiagonalDownParkour,
-  MoveSemiDiagonalParkour,
+  // MoveDiagonalParkour,
+  // MoveDiagonalUpParkour,
+  // MoveDiagonalDownParkour,
+  // MoveSemiDiagonalParkour,
 
   //idk
   MoveForwardParkourDownExt,

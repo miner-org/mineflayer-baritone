@@ -1,9 +1,12 @@
+const Vec3 = require("vec3").Vec3;
+
 class Goal {
   constructor(position) {
     this.position = position.floored();
-    this.x = Math.floor(position.x);
-    this.y = Math.floor(position.y);
-    this.z = Math.floor(position.z);
+    //round down all values
+    this.x = Math.floor(this.position.x);
+    this.y = Math.floor(this.position.y);
+    this.z = Math.floor(this.position.z);
   }
 
   isReached(otherPosition) {
@@ -11,7 +14,7 @@ class Goal {
   }
 }
 /**
- * This goal is used to reach a position within a certain distance
+ * This goal is used to reach a position within a certain distance, considering Y.
  */
 class GoalNear extends Goal {
   constructor(position, distance) {
@@ -23,26 +26,35 @@ class GoalNear extends Goal {
     if (!otherPosition) return false;
 
     const xDistance = Math.abs(this.x - otherPosition.x);
-    const yDistance = Math.abs(this.y - otherPosition.y);
     const zDistance = Math.abs(this.z - otherPosition.z);
+    const yDistance = this.y - otherPosition.y;
 
-    const distanceSq = this.distance * this.distance;
+    // If otherPosition is directly below or above within XZ distance, allow reaching
+    if (
+      yDistance === 1 &&
+      xDistance <= this.distance &&
+      zDistance <= this.distance
+    ) {
+      return true;
+    }
 
     return (
-      (xDistance * xDistance + yDistance * yDistance + zDistance * zDistance) <=
-      distanceSq
+      xDistance <= this.distance &&
+      zDistance <= this.distance &&
+      Math.abs(yDistance) <= 1
     );
   }
 }
 
 class GoalExact extends Goal {
+  /***
+   * @param {Vec3} otherPosition
+   */
   isReached(otherPosition) {
     if (!otherPosition) return false;
-    return (
-      this.x === otherPosition.x &&
-      this.y === otherPosition.y &&
-      this.z === otherPosition.z
-    );
+    const floored = otherPosition.floored();
+
+    return this.x === floored.x && this.y === floored.y && this.z === floored.z;
   }
 }
 /**
@@ -153,6 +165,25 @@ class GoalXZ extends Goal {
   }
 }
 
+/**
+ * This goal is used to reach a position within a certain distance on the XZ plane.
+ */
+class GoalXZNear extends Goal {
+  constructor(position, distance) {
+    super(position);
+    this.distance = distance;
+  }
+
+  isReached(otherPosition) {
+    if (!otherPosition) return false;
+
+    const xDistance = Math.abs(this.x - otherPosition.x);
+    const zDistance = Math.abs(this.z - otherPosition.z);
+
+    return xDistance <= this.distance && zDistance <= this.distance;
+  }
+}
+
 module.exports = {
   Goal,
   GoalNear,
@@ -163,4 +194,5 @@ module.exports = {
   GoalComposite,
   GoalInvert,
   GoalXZ,
+  GoalXZNear,
 };

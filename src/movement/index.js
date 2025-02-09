@@ -107,13 +107,13 @@ class Move {
     this.dir = dir;
     this.bot = bot;
     this.config = config;
-    this.COST_BREAK = 5;
+    this.COST_BREAK = 10;
     this.COST_NORMAL = 1;
     this.COST_DIAGONAL = Math.SQRT2;
     this.COST_UP = 1;
     this.COST_PLACE = 5;
-    this.COST_PARKOUR = 3;
-    this.COST_FALL = 1.2;
+    this.COST_PARKOUR = 5;
+    this.COST_FALL = 1;
     this.COST_SWIM = 2.02;
   }
 
@@ -138,6 +138,12 @@ class Move {
   makeVerticalPlace(position, costToPlace) {
     position.placeVertical = true;
     position.cost = costToPlace;
+    return position;
+  }
+
+  makeFlyMovement(position, cost) {
+    position.fly = true;
+    position.cost = cost;
     return position;
   }
 
@@ -200,6 +206,9 @@ class Move {
   isBreakble(node, config) {
     const block = this.world.getBlock(node);
     if (!block) return false;
+
+    if (this.manager.isAreaMarkedNode(node)) return false;
+
     return (
       this.isSolid(node) &&
       !unbreakableBlocks.includes(block.name) &&
@@ -286,6 +295,21 @@ class Move {
     );
   }
 
+  almostFullBlock(node) {
+    const block = this.getBlock(node);
+
+    if (!block) return false;
+
+    const shapes = block.shapes;
+    const firstShapeArray = shapes[0];
+
+    if (!firstShapeArray) return false;
+
+    const maxY = firstShapeArray[4];
+
+    if (maxY === 0.9375) return true;
+  }
+
   isFullBlock(node) {
     const block = this.getBlock(node);
 
@@ -298,7 +322,7 @@ class Move {
 
     const maxY = firstShapeArray[4];
 
-    if (maxY === 1) return true;
+    if (maxY >= 0.9375) return true;
   }
 
   isHalfBlock(node) {

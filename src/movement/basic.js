@@ -134,6 +134,7 @@ class MoveForwardDown extends Move {
 
       // If a standable node is found, add it as a valid neighbor
       if (
+        !this.almostFullBlock(landingNode) &&
         this.isStandable(landingNode) &&
         !this.isStandable(walkableNode) &&
         !manager.isNodeBroken(landingNode.down(1))

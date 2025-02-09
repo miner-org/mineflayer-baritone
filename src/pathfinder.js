@@ -55,6 +55,14 @@ class NodeManager {
 
     return attribute === "broken";
   }
+
+  isAreaMarkedNode(node) {
+    const attribute = this.getNodeAttribute(node);
+
+    if (!attribute) return false;
+
+    return attribute === "areaMarked";
+  }
 }
 
 class Cell {
@@ -145,7 +153,7 @@ function processBatch({
     neighbor.fCost = neighbor.gCost + neighbor.hCost;
 
     if (neighbor.hCost < bestNode.hCost) {
-      console.log("Setting neighbor to best node");
+      // console.log("Setting neighbor to best node");
       bestNode = neighbor;
     }
 
@@ -183,20 +191,24 @@ function processBatch({
   }
 }
 
-async function Astar(start, endPos, bot, endFunc, config) {
-  let end = endPos.clone().offset(0.5, 0, 0.5);
+async function Astar(start, endPos, bot, endFunc, config, excludedPositions) {
+  let end = endPos.clone().floored().offset(0.5, 0, 0.5);
   start = start.floored().offset(0.5, 0, 0.5);
+  // console.log(start)
 
   const openList = new BinaryHeapOpenSet(compare);
   const openSet = new Map();
   const closedSet = new Set();
   const nodemanager = new NodeManager();
+  nodemanager.markNodes(excludedPositions, "areaMarked")
   const startNode = new Cell(start);
 
   const world = bot.world;
 
+  const blockID = world.getBlock(startNode.worldPos).name;
+
   startNode.gCost = 0;
-  startNode.hCost = euclideanDistance(startNode.worldPos, end);
+  startNode.hCost = euclideanDistance(startNode.worldPos, end, blockID);
   startNode.fCost = startNode.gCost + startNode.hCost;
 
   openList.push(startNode);
@@ -222,8 +234,8 @@ async function Astar(start, endPos, bot, endFunc, config) {
       }
 
       if (endFunc(currentNode.worldPos)) {
-        // console.log(currentNode.worldPos);
-        // console.log(end);
+        // console.log("current",currentNode.worldPos);
+        // console.log("end", end);
 
         return resolve({
           path: reconstructPath(currentNode),
@@ -265,8 +277,10 @@ async function Astar(start, endPos, bot, endFunc, config) {
             neighborData.z
           );
 
+          const blockID = world.getBlock(neighbor.worldPos).name;
+
           neighbor.gCost = tempG;
-          neighbor.hCost = euclideanDistance(neighborData, end);
+          neighbor.hCost = euclideanDistance(neighborData, end, blockID);
           neighbor.fCost = neighbor.gCost + neighbor.hCost;
           neighbor.parent = currentNode;
 
@@ -280,6 +294,10 @@ async function Astar(start, endPos, bot, endFunc, config) {
           if (neighbor.fCost <= 100) {
             openList.update(neighbor);
           }
+        }
+
+        if (neighborData.fly) {
+          neighbor.fly = true;
         }
 
         if (neighborData.break) {
