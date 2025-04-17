@@ -7,6 +7,9 @@ class Goal {
     this.x = Math.floor(this.position.x);
     this.y = Math.floor(this.position.y);
     this.z = Math.floor(this.position.z);
+
+    this.x += 0.5;
+    this.z += 0.5;
   }
 
   isReached(otherPosition) {
@@ -52,7 +55,7 @@ class GoalExact extends Goal {
    */
   isReached(otherPosition) {
     if (!otherPosition) return false;
-    const floored = otherPosition.floored();
+    const floored = otherPosition;
 
     return this.x === floored.x && this.y === floored.y && this.z === floored.z;
   }

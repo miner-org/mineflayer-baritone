@@ -14,7 +14,7 @@ const {
 } = require("./utils.js");
 const { Cell } = require("./pathfinder");
 const AABB = require("./aabb.js");
-const { Goal } = require("./goal.js");
+const { Goal, GoalNear } = require("./goal.js");
 
 const sleep = (ms = 2000) => {
   return new Promise((r) => {
@@ -48,14 +48,15 @@ function inject(bot) {
       "sand",
       "farmland",
     ],
-    blocksToStayAway: ["cactus", "cobweb"],
-    placeBlocks: false,
+    blocksToStayAway: ["cactus", "cobweb", "lava", "gravel"],
+    avoidDistance: 8,
+    placeBlocks: true,
     breakBlocks: true,
     parkour: true,
     checkBreakUpNodes: true,
     proParkour: true,
     fly: false,
-    maxFallDist: 4,
+    maxFallDist: 3,
     maxWaterDist: 256,
     disposableBlocks: [
       "dirt",
@@ -72,23 +73,24 @@ function inject(bot) {
       "spruce_door",
       "birch_door",
       "jungle_door",
-      "acaica_door",
+      "acacia_door",
       "dark_oak_door",
       "mangrove_door",
       "warped_door",
       "crimson_door",
       // gates
-      "oak_gate",
-      "spruce_gate",
-      "birch_gate",
-      "jungle_gate",
-      "acacia_gate",
-      "dark_oak_gate",
-      "mangrove_gate",
-      "warped_gate",
-      "crimson_gate",
+      "oak_fence_gate", 
+      "spruce_fence_gate",
+      "birch_fence_gate",
+      "jungle_fence_gate",
+      "acacia_fence_gate",
+      "dark_oak_fence_gate",
+      "mangrove_fence_gate",
+      "warped_fence_gate",
+      "crimson_fence_gate",
     ],
-    thinkTimeout: 10000,
+
+    thinkTimeout: 5000,
   };
   bot.ashfinder.debug = false;
   // bot.loadPlugin(loader);
@@ -113,6 +115,11 @@ function inject(bot) {
   let targetEntity = null;
   let following = false;
   let breakingState = false;
+  let placingState = false;
+
+  let lastUpdate = performance.now();
+  let isPaused = false;
+
   /**
    * @type {Goal}
    */
@@ -232,10 +239,8 @@ function inject(bot) {
     const targetDistX = Math.abs(returnState.pos.x - targetPoint.x);
     const targetDistZ = Math.abs(returnState.pos.z - targetPoint.z);
 
-    const jumpDist = Math.sqrt(xDist * xDist + zDist * zDist);
-    const targetDist = Math.sqrt(
-      targetDistX * targetDistX + targetDistZ * targetDistZ
-    );
+    const jumpDist = xDist + zDist;
+    const targetDist = targetDistX + targetDistZ;
 
     //check y distance fo xtra precision
     const yDist = Math.abs(returnState.pos.y - bot.entity.position.y);
@@ -244,7 +249,7 @@ function inject(bot) {
 
     if (yDist > 0.5) return false;
 
-    if (jumpDist >= 2.5 && jumpDist <= 4 && targetDist <= 0.5) return true;
+    if (jumpDist >= 2 && jumpDist <= 4 && targetDist <= 0.8) return true;
 
     return false;
   }
@@ -291,17 +296,16 @@ function inject(bot) {
     const targetDistX = Math.abs(returnState.pos.x - targetPoint.x);
     const targetDistZ = Math.abs(returnState.pos.z - targetPoint.z);
 
-    const jumpDist = Math.sqrt(xDist * xDist + zDist * zDist);
-    const targetDist = Math.sqrt(
-      targetDistX * targetDistX + targetDistZ * targetDistZ
-    );
+    const jumpDist = xDist + zDist;
+    const targetDist = targetDistX + targetDistZ;
 
-    if (jumpDist <= 2 && targetDist <= 0.5) return true;
+    if (jumpDist <= 2 && targetDist <= 0.6) return true;
 
     return false;
   }
 
   function canStraightLine(sprint = false, targetPoint) {
+    // console.log(targetPoint)
     const reached = (state) => {
       if (!state) return false;
       const isonBlock = isPlayerOnBlock(state.pos, targetPoint);
@@ -312,14 +316,8 @@ function inject(bot) {
     const state = simulateUntil(
       bot,
       reached,
-      200,
-      {
-        jump: false,
-        forward: true,
-        sprint,
-      },
-      true,
-      false
+      getController(targetPoint, false, sprint),
+      1
     );
 
     if (!state) return;
@@ -343,13 +341,6 @@ function inject(bot) {
     return false;
   }
 
-  function stopVel() {
-    bot.clearControlStates();
-
-    bot.entity.velocity.x = 0;
-    bot.entity.velocity.z = 0;
-  }
-
   async function straightPathTick() {
     if (!straightPathOptions) return false;
 
@@ -359,6 +350,7 @@ function inject(bot) {
     let cell = straightPathOptions.target;
     let point = cell.worldPos;
     let botPos = bot.entity.position;
+    const shouldSlowDown = straightPathOptions.slowDown;
 
     const blockPlace = getBlockToPlace();
     const blockBelow = bot.blockAt(
@@ -395,13 +387,13 @@ function inject(bot) {
       await updateBotLookDirection(botPos, point);
 
       if (isAtTarget(botPos, point)) {
-        resetMovementState();
+        resetMovementState(shouldSlowDown);
         straightPathOptions = null;
         return true;
       }
 
       bot.setControlState("forward", true);
-      bot.setControlState("sprint", true);
+      // bot.setControlState("sprint", true);
 
       return false;
     } else {
@@ -412,13 +404,26 @@ function inject(bot) {
 
     if (isAtTarget(botPos, point)) {
       await updateBotLookDirection(botPos, point);
-      resetMovementState();
+      resetMovementState(shouldSlowDown);
       straightPathOptions = null;
       return true;
     }
 
     if (cell.horizontalPlacable.length > 0) {
+      pause();
       await handleHorizontalPlacables(cell, blockPlace, blockBelow);
+      placing = false;
+    }
+
+    if (cell.verticalPlacable.length > 0) {
+      pause();
+      await handleVerticalPlacables(cell, blockPlace, blockBelow);
+      placing = false;
+    }
+
+    if (cell.placeBlocks.length > 0) {
+      pause();
+      await handlePlaceBlocks(cell, blockPlace);
     }
 
     if (cell.breakableNeighbors.length > 0) {
@@ -431,10 +436,11 @@ function inject(bot) {
       !breakingState &&
       !bot.getControlState("forward") &&
       straightPathOptions !== null &&
-      !digging
+      !digging &&
+      !placing
     ) {
       bot.setControlState("forward", true);
-      bot.setControlState("sprint", true);
+      // bot.setControlState("sprint", true);
     }
 
     botPos = bot.entity.position;
@@ -455,7 +461,7 @@ function inject(bot) {
 
     if (isAtTarget(botPos, point, true)) {
       await updateBotLookDirection(botPos, point);
-      resetMovementState();
+      resetMovementState(shouldSlowDown);
       straightPathOptions = null;
       return true;
     }
@@ -472,6 +478,88 @@ function inject(bot) {
       .find((item) =>
         bot.ashfinder.config.disposableBlocks.includes(item.name)
       );
+  }
+
+  /**
+   *
+   * @param {Cell} cell
+   */
+  async function handlePlaceBlocks(cell, blockPlace) {
+    if (cell.placeBlocks.length === 0) return;
+    let promises = [];
+
+    placingState = true;
+
+    for (const poss of cell.placeBlocks) {
+      const vec3 = new Vec3(poss.x, poss.y, poss.z);
+
+      const block = bot.blockAt(vec3);
+
+      if (block.boundingBox === "empty") {
+        promises.push(
+          (async () => {
+            try {
+              if (!placing) {
+                placing = true;
+                await equipBlockIfNeeded(blockPlace);
+                await placeBlockAtTarget(poss, poss.dir);
+                placing = false;
+              }
+            } catch (error) {
+              console.error(`Error digging block at ${block.position}:`, error);
+              placing = false;
+            }
+          })()
+        );
+      }
+    }
+
+    placingState = false;
+
+    resume();
+  }
+
+  async function handleBreakingBlocks(positions) {
+    let promises = [];
+    bot.clearControlStates();
+
+    breakingState = true;
+    // console.log(positions);
+    for (const pos of positions) {
+      // console.log(pos);
+      const vec3 = new Vec3(pos.x, pos.y, pos.z);
+
+      const block = bot.blockAt(vec3);
+      // console.log(block.position)
+      if (bot.ashfinder.debug)
+        showPathParticleEffect(block.position, {
+          r: 0.11,
+          b: 0.11,
+          g: 0.11,
+        });
+
+      if (block.boundingBox === "block") {
+        promises.push(
+          (async () => {
+            try {
+              if (!digging) {
+                digging = true;
+                await autoTool(bot, block);
+                await bot.lookAt(block.position.offset(0.5, 0, 0.5), true);
+                await bot.dig(block, true);
+                digging = false;
+              }
+            } catch (error) {
+              console.error(`Error digging block at ${block.position}:`, error);
+              digging = false;
+            }
+          })()
+        );
+      }
+    }
+
+    await Promise.all(promises);
+    breakingState = false;
   }
 
   /**
@@ -497,9 +585,68 @@ function inject(bot) {
         placing = true;
         await equipBlockIfNeeded(blockPlace);
         await placeBlockAtTarget(target, target.dir);
-        placing = false;
+        await sleep(10);
       }
     }
+
+    resume();
+  }
+
+  /**
+   *
+   * @param {Cell} cell
+   * @param {import("prismarine-item").Item} blockPlace
+   * @returns
+   */
+  async function handleVerticalPlacables(cell, blockPlace) {
+    bot.clearControlStates();
+
+    for (const target of cell.verticalPlacable) {
+      if (!placing) {
+        await bot.lookAt(target);
+        bot.setControlState("back", true);
+
+        placing = true;
+        await equipBlockIfNeeded(blockPlace);
+        await placeBlockAtTarget(target, target.dir);
+        await sleep(10);
+
+        bot.setControlState("back", false);
+      }
+    }
+
+    resume();
+  }
+
+  function smoothPath(path) {
+    if (path.length <= 2) return path;
+
+    const smoothed = [];
+    let i = 0;
+
+    while (i < path.length - 1) {
+      let j = path.length - 1;
+
+      // Try to jump as far as possible from i to j
+      while (j > i + 1) {
+        const start = path[i].worldPos ?? path[i];
+        const end = path[j].worldPos ?? path[j];
+
+        if (canStraightLine(false, end) || canStraightLine(true, end)) {
+          break;
+        }
+
+        j--;
+      }
+
+      smoothed.push(path[i]);
+      i = j;
+    }
+
+    // Add the final point
+    smoothed.push(path[path.length - 1]);
+
+    return smoothed;
   }
 
   async function moveToEdge(target) {
@@ -586,7 +733,8 @@ function inject(bot) {
     const dirVec = new Vec3(dir.x, 0, dir.z);
 
     try {
-      await bot.placeBlock(block, dirVec);
+      bot.clearControlStates();
+      await placeBlock(bot, bot.heldItem.name, pos.floored());
     } catch (error) {
       console.error(`Error placing block at ${block.position}:`, error);
     }
@@ -594,42 +742,11 @@ function inject(bot) {
 
   async function equipBlockIfNeeded(item) {
     if (!item) {
-      console.log("guh");
+      console.log("Item is undefined or null");
       return;
     }
 
     await bot.equip(item, "hand");
-  }
-
-  async function handleBreakingBlocks(positions) {
-    let promises = [];
-    bot.clearControlStates();
-
-    breakingState = true;
-    for (const pos of positions) {
-      const block = bot.blockAt(pos);
-      if (block.boundingBox === "block") {
-        promises.push(
-          (async () => {
-            try {
-              if (!digging) {
-                digging = true;
-                await autoTool(bot, block);
-                await bot.lookAt(block.position.offset(0.5, 0, 0.5), true);
-                await bot.dig(block, true);
-                digging = false;
-              }
-            } catch (error) {
-              console.error(`Error digging block at ${block.position}:`, error);
-              digging = false;
-            }
-          })()
-        );
-      }
-    }
-
-    await Promise.all(promises);
-    breakingState = false;
   }
 
   // Check if the bot has reached the target position
@@ -661,8 +778,8 @@ function inject(bot) {
   }
 
   // Reset movement state when the bot reaches the target
-  function resetMovementState() {
-    bot.setControlState("sprint", false);
+  function resetMovementState(shouldSlowDown) {
+    bot.setControlState("sprint", !shouldSlowDown);
     bot.setControlState("jump", false);
     bot.setControlState("forward", false);
     if (straightPathOptions) straightPathOptions.resolve();
@@ -674,12 +791,15 @@ function inject(bot) {
   }
 
   // Show path particle effect for debugging
-  function showPathParticleEffect(point) {
+  function showPathParticleEffect(
+    point,
+    colors = { r: 0.2, g: 0.82, b: 0.48 }
+  ) {
     // bot.chat(
     //   `/particle dust{color:[0.2,0.82,0.48],scale:1} ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 1 4 force`
     // );
     bot.chat(
-      `/particle dust 0.2 0.82 0.48 1 ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 2 10 force`
+      `/particle dust ${colors.r} ${colors.g} ${colors.b} 1 ${point.x} ${point.y} ${point.z} 0.1 0.1 0.1 2 10 force`
     );
   }
 
@@ -801,6 +921,55 @@ function inject(bot) {
     await bot.lookAt(point.offset(0, 1.6, 0), true);
   }
 
+  /**
+   * Smoothly rotates the bot to look at a target position using raw packets.
+   * @param {Vec3} targetPos - The position to look at.
+   * @param {number} smoothness - A multiplier for how fast the bot should turn (lower is slower).
+   */
+  async function lookAtRaw(targetPos, smoothness = 2) {
+    if (!targetPos) return;
+
+    // Get bot's current position
+    const botPos = bot.entity.position.offset(0, bot.entity.height, 0);
+
+    // Calculate yaw and pitch using trigonometry
+    const dx = targetPos.x - botPos.x;
+    const dy = targetPos.y - botPos.y;
+    const dz = targetPos.z - botPos.z;
+
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    let yaw = Math.atan2(-dx, dz) * (180 / Math.PI);
+    let pitch = Math.atan2(-dy, distance) * (180 / Math.PI);
+
+    // Normalize yaw to be within -180 to 180
+    yaw = ((yaw + 180) % 360) - 180;
+
+    // Smoothly interpolate yaw & pitch to prevent detection
+    const prevYaw = bot.entity.yaw * (180 / Math.PI);
+    const prevPitch = bot.entity.pitch * (180 / Math.PI);
+    const newYaw = prevYaw + (yaw - prevYaw) / smoothness;
+    const newPitch = prevPitch + (pitch - prevPitch) / smoothness;
+
+    // Convert to radians for packets
+    const yawRadians = (newYaw / 180) * Math.PI;
+    const pitchRadians = (newPitch / 180) * Math.PI;
+
+    // Send raw rotation packet (clientbound)
+    bot._client.write("position_look", {
+      x: bot.entity.position.x,
+      y: bot.entity.position.y,
+      z: bot.entity.position.z,
+      yaw: newYaw,
+      pitch: newPitch,
+      flags: 0x01 | 0x02, // Yaw & pitch relative to prevent insta-rotation
+      teleportId: 0, // Needed for anti-cheats
+    });
+
+    // Update bot's internal yaw/pitch
+    bot.entity.yaw = yawRadians;
+    bot.entity.pitch = pitchRadians;
+  }
+
   function isNearTarget(currentPos, targetPos, tolerance = 1.5) {
     const deltaX = targetPos.x - currentPos.x;
     const deltaY = targetPos.y - currentPos.y;
@@ -916,45 +1085,12 @@ function inject(bot) {
     return { yaw, pitch };
   }
 
-  let initialPos = null;
-  let finalPos = null;
-  let startTime = null;
-  let endTime = null;
-
-  function getSpeed() {
-    // Record initial position and time when the bot starts moving
-    if (!initialPos) {
-      initialPos = bot.entity.position.clone();
-      startTime = new Date();
-    } else {
-      // Record final position and time when the bot stops moving
-      finalPos = bot.entity.position.clone();
-      endTime = new Date();
-
-      // Calculate distance traveled
-      const distance = initialPos.distanceTo(finalPos);
-
-      // Calculate time taken in seconds
-      const timeTaken = (endTime - startTime) / 1000; // Convert to seconds
-
-      // Calculate speed
-      const speed = distance / timeTaken;
-
-      console.log(`Bot's speed: ${speed} blocks per second`);
-
-      // Reset positions and times for next movement
-      initialPos = null;
-      finalPos = null;
-      startTime = null;
-      endTime = null;
-    }
-  }
-
-  function straightPath({ target, skip }) {
+  function straightPath({ target, skip, slowDown }) {
     straightPathOptions = {
       target,
 
       skip: skip ?? true,
+      slowDown,
     };
     return new Promise((resolve, reject) => {
       if (straightPathOptions) straightPathOptions.resolve = resolve;
@@ -972,37 +1108,12 @@ function inject(bot) {
     };
   }
 
-  function refinePath(path, bot) {
-    const refined = [];
-    for (let i = 0; i < path.length - 1; i++) {
-      const current = path[i].worldPos;
-      const next = path[i + 1].worldPos;
-
-      const dx = Math.abs(current.x - next.x);
-      const dy = next.y - current.y; // Vertical difference
-      const dz = Math.abs(current.z - next.z);
-
-      // Add nodes where vertical changes occur or where large distances are present
-      if (dx > 1 || dz > 1 || Math.abs(dy) > 0) {
-        refined.push(path[i]);
-
-        // Add intermediate points for jumps or falls
-        if (dy > 1) {
-          refined.push(new Cell(current.offset(0, 1, 0))); // Add jump step
-        } else if (dy < 0) {
-          refined.push(new Cell(next.offset(0, -1, 0))); // Add fall step
-        }
-      }
-    }
-    refined.push(path[path.length - 1]); // Ensure the last node is included
-    return refined;
-  }
-
   async function path(goal, options = {}) {
     if (bot.ashfinder.debug) console.log("called");
     let position = goal.position.clone().floored();
     let pathNumber = ++currentPathNumber;
     let currentStatus = "";
+    let slowDown = false;
     calculating = true;
     continuousPath = true;
     currentGoal = goal;
@@ -1017,6 +1128,8 @@ function inject(bot) {
       bot.ashfinder.config,
       options.excludedPositions
     );
+
+    result.path.shift();
 
     if (bot.ashfinder.debug) console.log("Cost:", result.cost);
     if (bot.ashfinder.debug) console.log("Status:", result.status);
@@ -1035,7 +1148,13 @@ function inject(bot) {
     extractPathPoints();
 
     if (bot.ashfinder.debug) console.log("Break: ", breakBlocks);
-    if (bot.ashfinder.debug) console.log("Place: ", horizontal);
+    if (bot.ashfinder.debug) console.log("PlaceH: ", horizontal);
+    if (bot.ashfinder.debug) console.log("PlaceV: ", vertical);
+    if (bot.ashfinder.debug)
+      console.log(
+        "Shits: ",
+        complexPathPoints.map((cell) => cell.moveName)
+      );
 
     while (complexPathPoints.length > 0) {
       // for (const cell of complexPathPoints) {
@@ -1046,10 +1165,17 @@ function inject(bot) {
 
       //   await sleep(10);
       // }
+
+      // slow tf down
+      if (complexPathPoints.length <= 5) {
+        slowDown = true;
+      }
+
       const movement = complexPathPoints[0];
 
       await straightPath({
         target: movement,
+        slowDown,
       });
 
       if (
@@ -1160,27 +1286,14 @@ function inject(bot) {
 
     following = true;
 
-    const goal = targetEntity.position.clone().floored();
+    const goal = new GoalNear(
+      targetEntity.position.floored(),
+      followOptions.minDistance
+    );
 
     await path(goal, {});
 
     following = false;
-  }
-
-  function arraysMatch(arr1, arr2) {
-    if (arr1.length !== arr2.length) {
-      return false;
-    }
-    for (let i = 0; i < arr1.length; i++) {
-      if (
-        arr1[i].x !== arr2[i].x ||
-        arr1[i].y !== arr2[i].y ||
-        arr1[i].z !== arr2[i].z
-      ) {
-        return false;
-      }
-    }
-    return true;
   }
 
   bot.ashfinder.elytraPath = async (endPos, options = {}) => {
@@ -1253,10 +1366,48 @@ function inject(bot) {
   // }
 
   // bot.on("physicsTick", lookTick);
-  bot.on("physicsTick", moveTick);
-  bot.on("physicsTick", followTick);
+
+  function startUpdateLoop() {
+    const tickRate = 50;
+
+    const update = () => {
+      if (!isPaused) {
+        const now = performance.now();
+        const deltaTime = (now - lastUpdate) / 1000;
+        lastUpdate = now;
+
+        updateTick(deltaTime);
+      } else {
+        // If paused, just reset the timestamp so deltaTime isn't huge when resuming
+        lastUpdate = performance.now();
+      }
+
+      setTimeout(update, tickRate);
+    };
+
+    update();
+  }
+
+  function updateTick(deltaTime) {
+    moveTick();
+    followTick();
+  }
+
+  // Pause and resume functions
+  function pause() {
+    isPaused = true;
+  }
+
+  function resume() {
+    isPaused = false;
+  }
+
+  // bot.on("physicsTick", moveTick);
+  // bot.on("physicsTick", followTick);
   bot.on("death", resetPathingState);
   // bot.on("move", getSpeed);
+
+  startUpdateLoop();
 }
 
 module.exports = inject;

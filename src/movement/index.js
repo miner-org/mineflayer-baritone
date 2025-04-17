@@ -3,14 +3,10 @@ const { Vec3 } = require("vec3");
 const nbt = require("prismarine-nbt");
 
 const cardinalDirections = [
-  { x: 0, z: -1 }, // north
-  { x: 0, z: 1 }, // south
-  { x: -1, z: 0 }, // west
-  { x: 1, z: 0 }, // east
-  // { x: 1, z: -1 },
-  // { x: 1, z: 1 },
-  // { x: -1, z: -1 },
-  // { x: -1, z: 1 },
+  { x: -1, z: 0 }, // West
+  { x: 1, z: 0 }, // East
+  { x: 0, z: -1 }, // North
+  { x: 0, z: 1 }, // South
 ];
 
 class DirectionalVec3 extends Vec3 {
@@ -101,20 +97,65 @@ const unbreakableBlocks = [
 ];
 
 class Move {
-  setValues(world, origin, dir, bot, config) {
+  constructor() {
+    this.name = this.constructor.name;
+  }
+
+  setValues(world, origin, dir, bot, config, manager) {
     this.world = world;
     this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
     this.dir = dir;
+    /**
+     * @type {import("mineflayer").Bot}
+     */
     this.bot = bot;
+    this.manager = manager;
     this.config = config;
-    this.COST_BREAK = 10;
+    this.COST_BREAK = 5;
     this.COST_NORMAL = 1;
-    this.COST_DIAGONAL = Math.SQRT2;
+    this.COST_DIAGONAL = 1.41 + 0.001; //make diagonal slightly more expensive
     this.COST_UP = 1;
     this.COST_PLACE = 5;
     this.COST_PARKOUR = 5;
     this.COST_FALL = 1;
     this.COST_SWIM = 2.02;
+  }
+
+  hasScaffoldingBlocks() {
+    const bot = this.bot;
+    const scaffoldingBlocks = this.config.disposableBlocks;
+
+    // check if the bot has atleast one scaffolding block in its inventory
+    for (const item of bot.inventory.items()) {
+      if (scaffoldingBlocks.includes(item.name)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // Function to determine an avoidance penalty if near a certain block
+  getAvoidancePenalty(node, distance) {
+    let penalty = 0;
+    for (let dx = -distance; dx <= distance; dx++) {
+      for (let dz = -distance; dz <= distance; dz++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          // Slight vertical check
+          let checkNode = node.offset(dx, dy, dz);
+          if (this.isBlockToAvoid(checkNode)) {
+            penalty += 10; // Increase penalty for closer avoidable blocks
+          }
+        }
+      }
+    }
+    return penalty;
+  }
+
+  // Define which blocks to avoid
+  isBlockToAvoid(node) {
+    let block = this.getBlock(node);
+    return block && this.config.blocksToStayAway.includes(block.name);
   }
 
   makeMovement(position, cost) {
@@ -127,6 +168,12 @@ class Move {
     position.cost = costToBreak;
     // console.log(position);
     return position;
+  }
+
+  makePlace(pos, costToPlace) {
+    pos.place = true;
+    pos.cost = costToPlace;
+    return pos;
   }
 
   makeHorizontalPlace(position, costToPlace) {
@@ -151,6 +198,25 @@ class Move {
     const block = this.world.getBlock(node);
     if (!block) return false;
     return block.name.includes("stairs");
+  }
+
+  isStairBB(node) {
+    const block = this.getBlock(node);
+
+    if (!block) return false;
+
+    const shapes = block.shapes;
+    const firstShapeArray = shapes[0];
+    const secondShapeArray = shapes[1] ? shapes[1] : null;
+
+    if (!firstShapeArray) return false;
+
+    if (!secondShapeArray) return false;
+
+    const maxY = firstShapeArray[4];
+    const maxY2 = secondShapeArray ? secondShapeArray[4] : null;
+
+    if (maxY2 && maxY === 0.5 && maxY2 === 1) return true;
   }
 
   isSlab(node) {
@@ -190,16 +256,22 @@ class Move {
     return block.name === "water";
   }
 
+  isLava(node) {
+    const block = this.world.getBlock(node);
+    if (!block) return false;
+    return block.name === "lava";
+  }
+
   isWalkable(node) {
     const block = this.world.getBlock(node);
     if (!block) return false;
     const blockAbove = this.world.getBlock(node.offset(0, 1, 0));
     return (
-      !this.isStair(node) &&
-      block.boundingBox === "empty" &&
-      blockAbove.boundingBox === "empty" &&
-      block.name !== "water" &&
-      !this.config.blocksToStayAway.includes(block.name)
+      (!this.isStair(node) &&
+        block.boundingBox === "empty" &&
+        blockAbove.boundingBox === "empty" &&
+        block.name !== "water" &&
+        !this.config.blocksToStayAway.includes(block.name)) 
     );
   }
 
@@ -209,13 +281,7 @@ class Move {
 
     if (this.manager.isAreaMarkedNode(node)) return false;
 
-    return (
-      this.isSolid(node) &&
-      !unbreakableBlocks.includes(block.name) &&
-      !climbableBlocks.includes(block.name) &&
-      !config.blocksToAvoid.includes(block.name) &&
-      !this.isInteractable(node, config)
-    );
+    return this.isSolid(node) && !config.blocksToAvoid.includes(block.name);
   }
 
   getNodeDigTime(node) {
@@ -282,7 +348,8 @@ class Move {
   isSolid(node) {
     const block = this.getBlock(node);
     if (!block) return false;
-    return block.boundingBox === "block";
+
+    return block.boundingBox === "block" || this.manager.isNodePlaced(node);
   }
 
   isStandable(node) {
@@ -291,7 +358,8 @@ class Move {
       this.isWalkable(node) &&
       !this.isFence(node.offset(0, -1, 0)) &&
       !this.config.blocksToAvoid.includes(this.getBlock(node).name) &&
-      this.isFullBlock(node.offset(0, -1, 0))
+      this.isFullBlock(node.offset(0, -1, 0)) &&
+      !this.isLava(node)
     );
   }
 
@@ -315,6 +383,8 @@ class Move {
 
     if (!block) return false;
 
+    if (block.name === "farmland") return true;
+
     const shapes = block.shapes;
     const firstShapeArray = shapes[0];
 
@@ -322,7 +392,7 @@ class Move {
 
     const maxY = firstShapeArray[4];
 
-    if (maxY >= 0.9375) return true;
+    if (maxY === 1) return true;
   }
 
   isHalfBlock(node) {
@@ -330,8 +400,11 @@ class Move {
 
     if (!block) return false;
 
+    if (this.isStair(node)) return;
+
     const shapes = block.shapes;
     const firstShapeArray = shapes[0];
+    const secondShapeArray = shapes[1] ? shapes[1] : null;
 
     if (!firstShapeArray) return false;
 
@@ -432,17 +505,6 @@ class Move {
   }
 }
 
-/**
- * @type {Array<Move>}
- */
-const moveClasses = [];
-
-function registerMoves(moves) {
-  for (const moveClass of moves) {
-    moveClasses.push(new moveClass());
-  }
-}
-
 function bestHarvestTool(bot, block) {
   const availableTools = bot.inventory.items();
   const effects = bot.entity.effects;
@@ -469,13 +531,26 @@ function bestHarvestTool(bot, block) {
   return bestTool;
 }
 
+/**
+ * @type {Array<Move>}
+ */
+const moveClasses = [];
+
+function registerMoves(moves) {
+  for (const moveClass of moves) {
+    moveClasses.push(new moveClass());
+  }
+  // console.log(moveClasses);
+}
+
 function getNeighbors2(world, node, config, manager, bot) {
   let neighbors = [];
 
   for (const move of moveClasses) {
     for (const dir of cardinalDirections) {
-      move.setValues(world, node.worldPos, dir, bot, config);
-      move.addNeighbors(neighbors, config, manager);
+      move.setValues(world, node.worldPos, dir, bot, config, manager);
+      const name = move.constructor.name;
+      move.addNeighbors(neighbors, config, manager, name);
     }
   }
 
@@ -484,9 +559,7 @@ function getNeighbors2(world, node, config, manager, bot) {
       index === self.findIndex((n) => n.equals(neighbor))
   );
 
-  return {
-    neighbors,
-  };
+  return neighbors;
 }
 
 function getXZDist(nodeA, nodeB) {

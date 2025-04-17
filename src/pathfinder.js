@@ -56,6 +56,14 @@ class NodeManager {
     return attribute === "broken";
   }
 
+  isNodePlaced(node) {
+    const attribute = this.getNodeAttribute(node);
+
+    if (!attribute) return false;
+
+    return attribute === "placed";
+  }
+
   isAreaMarkedNode(node) {
     const attribute = this.getNodeAttribute(node);
 
@@ -94,10 +102,20 @@ class Cell {
      * @type {DirectionalVec3[]}
      */
     this.horizontalPlacable = [];
+    /**
+     * @type {DirectionalVec3[]}
+     */
+    this.placeBlocks = [];
 
     // to break or place blocks later
     this.placeHere = false;
     this.breakThis = false;
+
+    /**
+     * @type {string}
+     * The name of the move class that is node is associdiated with
+     */
+    this.moveName = "";
   }
 
   add(offset) {
@@ -105,114 +123,35 @@ class Cell {
   }
 }
 
-function processBatch({
-  batch,
-  currentNode,
-  openList,
-  openSet,
-  breakBlocks,
-  horPlace,
-  verPlace,
-  closedSet,
-  end,
-  bestNode,
-  manager,
-  world,
-}) {
-  for (const neighborData of batch) {
-    if (closedSet.has(defaultHash(neighborData))) continue;
-
-    let tempG = currentNode.gCost + neighborData.cost;
-    let neighbor = openSet.get(defaultHash(neighborData));
-    let update = false;
-
-    if (neighbor === undefined) {
-      neighbor = new Cell();
-
-      openSet.set(defaultHash(neighborData), neighbor);
-    } else {
-      if (neighbor.gCost < tempG) {
-        // skip dis one cuz we foudn btter path
-        continue;
-      }
-
-      update = true;
-    }
-
-    neighbor.worldPos = new Vec3(
-      neighborData.x,
-      neighborData.y,
-      neighborData.z
-    );
-    neighbor.parent = currentNode;
-    neighbor.gCost = tempG;
-
-    const blockID = world.getBlock(neighborData).name;
-
-    neighbor.hCost = euclideanDistance(neighborData, end, blockID);
-    neighbor.fCost = neighbor.gCost + neighbor.hCost;
-
-    if (neighbor.hCost < bestNode.hCost) {
-      // console.log("Setting neighbor to best node");
-      bestNode = neighbor;
-    }
-
-    if (update) {
-      openList.update(neighbor, neighbor.fCost);
-    } else {
-      openList.insert(neighbor);
-      openSet.set(defaultHash(neighborData), neighbor);
-    }
-
-    if (neighborData.break) {
-      neighbor.breakThis = true;
-      neighbor.breakableNeighbors = neighborData.blocks;
-    }
-
-    // if (neighbor.placeHere) {
-    //   for (const dirVec of horPlace) {
-    //     if (
-    //       neighbor.worldPos.x === dirVec.parent.x &&
-    //       neighbor.worldPos.z === dirVec.parent.z
-    //     ) {
-    //       neighbor.horizontalPlacable = dirVec.blocks;
-    //     }
-    //   }
-
-    //   for (const dirVec of verPlace) {
-    //     if (
-    //       neighbor.worldPos.x === dirVec.parent.x &&
-    //       neighbor.worldPos.z === dirVec.parent.z
-    //     ) {
-    //       neighbor.verticalPlacable = dirVec.blocks;
-    //     }
-    //   }
-    // }
-  }
-}
-
-async function Astar(start, endPos, bot, endFunc, config, excludedPositions) {
+async function Astar(
+  start,
+  endPos,
+  bot,
+  endFunc,
+  config,
+  excludedPositions = []
+) {
   let end = endPos.clone().floored().offset(0.5, 0, 0.5);
-  start = start.floored().offset(0.5, 0, 0.5);
+  let startPos = start.floored().offset(0.5, 0, 0.5);
   // console.log(start)
 
-  const openList = new BinaryHeapOpenSet(compare);
+  const openList = new BinaryHeapOpenSet();
   const openSet = new Map();
   const closedSet = new Set();
   const nodemanager = new NodeManager();
-  nodemanager.markNodes(excludedPositions, "areaMarked")
-  const startNode = new Cell(start);
+  nodemanager.markNodes(excludedPositions, "areaMarked");
+  const startNode = new Cell(startPos);
 
   const world = bot.world;
 
   const blockID = world.getBlock(startNode.worldPos).name;
 
   startNode.gCost = 0;
-  startNode.hCost = euclideanDistance(startNode.worldPos, end, blockID);
+  startNode.hCost = manhattanDistance(startNode.worldPos, end, blockID);
   startNode.fCost = startNode.gCost + startNode.hCost;
 
   openList.push(startNode);
-  openSet.set(defaultHash(start), startNode);
+  openSet.set(defaultHash(startPos), startNode);
 
   let path = [];
   let bestNode = startNode;
@@ -256,15 +195,16 @@ async function Astar(start, endPos, bot, endFunc, config, excludedPositions) {
       openSet.delete(defaultHash(currentNode.worldPos));
       closedSet.add(defaultHash(currentNode.worldPos));
 
-      const { neighbor: neighbors } = getNeighbors(
-        currentNode,
-        bot,
-        config,
-        nodemanager
-      );
+      const neighbors = getNeighbors(currentNode, bot, config, nodemanager);
 
       for (const neighborData of neighbors) {
         if (closedSet.has(defaultHash(neighborData))) continue;
+
+        //if da cost to get to this node is greater than the cost to get to the current node
+        if (neighborData.cost > 200) {
+          // console.log("cost too high")
+          continue;
+        }
 
         let tempG = currentNode.gCost + neighborData.cost;
         let neighbor = openSet.get(defaultHash(neighborData));
@@ -280,9 +220,10 @@ async function Astar(start, endPos, bot, endFunc, config, excludedPositions) {
           const blockID = world.getBlock(neighbor.worldPos).name;
 
           neighbor.gCost = tempG;
-          neighbor.hCost = euclideanDistance(neighborData, end, blockID);
+          neighbor.hCost = manhattanDistance(neighborData, end, blockID);
           neighbor.fCost = neighbor.gCost + neighbor.hCost;
           neighbor.parent = currentNode;
+          neighbor.moveName = neighborData.attributes.name;
 
           openSet.set(defaultHash(neighborData), neighbor);
           openList.push(neighbor);
@@ -291,7 +232,7 @@ async function Astar(start, endPos, bot, endFunc, config, excludedPositions) {
           neighbor.fCost = neighbor.gCost + neighbor.hCost;
           neighbor.parent = currentNode;
 
-          if (neighbor.fCost <= 100) {
+          if (neighbor.fCost <= 200) {
             openList.update(neighbor);
           }
         }
@@ -310,11 +251,24 @@ async function Astar(start, endPos, bot, endFunc, config, excludedPositions) {
           bestNode = neighbor;
         }
 
+        if (neighborData.place) {
+          neighbor.placeHere = true;
+          neighbor.placeBlocks = neighborData.blocks;
+          nodemanager.markNodes(neighborData.blocks, "placed");
+        }
+
         if (neighborData.placeHorizontal) {
           // console.log("guh")
           neighbor.placeHere = true;
           neighbor.horizontalPlacable = neighborData.blocks;
           nodemanager.markNodes(neighborData.blocks, "placeHorizontal");
+        }
+
+        if (neighborData.placeVertical) {
+          // console.log("guh")
+          neighbor.placeHere = true;
+          neighbor.verticalPlacable = neighborData.blocks;
+          nodemanager.markNodes(neighborData.blocks, "placeVertical");
         }
 
         // bot.chat(
@@ -384,9 +338,10 @@ function manhattanDistance(node, goal, blockID = null) {
   const dy = Math.abs(node.y - goal.y);
   const dz = Math.abs(node.z - goal.z);
 
-  const cost = blockMapCost.get(blockID) ?? 1;
+  const horizontalDistance = dx + dz;
+  const verticalDistance = dy;
 
-  return (dx + dy + dz) * cost;
+  return (horizontalDistance + verticalDistance) * 1.5;
 }
 
 function octileDistance(node, goal, blockID = null) {
@@ -417,29 +372,7 @@ function getNeighbors(node, bot, config, manager) {
   let neighbor = [];
   const neighbors = getNeighbors2(bot.world, node, config, manager, bot);
 
-  for (const dirVec of neighbors.neighbors) {
-    // for (const obj of neighbors.breakNeighbors) {
-    //   // console.log(dirVec);
-    //   // console.log(obj)
-    //   if (
-    //     dirVec.x === obj.parent.x &&
-    //     dirVec.y === obj.parent.y &&
-    //     dirVec.z === obj.parent.z
-    //   ) {
-    //     dirVec.blocks = obj.blocks;
-    //   }
-    // }
-
-    // for (const obj of neighbors.horizontalPlaceNeighbors) {
-    //   if (
-    //     dirVec.x === obj.parent.x &&
-    //     dirVec.y === obj.parent.y &&
-    //     dirVec.z === obj.parent.z
-    //   ) {
-    //     dirVec.blocks = obj.blocks;
-    //   }
-    // }
-
+  for (const dirVec of neighbors) {
     neighbor.push(dirVec);
   }
 
@@ -447,9 +380,7 @@ function getNeighbors(node, bot, config, manager) {
   // console.log(neighbor);
   // console.log("===*===");
 
-  return {
-    neighbor,
-  };
+  return neighbor;
 }
 
 module.exports = {

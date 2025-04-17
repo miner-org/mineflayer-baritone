@@ -2,7 +2,7 @@ const mineflayer = require("mineflayer");
 const inject = require("./loader");
 const Vec3 = require("vec3").Vec3;
 const { argv } = require("process");
-const { elytrafly } = require("mineflayer-elytrafly");
+// const { elytrafly } = require("mineflayer-elytrafly");
 const { GoalNear } = require("./goal");
 
 const bot = mineflayer.createBot({
@@ -14,12 +14,13 @@ const bot = mineflayer.createBot({
 });
 
 bot.loadPlugin(inject);
-bot.loadPlugin(elytrafly);
+// bot.loadPlugin(elytrafly);
 
 let endPos;
 bot.once("spawn", async () => {
   await bot.waitForChunksToLoad();
   bot.chat("hi");
+  bot.ashfinder.debug = true;
 
   bot.on("chat", async (username, message) => {
     if (username === bot.username) return;
@@ -31,6 +32,7 @@ bot.once("spawn", async () => {
       bot.clearControlStates();
       bot.setControlState("forward", false);
       bot.setControlState("sprint", false);
+      bot.ashfinder.stop();
     }
 
     if (command === "f!test") {
@@ -39,11 +41,11 @@ bot.once("spawn", async () => {
       const z = parseInt(args[2]);
       endPos = new Vec3(x, y, z);
 
-      bot.creative.startFlying();
+      // bot.creative.startFlying();
 
-      // const goal = new GoalNear(endPos, 2);
+      const goal = new GoalNear(endPos, 1);
 
-      // await bot.ashfinder.goto(goal);
+      await bot.ashfinder.goto(goal);
     }
 
     if (command === "f!find") {
@@ -60,7 +62,7 @@ bot.once("spawn", async () => {
 
       const pos = block.position.clone();
 
-      const goal = new GoalNear(pos, 2);
+      const goal = new GoalNear(pos, 1);
 
       await bot.ashfinder.goto(goal);
       bot.clearControlStates();

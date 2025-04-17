@@ -12,43 +12,67 @@ declare module "mineflayer" {
         blocksToAvoid: string[];
 
         /**
-         * Blocks to not get near of
+         * Blocks to not get near
          */
         blocksToStayAway: string[];
+
+        /**
+         * Radius to avoid blocks in `blocksToStayAway`
+         */
+        avoidDistance: number;
+
         placeBlocks: boolean;
         breakBlocks: boolean;
         parkour: boolean;
         proParkour: boolean;
+
+        /**
+         * Try to break blocks above target if needed
+         */
+        checkBreakUpNodes: boolean;
+
         fly: boolean;
+
         /**
          * How many blocks the bot can go down
          */
         maxFallDist: number;
+
         /**
          * How far the bot can jump down into a water source
          */
         maxWaterDist: number;
+
         /**
          * Blocks that can be used for placing
          */
         disposableBlocks: string[];
+
         /**
-         * Block the bot can interact with
+         * Blocks the bot can interact with
          */
         interactableBlocks: string[];
+
         /**
          * The time the bot uses to think of a path
          */
         thinkTimeout: number;
       };
+
       debug: boolean;
       stopped: boolean;
+      path: Cell[]; // Add type or import as needed
 
-      goto: (goal: Goal, excludedPositions: Vec3[]) => Promise<void>;
+      goto(goal: Goal, excludedPositions?: Vec3[]): Promise<void>;
 
-      stop: () => void;
+      stop(): void;
 
-      generatePath: (position: Vec3) => { path: Cell[]; cost: number };
+      follow(
+        entity: Entity,
+        options?: { minDistance?: number; maxDistance?: number }
+      ): Promise<void>;
+
+      generatePath(position: Vec3): { path: Cell[]; cost: number };
     };
   }
 }

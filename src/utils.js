@@ -248,29 +248,58 @@ function calculateTurnAngle(bot, nextPoint) {
 /**
  *
  * @param {import("mineflayer").Bot} bot
- * @param {} block
- * @param {*} faceVector
- * @param {{half?: 'top'|'bottom', delta?: import('vec3').Vec3, forceLook?: boolean | 'ignore', offhand?: boolean, swingArm?: 'right' | 'left', showHand?: boolean}} options
+ * @param {string} blockName
+ * @param {Vec3} targetPosition
+ * @param {{half?: "top" | "bottom", axis?: "x" | "y" | "z"}} properties
  * @returns
  */
-async function placeBlock(bot, block, faceVector, options) {
-  async function waitForBlockPlace() {
-    return new Promise((resolve, reject) => {
-      bot.once("blockUpdate", (old, newBlock) => {
-        if (newBlock === block) {
-          resolve();
-        }
-      });
-    });
-  }
-
+async function placeBlock(bot, blockName, targetPosition, properties) {
   return new Promise(async (resolve, reject) => {
-    try {
-      await bot._genericPlace(block, faceVector, options);
-      resolve();
-    } catch (error) {
-      reject(error.message);
+    const item = bot.inventory.items().find((i) => i.name === blockName);
+    if (!item) {
+      return reject(`Bot does not have ${blockName}!`);
     }
+
+    const blockBelow = bot.blockAt(targetPosition.offset(0, -1, 0));
+    if (!blockBelow || !blockBelow.boundingBox === "block") {
+      return reject("Cannot place block: No solid surface below!");
+    }
+
+    await bot.equip(item, "hand");
+
+    // Find a valid placement face
+    const faces = [
+      { face: 1, offset: new Vec3(0, 1, 0) }, // Top
+      { face: 0, offset: new Vec3(0, -1, 0) }, // Bottom
+      { face: 3, offset: new Vec3(0, 0, 1) }, // North
+      { face: 2, offset: new Vec3(0, 0, -1) }, // South
+      { face: 5, offset: new Vec3(1, 0, 0) }, // East
+      { face: 4, offset: new Vec3(-1, 0, 0) }, // West
+    ];
+
+    let placeFace = faces.find((face) =>
+      bot.blockAt(targetPosition.plus(face.offset))
+    );
+    if (!placeFace) {
+      return reject("❌ No valid placement face found!");
+    }
+
+    // Look at the block before placing
+    await bot.lookAt(targetPosition.offset(0.5, 0.5, 0.5), true);
+
+    bot.swingArm("right");
+
+    // Send the block place packet
+    bot._client.write("block_place", {
+      location: targetPosition,
+      direction: 0,
+      hand: 0, // Main hand
+      cursorX: 0.5,
+      cursorY: 0.5,
+      cursorZ: 0.5,
+    });
+
+    resolve(`Placed ${blockName} at ${targetPosition}`);
   });
 }
 

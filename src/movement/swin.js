@@ -35,8 +35,10 @@ class MoveUpSwim extends Move {
     let position = this.up(0);
     let landingNode = this.up(1);
 
-    if (this.isWater(position) && this.isWater(landingNode))
+    if (this.isWater(position) && this.isWater(landingNode)) {
+      landingNode.attributes["name"] = this.name;
       neighbors.push(this.makeMovement(landingNode, 1.501));
+    }
   }
 }
 
