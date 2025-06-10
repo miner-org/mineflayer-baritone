@@ -2,14 +2,10 @@ const Vec3 = require("vec3").Vec3;
 
 class Goal {
   constructor(position) {
-    this.position = position.floored();
-    //round down all values
-    this.x = Math.floor(this.position.x);
-    this.y = Math.floor(this.position.y);
-    this.z = Math.floor(this.position.z);
-
-    this.x += 0.5;
-    this.z += 0.5;
+    this.position = position.floored(); // Already floored
+    this.x = this.position.x + 0.5;
+    this.y = this.position.y;
+    this.z = this.position.z + 0.5;
   }
 
   isReached(otherPosition) {
@@ -28,24 +24,11 @@ class GoalNear extends Goal {
   isReached(otherPosition) {
     if (!otherPosition) return false;
 
-    const xDistance = Math.abs(this.x - otherPosition.x);
-    const zDistance = Math.abs(this.z - otherPosition.z);
-    const yDistance = this.y - otherPosition.y;
+    const dx = Math.abs(this.x - otherPosition.x);
+    const dy = Math.abs(this.y - otherPosition.y);
+    const dz = Math.abs(this.z - otherPosition.z);
 
-    // If otherPosition is directly below or above within XZ distance, allow reaching
-    if (
-      yDistance === 1 &&
-      xDistance <= this.distance &&
-      zDistance <= this.distance
-    ) {
-      return true;
-    }
-
-    return (
-      xDistance <= this.distance &&
-      zDistance <= this.distance &&
-      Math.abs(yDistance) <= 1
-    );
+    return dx <= this.distance && dz <= this.distance && dy <= 1;
   }
 }
 
@@ -55,7 +38,13 @@ class GoalExact extends Goal {
    */
   isReached(otherPosition) {
     if (!otherPosition) return false;
-    const floored = otherPosition;
+    const floored = otherPosition.floored();
+    this.x = Math.floor(this.position.x);
+    this.z = Math.floor(this.position.z);
+
+    // console.log(floored, "current");
+    // console.log(this.x, this.z, "goal");
+    // console.log(this.y, "goaly")
 
     return this.x === floored.x && this.y === floored.y && this.z === floored.z;
   }

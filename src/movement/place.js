@@ -17,24 +17,23 @@ class MovePlaceForward extends Move {
   }
 }
 
-class MovePlaceForward1 extends Move {
-  addNeighbors(neighbors, config) {
+//for 1x1 towering
+class MovePlaceUp extends Move {
+  addNeighbors(neighbors, config, manager, name) {
     if (!config.placeBlocks) return;
 
     if (!this.hasScaffoldingBlocks()) return;
-    let target = this.forward(1).up(1);
-    let place = this.forward(1);
-    let up = this.up(1);
+
+    let target = this.up(1);
+    let current = this.up(0);
 
     if (!this.isWalkable(target)) return;
 
-    if (!this.isWalkable(up)) return;
+    if (!this.isAir(current)) return;
 
-    if (this.isSolid(place)) return;
-
-    target.blocks.push(place);
-    target.attributes["name"] = this.name;
+    target.attributes["name"] = name;
+    target.blocks.push(current);
     neighbors.push(this.makePlace(target, this.COST_PLACE));
   }
 }
-registerMoves([]);
+// registerMoves([MovePlaceUp]);

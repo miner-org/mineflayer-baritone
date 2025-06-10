@@ -1,23 +1,30 @@
-const { Move, registerMoves } = require("./");
+const { Move, registerMoves, DirectionalVec3 } = require("./");
 
 class MoveParkour1 extends Move {
-  addNeighbors(neighbors, config, manager) {
-    if (!config.parkour) return;
+  generate(cardinalDirections, origin, neighbors) {
+    if (!this.config.parkour) return;
 
-    // only used if config.proParkour is false
-    let jumpNode = this.up(2);
+    for (const dir of cardinalDirections) {
+      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
-    let landingNode = this.forward(2);
-    let spaceNode1 = this.forward(1);
-    let spaceNode2 = this.forward(1).up(1);
+      const landingNode = this.origin.forward(2);
+      this.addNeighbors(neighbors, landingNode);
+    }
+  }
 
-    let airNode = this.down(1, spaceNode1);
+  addNeighbors(neighbors, landingNode) {
+    const name = this.name;
+    const config = this.config;
+    const manager = this.manager;
 
-    let shouldJump = this.isAir(airNode) || this.isWater(airNode);
+    const spaceNode1 = this.origin.forward(1);
+    const spaceNode2 = spaceNode1.up(1);
+    const airNodeBelow = spaceNode1.down(1);
+    const standingNode = landingNode.down(1);
 
+    const shouldJump = this.isAir(airNodeBelow) || this.isWater(airNodeBelow);
     if (!shouldJump) return;
 
-    let standingNode = this.down(1, landingNode);
     if (manager.isNodeBroken(standingNode)) return;
 
     if (
@@ -25,171 +32,171 @@ class MoveParkour1 extends Move {
       this.isWalkable(spaceNode2) &&
       this.isStandable(landingNode)
     ) {
+      landingNode.attributes["name"] = name;
       neighbors.push(this.makeMovement(landingNode, this.COST_PARKOUR));
     }
   }
 }
 
-class MoveForwardParkour2 extends Move {
-  // 2 block jump
-  addNeighbors(neighbors, config, manager) {
-    if (!config.parkour) return [];
+class MoveDiagonalParkour1 extends Move {
+  generate(cardinalDirections, origin, neighbors) {
+    if (!this.config.parkour) return;
 
-    let jumpNode = this.up(2);
+    // Diagonal directions
+    const diagonalDirections = [
+      { x: 1, z: 1 },
+      { x: -1, z: 1 },
+      { x: 1, z: -1 },
+      { x: -1, z: -1 },
+    ];
 
-    /**
-     * X
-     * -
-     * -
-     * x
-     * (X target, - space node, x we are here)
-     *
-     */
-    let landingNode = this.forward(3); // X
+    for (const dir of diagonalDirections) {
+      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
-    let spaceNode1 = this.forward(1); // -
-    let spaceNode2 = this.forward(1, spaceNode1); // -
-    let spaceNode3 = this.forward(1).up(1); // -
-    let spaceNode4 = this.forward(2).up(1); // -
-
-    let airNode = this.forward(1).down(1);
-    let airNode2 = this.forward(1, airNode);
-
-    let shouldJump =
-      (this.isAir(airNode) || this.isWater(airNode)) &&
-      (this.isAir(airNode2) || this.isWater(airNode2));
-
-    if (!shouldJump) return;
-
-    let standingNode = this.forward(3).down(1);
-    if (manager.isNodeBroken(standingNode)) return;
-
-    if (
-      this.isJumpable(spaceNode1) &&
-      this.isJumpable(spaceNode2) &&
-      this.isWalkable(spaceNode3) &&
-      this.isWalkable(spaceNode4) &&
-      this.isStandable(landingNode)
-    )
-      neighbors.push(this.makeMovement(landingNode, this.COST_PARKOUR));
-  }
-}
-
-class MoveForwardParkour3 extends Move {
-  addNeighbors(neighbors, config, manager) {
-    if (!config.parkour) return;
-
-    let jumpNode = this.up(2);
-
-    // 3 block distance from current node
-    let landingNode = this.forward(4);
-    let spaceNode1 = this.forward(1);
-    let spaceNode2 = this.forward(1, spaceNode1);
-    let spaceNode3 = this.forward(1, spaceNode2);
-
-    // gaps above
-    let gapNode1 = this.up(1, spaceNode1);
-    let gapNode2 = this.up(1, spaceNode2);
-    let gapNode3 = this.up(1, spaceNode3);
-
-    // air nodes to prevent it from randomly sprint jumping
-    let airNode1 = this.down(1, spaceNode1);
-    let airNode2 = this.down(1, spaceNode2);
-    let airNode3 = this.down(1, spaceNode3);
-
-    let shouldJump =
-      (this.isAir(airNode1) || this.isWater(airNode1)) &&
-      (this.isAir(airNode2) || this.isWater(airNode2)) &&
-      (this.isAir(airNode3) || this.isWater(airNode3));
-
-    if (!shouldJump) return;
-
-    let standingNode = this.forward(4).down(1);
-    if (manager.isNodeBroken(standingNode)) return;
-
-    if (
-      this.isJumpable(spaceNode1) &&
-      this.isJumpable(spaceNode2) &&
-      this.isJumpable(spaceNode3) &&
-      this.isWalkable(gapNode1) &&
-      this.isWalkable(gapNode2) &&
-      this.isWalkable(gapNode3) &&
-      this.isStandable(landingNode)
-    )
-      neighbors.push(this.makeMovement(landingNode, this.COST_PARKOUR));
-  }
-}
-
-class MoveForwardParkourUp1 extends Move {
-  addNeighbors(neighbors, config, manager) {
-    if (!config.parkour) return;
-
-    let landingNode = this.forward(2).up(1);
-    let gapNode1 = this.forward(1);
-
-    if (this.isSolid(gapNode1)) return;
-
-    let shouldJump =
-      this.isAir(this.down(1).forward(1)) ||
-      this.isWater(this.down(1).forward(1));
-    let shouldJump2 = this.isWalkable(this.up(1, gapNode1));
-
-    // if not air return
-    if (!shouldJump) return;
-    if (!shouldJump2) return;
-
-    let standingNode = this.down(1, landingNode);
-    if (manager.isNodeBroken(standingNode)) return;
-
-    if (this.isWalkable(gapNode1) && this.isStandable(landingNode)) {
-      neighbors.push(this.makeMovement(landingNode, this.COST_PARKOUR));
+      const landingNode = this.origin.offset(dir.x * 2, 0, dir.z * 2);
+      this.addNeighbors(neighbors, landingNode, dir);
     }
   }
-}
 
-class MoveForwardParkourUp2 extends Move {
-  addNeighbors(neighbors, config, manager) {
-    if (!config.parkour) return;
+  addNeighbors(neighbors, landingNode, dir) {
+    const name = this.name;
+    const config = this.config;
+    const manager = this.manager;
 
-    let jumpNode = this.up(2);
+    const spaceNode1 = this.origin.offset(dir.x, 0, dir.z);
+    const spaceNode2 = spaceNode1.up(1);
+    const airNodeBelow = spaceNode1.down(1);
+    const standingNode = landingNode.down(1);
 
-    let landingNode = this.forward(3).up(1);
-    let gapNode1 = this.forward(1);
-    let gapNode2 = this.forward(2);
-
-    if (this.isSolid(gapNode1)) return;
-
-    if (this.isSolid(gapNode2)) return;
-
-    let shouldJump =
-      (this.isAir(this.down(1).forward(1)) ||
-        this.isWater(this.down(1).forward(1))) &&
-      (this.isAir(this.down(1).forward(2)) ||
-        this.isWater(this.down(1).forward(2)));
-
-    let shouldJump2 =
-      this.isWalkable(this.up(1, gapNode1)) &&
-      this.isWalkable(this.up(1, gapNode2));
-
+    const shouldJump = this.isAir(airNodeBelow) || this.isWater(airNodeBelow);
     if (!shouldJump) return;
 
-    if (!shouldJump2) return;
-
-    let standingNode = this.forward(3);
     if (manager.isNodeBroken(standingNode)) return;
 
     if (
-      this.isWalkable(gapNode1) &&
-      this.isWalkable(gapNode2) &&
+      this.isWalkable(spaceNode1) &&
+      this.isWalkable(spaceNode2) &&
       this.isStandable(landingNode)
     ) {
+      landingNode.attributes["name"] = name;
+      neighbors.push(this.makeMovement(landingNode, this.COST_PARKOUR));
+    }
+  }
+}
+
+class MoveForwardParkour extends Move {
+  generate(cardinalDirections, origin, neighbors) {
+    const maxDistance = this.config.proParkour ? 4 : 3;
+    if (!this.config.parkour) return;
+
+    for (const dir of cardinalDirections) {
+      for (let dist = 2; dist <= maxDistance; dist++) {
+        this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+        const landingNode = this.origin.forward(dist + 1);
+        this.addNeighbors(neighbors, landingNode, dist);
+      }
+    }
+  }
+
+  /**
+   * @param {DirectionalVec3[]} neighbors
+   * @param {DirectionalVec3} landingNode
+   * @param {number} dist
+   */
+  addNeighbors(neighbors, landingNode, dist) {
+    const config = this.config;
+    const manager = this.manager;
+    const name = this.name;
+
+    const standingNode = landingNode.down(1);
+    if (manager.isNodeBroken(standingNode)) return;
+
+    const spaceNodes = [];
+    const gapNodes = [];
+    const airNodes = [];
+
+    let last = this.origin;
+    for (let i = 1; i <= dist; i++) {
+      const forward = last.forward(1);
+      spaceNodes.push(forward);
+      gapNodes.push(forward.up(1));
+      airNodes.push(forward.down(1));
+      last = forward;
+    }
+
+    const shouldJump = airNodes.every(
+      (node) => this.isAir(node) || this.isWater(node)
+    );
+    if (!shouldJump) return;
+
+    const allJumpable = spaceNodes.every((node) => this.isJumpable(node));
+    const allWalkable = gapNodes.every((node) => this.isWalkable(node));
+
+    if (allJumpable && allWalkable && this.isStandable(landingNode)) {
+      landingNode.attributes["name"] = name;
+      neighbors.push(this.makeMovement(landingNode, this.COST_PARKOUR));
+    }
+  }
+}
+
+class MoveForwardParkourUp extends Move {
+  generate(cardinalDirections, origin, neighbors) {
+    if (!this.config.parkour) return;
+
+    for (const dir of cardinalDirections) {
+      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+
+      for (let distance = 2; distance <= 3; distance++) {
+        const landingNode = this.forward(distance).up(1);
+        this.addNeighbors(neighbors, distance, landingNode);
+      }
+    }
+  }
+
+  addNeighbors(neighbors, distance, landingNode) {
+    const config = this.config;
+    const manager = this.manager;
+    const name = this.name;
+
+    const standingNode = this.down(1, landingNode);
+
+    let shouldJump = true;
+    let shouldJump2 = true;
+
+    for (let i = 1; i < distance; i++) {
+      const forward = this.forward(i);
+      const gapAbove = this.up(1, forward);
+      const below = this.down(1, forward);
+
+      if (this.isSolid(forward)) return;
+      if (!this.isAir(below) && !this.isWater(below)) shouldJump = false;
+      if (!this.isWalkable(gapAbove)) shouldJump2 = false;
+    }
+
+    if (!shouldJump || !shouldJump2) return;
+    if (manager.isNodeBroken(standingNode)) return;
+
+    if (this.isStandable(landingNode)) {
+      landingNode.attributes["name"] = name;
       neighbors.push(this.makeMovement(landingNode, this.COST_PARKOUR));
     }
   }
 }
 
 class MoveForwardParkourDown1 extends Move {
-  addNeighbors(neighbors, config, manager) {
+  generate(cardinalDirections, origin, neighbors) {
+    for (const dir of cardinalDirections) {
+      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+
+      this.addNeighbors(neighbors);
+    }
+  }
+
+  addNeighbors(neighbors) {
+    const config = this.config;
+    const manager = this.manager;
+    const name = this.name;
+
     if (!config.parkour) return;
 
     let jumpNode = this.up(2);
@@ -221,7 +228,19 @@ class MoveForwardParkourDown1 extends Move {
 }
 
 class MoveForwardParkourDown2 extends Move {
-  addNeighbors(neighbors, config, manager) {
+  generate(cardinalDirections, origin, neighbors) {
+    for (const dir of cardinalDirections) {
+      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+
+      this.addNeighbors(neighbors);
+    }
+  }
+
+  addNeighbors(neighbors) {
+    const config = this.config;
+    const manager = this.manager;
+    const name = this.name;
+
     if (!config.parkour) return;
 
     let jumpNode = this.up(2);
@@ -258,7 +277,19 @@ class MoveForwardParkourDown2 extends Move {
 }
 
 class MoveForwardParkourDown3 extends Move {
-  addNeighbors(neighbors, config, manager) {
+  generate(cardinalDirections, origin, neighbors) {
+    for (const dir of cardinalDirections) {
+      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+
+      this.addNeighbors(neighbors);
+    }
+  }
+
+  addNeighbors(neighbors) {
+    const config = this.config;
+    const manager = this.manager;
+    const name = this.name;
+
     if (!config.parkour) return;
 
     let jumpNode = this.up(2);
@@ -299,7 +330,19 @@ class MoveForwardParkourDown3 extends Move {
 }
 
 class MoveForwardParkourDownExt extends Move {
-  addNeighbors(neighbors, config, manager) {
+  generate(cardinalDirections, origin, neighbors) {
+    for (const dir of cardinalDirections) {
+      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+
+      this.addNeighbors(neighbors);
+    }
+  }
+
+  addNeighbors(neighbors) {
+    const config = this.config;
+    const manager = this.manager;
+    const name = this.name;
+
     if (!config.parkour) return;
 
     let jumpNode = this.up(2);
@@ -514,25 +557,22 @@ class MoveSemiDiagonalParkour extends Move {
 
 registerMoves([
   // parkour
-  MoveParkour1,
-  MoveForwardParkour2,
-  MoveForwardParkour3,
+  new MoveParkour1(),
+  new MoveForwardParkour(),
+  // // up parkour
+  new MoveForwardParkourUp(),
 
-  // up parkour
-  MoveForwardParkourUp1,
-  MoveForwardParkourUp2,
-
-  // down parkour
-  MoveForwardParkourDown1,
-  MoveForwardParkourDown2,
-  MoveForwardParkourDown3,
+  // // down parkour
+  new MoveForwardParkourDown1(),
+  new MoveForwardParkourDown2(),
+  new MoveForwardParkourDown3(),
 
   // diagonal parkour
-  // MoveDiagonalParkour,
+  new MoveDiagonalParkour1(),
   // MoveDiagonalUpParkour,
   // MoveDiagonalDownParkour,
   // MoveSemiDiagonalParkour,
 
   //idk
-  MoveForwardParkourDownExt,
+  new MoveForwardParkourDownExt(),
 ]);

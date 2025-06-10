@@ -39,4 +39,4 @@ class MoveFlyDown extends Move {
   }
 }
 
-registerMoves([MoveFlyForward, MoveFlyUp, MoveFlyDown]);
+// registerMoves([MoveFlyForward, MoveFlyUp, MoveFlyDown]);

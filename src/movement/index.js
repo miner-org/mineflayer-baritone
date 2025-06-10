@@ -3,10 +3,10 @@ const { Vec3 } = require("vec3");
 const nbt = require("prismarine-nbt");
 
 const cardinalDirections = [
-  { x: -1, z: 0 }, // West
-  { x: 1, z: 0 }, // East
-  { x: 0, z: -1 }, // North
-  { x: 0, z: 1 }, // South
+  { x: 1, z: 0 },
+  { x: -1, z: 0 },
+  { x: 0, z: 1 },
+  { x: 0, z: -1 },
 ];
 
 class DirectionalVec3 extends Vec3 {
@@ -86,6 +86,16 @@ class DirectionalVec3 extends Vec3 {
       this.attributes
     );
   }
+
+  plus(vec) {
+    return new DirectionalVec3(
+      this.x + vec.x,
+      this.y + vec.y,
+      this.z + vec.z,
+      this.dir,
+      this.attributes
+    );
+  }
 }
 
 const climbableBlocks = ["ladder", "vines"];
@@ -96,14 +106,29 @@ const unbreakableBlocks = [
   "end_portal_frame",
 ];
 
+/**
+ * @type {Array<Move>}
+ */
+const moveClasses = [];
+
 class Move {
   constructor() {
     this.name = this.constructor.name;
+    this.COST_BREAK = 5;
+    this.COST_NORMAL = 1;
+    this.COST_DIAGONAL = 1.41;
+    this.COST_UP = 1;
+    this.COST_PLACE = 3;
+    this.COST_PARKOUR = 6;
+    this.COST_FALL = 1;
+    this.COST_SWIM = 2.2;
+    this.COST_SWIM_EXIT = 2;
+    this.COST_SWIM_START = 2.4;
+    this.COST_CLIMB = 2;
   }
 
-  setValues(world, origin, dir, bot, config, manager) {
+  setValues(world, dir, bot, config, manager) {
     this.world = world;
-    this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
     this.dir = dir;
     /**
      * @type {import("mineflayer").Bot}
@@ -111,14 +136,6 @@ class Move {
     this.bot = bot;
     this.manager = manager;
     this.config = config;
-    this.COST_BREAK = 5;
-    this.COST_NORMAL = 1;
-    this.COST_DIAGONAL = 1.41 + 0.001; //make diagonal slightly more expensive
-    this.COST_UP = 1;
-    this.COST_PLACE = 5;
-    this.COST_PARKOUR = 5;
-    this.COST_FALL = 1;
-    this.COST_SWIM = 2.02;
   }
 
   hasScaffoldingBlocks() {
@@ -195,7 +212,7 @@ class Move {
   }
 
   isStair(node) {
-    const block = this.world.getBlock(node);
+    const block = this.getBlock(node);
     if (!block) return false;
     return block.name.includes("stairs");
   }
@@ -220,7 +237,7 @@ class Move {
   }
 
   isSlab(node) {
-    const block = this.world.getBlock(node);
+    const block = this.getBlock(node);
     if (!block) return false;
     return block.name.includes("slab");
   }
@@ -228,7 +245,7 @@ class Move {
   isNearBaddie(node, config, range) {
     const baddies = config.blocksToStayAway;
 
-    const block = this.world.getBlock(node);
+    const block = this.getBlock(node);
 
     if (!block) return false;
 
@@ -245,43 +262,49 @@ class Move {
   }
 
   isAir(node) {
-    const block = this.world.getBlock(node);
+    const block = this.getBlock(node);
     if (!block) return false;
     return block.boundingBox === "empty" && block.name !== "water";
   }
 
   isWater(node) {
-    const block = this.world.getBlock(node);
+    const block = this.getBlock(node);
     if (!block) return false;
     return block.name === "water";
   }
 
   isLava(node) {
-    const block = this.world.getBlock(node);
+    const block = this.getBlock(node);
     if (!block) return false;
     return block.name === "lava";
   }
 
   isWalkable(node) {
-    const block = this.world.getBlock(node);
+    const block = this.getBlock(node);
     if (!block) return false;
-    const blockAbove = this.world.getBlock(node.offset(0, 1, 0));
+
+    const blockAbove = this.getBlock(node.offset(0, 1, 0));
+
+    const walk =
+      block.boundingBox === "empty" && blockAbove.boundingBox === "empty";
+
     return (
-      (!this.isStair(node) &&
-        block.boundingBox === "empty" &&
-        blockAbove.boundingBox === "empty" &&
-        block.name !== "water" &&
-        !this.config.blocksToStayAway.includes(block.name)) 
+      !this.isStair(node) &&
+      walk &&
+      block.name !== "water" &&
+      !this.config.blocksToStayAway.includes(block.name)
     );
   }
 
   isBreakble(node, config) {
-    const block = this.world.getBlock(node);
+    const block = this.getBlock(node);
     if (!block) return false;
 
     if (this.manager.isAreaMarkedNode(node)) return false;
 
-    return this.isSolid(node) && !config.blocksToAvoid.includes(block.name);
+    return (
+      this.isSolid(node) && !this.config.blocksToAvoid.includes(block.name)
+    );
   }
 
   getNodeDigTime(node) {
@@ -341,23 +364,30 @@ class Move {
   }
 
   getBlock(node) {
-    const block = this.world.getBlock(node);
+    const block = this.bot.blockAt(node);
     return block;
   }
 
   isSolid(node) {
     const block = this.getBlock(node);
-    if (!block) return false;
+    if (!block) {
+      return false;
+    }
 
     return block.boundingBox === "block" || this.manager.isNodePlaced(node);
   }
 
   isStandable(node) {
+    const blockBelow = this.getBlock(node.offset(0, -1, 0));
+
+    if (!blockBelow) return false;
+
+    if (this.config.blocksToAvoid.includes(blockBelow.name)) return false;
+
     return (
       this.isSolid(node.offset(0, -1, 0)) &&
       this.isWalkable(node) &&
       !this.isFence(node.offset(0, -1, 0)) &&
-      !this.config.blocksToAvoid.includes(this.getBlock(node).name) &&
       this.isFullBlock(node.offset(0, -1, 0)) &&
       !this.isLava(node)
     );
@@ -383,7 +413,7 @@ class Move {
 
     if (!block) return false;
 
-    if (block.name === "farmland") return true;
+    // if (block.name === "farmland") return true;
 
     const shapes = block.shapes;
     const firstShapeArray = shapes[0];
@@ -531,27 +561,28 @@ function bestHarvestTool(bot, block) {
   return bestTool;
 }
 
-/**
- * @type {Array<Move>}
- */
-const moveClasses = [];
-
 function registerMoves(moves) {
   for (const moveClass of moves) {
-    moveClasses.push(new moveClass());
+    moveClasses.push(moveClass);
   }
   // console.log(moveClasses);
 }
 
 function getNeighbors2(world, node, config, manager, bot) {
+  /**
+   * @type {DirectionalVec3[]}
+   */
   let neighbors = [];
-
   for (const move of moveClasses) {
-    for (const dir of cardinalDirections) {
-      move.setValues(world, node.worldPos, dir, bot, config, manager);
-      const name = move.constructor.name;
-      move.addNeighbors(neighbors, config, manager, name);
-    }
+    move.setValues(world, node.worldPos, bot, config, manager);
+
+    const origin = new DirectionalVec3(
+      node.worldPos.x,
+      node.worldPos.y,
+      node.worldPos.z,
+      { x: 0, z: 0 }
+    );
+    move.generate(cardinalDirections, origin, neighbors);
   }
 
   neighbors = neighbors.filter(
@@ -560,13 +591,6 @@ function getNeighbors2(world, node, config, manager, bot) {
   );
 
   return neighbors;
-}
-
-function getXZDist(nodeA, nodeB) {
-  const xDist = Math.abs(nodeB.x - nodeA.x);
-  const zDist = Math.abs(nodeB.z - nodeA.z);
-
-  return Math.sqrt(xDist * xDist + zDist * zDist);
 }
 
 module.exports = { getNeighbors2, Move, registerMoves, DirectionalVec3 };

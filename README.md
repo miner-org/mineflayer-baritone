@@ -40,6 +40,7 @@ const bot = mineflayer.createBot({ username: "PathfinderBot" });
 bot.loadPlugin(pathfinder);
 
 bot.once("spawn", async () => {
+  await bot.waitForChunks()
   const goal = new goals.GoalExact(new Vec3(100, 65, 100));
 
   await bot.ashfinder.goto(goal);

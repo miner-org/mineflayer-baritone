@@ -4,7 +4,9 @@
   "description": "Minecraft pathfinder made in javascript using mineflayer and node js.",
   "main": "index.js",
   "scripts": {
-    "start": "node src/index.js localhost 25565"
+    "release:patch": "npm version patch && git push && git push --tags && npm publish",
+    "release:minor": "npm version minor && git push && git push --tags && npm publish",
+    "release:major": "npm version major && git push && git push --tags && npm publish"
   },
   "keywords": [
     "miner-org",
