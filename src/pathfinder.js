@@ -18,9 +18,24 @@ const compare = (a, b) => {
   return a.hCost - b.hCost; // Break ties by lower hCost
 };
 
+/**
+ * Generates a unique number-based hash for a DirectionalVec3.
+ * Safe for use as Map/Set keys in A*.
+ * @param {DirectionalVec3} node
+ * @returns {string} Hash key (as string)
+ */
 function defaultHash(node) {
-  const prime = 31; // A prime number to help distribute the values
-  return node.x * prime * prime + node.y * prime + node.z;
+  const x = node.x | 0;
+  const y = node.y | 0;
+  const z = node.z | 0;
+  const dx = node.dir?.x ?? 0;
+  const dz = node.dir?.z ?? 0;
+
+  // dir component mapped to 0..8
+  const dirKey = (dx + 1) * 3 + (dz + 1); // -1,-1 → 0 | 0,0 → 4 | 1,1 → 8
+
+  // Combine into a string key: "x,y,z,d"
+  return `${x},${y},${z},${dirKey}`;
 }
 
 class NodeManager {
@@ -81,6 +96,7 @@ class Cell {
      * @type {Vec3}
      */
     this.worldPos = worldPos || null;
+    this.direction = { x: 0, z: 0 };
     this.gCost = 0;
     this.hCost = 0;
     this.fCost = 0;
@@ -141,13 +157,21 @@ async function Astar(
   bot,
   endFunc,
   config,
-  excludedPositions = []
+  excludedPositions = [],
+  debug = false
 ) {
   let end = endPos.clone();
   let startPos = start.floored().offset(0.5, 0, 0.5);
+
+  excludedPositions = excludedPositions.map((pos) =>
+    pos.floored().offset(0.5, 0, 0.5)
+  );
   // console.log(start)
 
   const openList = new BinaryHeapOpenSet(compare);
+  /**'
+   * @type {Map<string, Cell>}
+   */
   const openSet = new Map();
   const closedSet = new Set();
   const nodemanager = new NodeManager();
@@ -171,12 +195,19 @@ async function Astar(
   let bestNode = null;
   let bestScore = Infinity;
 
+  let processedAny = false;
+
+  let iteration = 0;
+
   return new Promise(async (resolve) => {
     let startTime = performance.now();
     let lastSleep = performance.now();
 
     while (!openList.isEmpty()) {
-      if (performance.now() - lastSleep >= 40) {
+      processedAny = false;
+      iteration++;
+
+      if (performance.now() - lastSleep >= 30) {
         // need to do this so the bot doesnt lag
         await new Promise((r) => setTimeout(r, 0));
         lastSleep = performance.now();
@@ -184,7 +215,6 @@ async function Astar(
 
       let currentNode = openList.pop();
 
-      // At the top of the loop, after popping currentNode
       if (currentNode.attributes?.break) {
         nodemanager.markNodes(currentNode.attributes.break, "broken");
       }
@@ -225,76 +255,61 @@ async function Astar(
           cost: currentNode.fCost,
           status: "found",
           openMap: openSet,
+          iterations: iteration,
         });
       }
 
-      // bot.chat(
-      //   `/particle dust{color:[0.38,0.21,0.51],scale:1} ${currentNode.worldPos.x} ${currentNode.worldPos.y} ${currentNode.worldPos.z} 0.1 0.1 0.1 1 4 force`
-      // );
+      if (debug)
+        bot.chat(
+          `/particle dust{color:[0.38,0.21,0.51],scale:1} ${currentNode.worldPos.x} ${currentNode.worldPos.y} ${currentNode.worldPos.z} 0.1 0.1 0.1 1 4 force`
+        );
 
       // bot.chat(
       //   `/particle dust 0.38 0.21 0.51 1 ${currentNode.worldPos.x} ${currentNode.worldPos.y} ${currentNode.worldPos.z} 0.1 0.1 0.1 1 10 force`
       // );
 
       openSet.delete(defaultHash(currentNode.worldPos));
+      openList.remove(currentNode);
       closedSet.add(defaultHash(currentNode.worldPos));
 
       const neighbors = getNeighbors(currentNode, bot, config, nodemanager);
+
+      let safeNeighbors = [];
+      let riskyNeighbors = [];
+
       for (const neighborData of neighbors) {
-        if (closedSet.has(defaultHash(neighborData))) continue;
-
-        //if da cost to get to this node is greater than the cost to get to the current node
-        // if (neighborData.cost > 100) {
-        //   // console.log("cost too high");
-        //   continue;
-        // }
-
-        let tempG = currentNode.gCost + neighborData.cost;
-
-        let neighbor = openSet.get(defaultHash(neighborData));
-        const noise = Math.random() * 0.5;
-
-        if (!neighbor) {
-          neighbor = new Cell();
-          neighbor.worldPos = new Vec3(
-            neighborData.x,
-            neighborData.y,
-            neighborData.z
-          );
-
-          const blockID = world.getBlock(neighbor.worldPos).name;
-
-          neighbor.gCost = tempG;
-          neighbor.hCost = averageDist(neighborData, end, blockID);
-          neighbor.fCost = computeScore(neighbor, end);
-          // neighbor.fCost = neighbor.gCost + neighbor.hCost;
-          neighbor.parent = currentNode;
-          neighbor.moveName = neighborData.attributes.name;
-          neighbor.attributes = neighborData.attributes;
-
-          openSet.set(defaultHash(neighborData), neighbor);
-          openList.push(neighbor);
-          // console.log("Pushing neighbor:", neighbor.worldPos.toString(), "fCost:", neighbor.fCost);
-        } else if (tempG < neighbor.gCost) {
-          neighbor.gCost = tempG;
-          neighbor.hCost = averageDist(neighborData, end, blockID);
-          neighbor.fCost = computeScore(neighbor, end);
-          // neighbor.fCost = neighbor.gCost + neighbor.hCost;
-          neighbor.parent = currentNode;
-          neighbor.attributes = neighborData.attributes;
-
-          if (neighbor.fCost <= 100) {
-            // console.log("gay")
-            openList.update(neighbor);
-          }
+        if (closedSet.has(defaultHash(neighborData))) {
+          continue;
         }
-        // bot.chat(
-        //   `/particle dust{color:[0.11,0.75,0.31],scale:1} ${neighbor.worldPos.x} ${neighbor.worldPos.y} ${neighbor.worldPos.z} 0.1 0.1 0.1 1 4 force`
-        // );
 
+        const distToGoal = neighborData.distanceTo(end);
+        const nearGoal = distToGoal < 4;
+        const isRisky = nearGoal && neighborData.cost > 5;
+
+        if (isRisky) {
+          riskyNeighbors.push(neighborData);
+        } else {
+          safeNeighbors.push(neighborData);
+        }
+      }
+
+      for (const n of safeNeighbors) {
         // bot.chat(
-        //   `/particle dust 0.11 0.75 0.31 1 ${neighbor.worldPos.x} ${neighbor.worldPos.y} ${neighbor.worldPos.z} 0.1 0.1 0.1 2 10 force`
+        //   `/particle dust{color:[0.10,0.80,0.40],scale:1} ${n.x} ${n.y} ${n.z} 0.1 0.1 0.1 1 4 force`
         // );
+        processNeighbor(currentNode, n);
+      }
+
+      // If we didn’t process anything, consider risky moves as fallback
+      if (!processedAny) {
+        for (const n of riskyNeighbors) {
+          // Lower cost penalty to allow block placement as last resort
+          if (n.place?.length) n.cost *= 0.6; // encourage fallback
+          // bot.chat(
+          //   `/particle dust{color:[0.53,0.15,0.10],scale:1} ${n.x} ${n.y} ${n.z} 0.1 0.1 0.1 1 4 force`
+          // );
+          processNeighbor(currentNode, n);
+        }
       }
 
       let currentTime = performance.now();
@@ -306,14 +321,19 @@ async function Astar(
             path: reconstructPath(bestNode),
             status: "partial",
             cost: bestNode.fCost,
+            bestNode: bestNode,
             exploredNodes: closedSet.size,
             remainingNodes: openList.size(),
             openMap: openSet,
+            iterations: iteration,
           });
         } else {
           return resolve({
             path,
             status: "no path",
+            exploredNodes: closedSet.size,
+            remainingNodes: openList.size(),
+            iterations: iteration,
           });
         }
       }
@@ -322,8 +342,50 @@ async function Astar(
     return resolve({
       path,
       status: "no path",
+      exploredNodes: closedSet.size,
+      remainingNodes: openList.size(),
+      iterations: iteration,
     });
   });
+
+  /**
+   *
+   * @param {Cell} currentNode
+   * @param {DirectionalVec3} neighborData
+   */
+  function processNeighbor(currentNode, neighborData) {
+    const tempG = currentNode.gCost + neighborData.cost;
+    const hash = defaultHash(neighborData);
+    let neighbor = openSet.get(hash);
+
+    if (!neighbor) {
+      neighbor = new Cell();
+      neighbor.worldPos = new Vec3(
+        neighborData.x,
+        neighborData.y,
+        neighborData.z
+      );
+      neighbor.direction = neighborData.dir;
+      neighbor.gCost = tempG;
+      neighbor.hCost = averageDist(neighborData, end);
+      neighbor.fCost = computeScore(neighbor, end);
+      neighbor.parent = currentNode;
+      neighbor.moveName = neighborData.attributes.name;
+      neighbor.attributes = neighborData.attributes;
+
+      openSet.set(hash, neighbor);
+      openList.push(neighbor);
+      processedAny = true;
+    } else if (tempG < neighbor.gCost) {
+      neighbor.gCost = tempG;
+      neighbor.hCost = averageDist(neighborData, end);
+      neighbor.fCost = computeScore(neighbor, end);
+      neighbor.parent = currentNode;
+      neighbor.attributes = neighborData.attributes;
+      openList.update(neighbor);
+      processedAny = true;
+    }
+  }
 }
 /**
  *
@@ -339,12 +401,53 @@ function computeScore(node, goal) {
   const moveDir = node.velocity?.normalize() ?? toGoal;
   const dot = toGoal.dot(moveDir);
 
-  const directionPenalty = (1 - dot) * 0.4; // softer penalty
-  const jitter = Math.random() * 0.2;
+  const distToGoal = node.worldPos.distanceTo(goal);
+  const w = clamp(0.6 + distToGoal / 30, 0.6, 1.3);
+
+  const directionPenalty = distToGoal > 2 ? (1 - dot) * 0.4 : 0;
+
+  const riskyMovePenalty = distToGoal < 4 && node.attributes?.cost > 5 ? 3 : 0;
+  const placedBlocks = node.attributes?.place?.length || 0;
+  const scaffoldingPenalty = placedBlocks * 20;
+
+  const maxFallBonus = -2;
+  const fallingBonus =
+    node.parent &&
+    node.worldPos.y < node.parent.worldPos.y &&
+    !node.attributes?.place?.length
+      ? Math.max(
+          maxFallBonus,
+          -0.5 * (node.parent.worldPos.y - node.worldPos.y)
+        )
+      : 0;
+
   const explorationBonus = Math.sqrt(g) * 0.8;
 
-  const w = 0.8; // static weight for now
-  return g + w * h + directionPenalty + jitter - explorationBonus;
+  // Slight directional preference
+  const dirBias = node.direction
+    ? (node.direction.x * 17 + node.direction.z * 37) * 0.01
+    : 0;
+
+  // Randomness when far from goal
+  const randomness = distToGoal > 6 ? (Math.random() - 0.5) * 0.4 : 0;
+
+  // Optional: scale g cost weight down near goal
+  const gWeight = distToGoal > 10 ? 1 : 0.7;
+
+  let score = g * gWeight + w * h;
+  score += directionPenalty;
+  score += explorationBonus * 0.6;
+  score += riskyMovePenalty;
+  score += scaffoldingPenalty;
+  score += fallingBonus;
+  score += dirBias;
+  score += randomness;
+
+  return score;
+}
+
+function clamp(val, min, max) {
+  return Math.max(min, Math.min(max, val));
 }
 
 function euclideanDistance(node, goal, blockID = null) {

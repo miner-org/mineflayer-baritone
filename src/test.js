@@ -4,6 +4,7 @@ const Vec3 = require("vec3").Vec3;
 const { argv } = require("process");
 // const { elytrafly } = require("mineflayer-elytrafly");
 const { GoalNear, GoalExact } = require("./goal");
+const PathExecutor = require("./executor");
 const sussyVersions = ["1.21", "1.21.1", "1.21.2", "1.21.3", "1.21.4"];
 
 const bot = mineflayer.createBot({
@@ -18,10 +19,12 @@ bot.loadPlugin(inject);
 // bot.loadPlugin(elytrafly);
 
 let endPos;
+let pathExecutor;
 bot.once("spawn", async () => {
   await bot.waitForChunksToLoad();
   bot.chat("hi");
   bot.ashfinder.debug = true;
+  pathExecutor = new PathExecutor(bot);
 
   bot.on("chat", async (username, message) => {
     if (username === bot.username) return;
@@ -297,6 +300,49 @@ bot.once("spawn", async () => {
       bot.clearControlStates();
       bot.setControlState("forward", false);
       bot.setControlState("sprint", false);
+    }
+
+    // if (command === "f!newtest") {
+    //   const x = parseInt(args[0]);
+    //   const y = parseInt(args[1]);
+    //   const z = parseInt(args[2]);
+    //   endPos = new Vec3(x, y, z);
+
+    //   const { path } = await bot.ashfinder.generatePath(endPos);
+
+    //   const pathExecutor = new PathExecutor(bot);
+    //   pathExecutor.setPath(path);
+    // }
+
+    if (command === "f!newfindBlock") {
+      const blockName = args[0];
+
+      if (!blockName) return bot.chat("No");
+
+      const block = bot.findBlock({
+        matching: (block) => block.name === blockName,
+        maxDistance: 64,
+      });
+
+      if (!block) return bot.chat(`no ${blockName} in 64 block radius`);
+
+      const pos = block.position.clone().floored();
+
+      const goal = new GoalNear(pos, 1);
+
+      const result = await bot.ashfinder.generatePath(goal);
+
+      const { path, status } = result;
+
+      console.log(path.map((node) => node.attributes.name));
+
+      console.log(status);
+
+      pathExecutor.setPath(path, {
+        partial: status === "partial",
+        targetGoal: goal,
+        bestNode: result.bestNode,
+      });
     }
   });
 

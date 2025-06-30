@@ -15,6 +15,7 @@ class DirectionalVec3 extends Vec3 {
     this.dir = direction;
     this.attributes = attributes;
     this.blocks = [];
+    this.cost = 0;
   }
 
   forward(amount = 1, attributes = {}) {
@@ -116,20 +117,20 @@ class Move {
     this.name = this.constructor.name;
     this.COST_BREAK = 5;
     this.COST_NORMAL = 1;
+    this.COST_LADDER = 2;
     this.COST_DIAGONAL = 1.41;
     this.COST_UP = 1;
-    this.COST_PLACE = 3;
-    this.COST_PARKOUR = 6;
+    this.COST_PLACE = 5;
+    this.COST_PARKOUR = 5;
     this.COST_FALL = 1;
     this.COST_SWIM = 2.2;
     this.COST_SWIM_EXIT = 2;
-    this.COST_SWIM_START = 2.4;
-    this.COST_CLIMB = 2;
+    this.COST_SWIM_START = 2;
+    this.COST_CLIMB = 1;
   }
 
-  setValues(world, dir, bot, config, manager) {
+  setValues(world, bot, config, manager) {
     this.world = world;
-    this.dir = dir;
     /**
      * @type {import("mineflayer").Bot}
      */
@@ -150,6 +151,18 @@ class Move {
     }
 
     return false;
+  }
+
+  scaffoldingLeft() {
+    const bot = this.bot;
+    const scaffoldingBlocks = this.config.disposableBlocks;
+
+    return bot.inventory.items().reduce((count, item) => {
+      if (scaffoldingBlocks.includes(item.name)) {
+        return count + item.count;
+      }
+      return count;
+    }, 0);
   }
 
   // Function to determine an avoidance penalty if near a certain block
@@ -574,25 +587,24 @@ function getNeighbors2(world, node, config, manager, bot) {
    */
   let neighbors = [];
   for (const move of moveClasses) {
-    move.setValues(world, node.worldPos, bot, config, manager);
+    move.setValues(world, bot, config, manager);
 
-    const origin = new DirectionalVec3(
-      node.worldPos.x,
-      node.worldPos.y,
-      node.worldPos.z,
-      { x: 0, z: 0 }
-    );
+    const origin = node.worldPos;
     move.generate(cardinalDirections, origin, neighbors);
   }
 
-  neighbors = neighbors.filter(
-    (neighbor, index, self) =>
-      index === self.findIndex((n) => n.equals(neighbor))
-  );
+    neighbors = neighbors.filter(
+      (neighbor, index, self) =>
+        index === self.findIndex((n) => n.equals(neighbor))
+    );
 
   return neighbors;
 }
 
-module.exports = { getNeighbors2, Move, registerMoves, DirectionalVec3 };
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+module.exports = { getNeighbors2, Move, registerMoves, DirectionalVec3, clamp };
 
 requireDir("./");

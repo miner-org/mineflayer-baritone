@@ -1,4 +1,4 @@
-const { Move, registerMoves, DirectionalVec3 } = require("./");
+const { Move, registerMoves, DirectionalVec3, clamp } = require("./");
 
 class MoveForward extends Move {
   generate(cardinalDirections, origin, neighbors) {
@@ -30,6 +30,8 @@ class MoveForward extends Move {
     const isSolidBelow = this.isSolid(belowNode);
     const isAirBelow = this.isAir(belowNode);
 
+    if (this.manager.isNodeBroken(belowNode)) return;
+
     // Determine if we can stand (either on solid block or placed one)
     const canStand =
       isSolidBelow || (canPlace && this.canPlaceBlock(belowNode));
@@ -37,7 +39,12 @@ class MoveForward extends Move {
     if (!canStand) return;
 
     // Place block if needed
-    if (!isSolidBelow && canPlace && this.canPlaceBlock(belowNode)) {
+    if (
+      !isSolidBelow &&
+      canPlace &&
+      this.canPlaceBlock(belowNode) &&
+      !this.manager.isAreaMarkedNode(belowNode)
+    ) {
       node.attributes["place"].push(belowNode.clone());
     }
 
@@ -54,10 +61,19 @@ class MoveForward extends Move {
       else return;
     }
 
-    const placeCost = (node.attributes["place"].length || 0) * this.COST_PLACE;
+    // We’ll assume config.scaffoldingLeft is available
+    const remainingScaffolding = this.scaffoldingLeft() ?? 16; // fallback
+
+    // Give expensive cost to avoid spamming blocks
+    const scarcityFactor = clamp(20 / remainingScaffolding, 1, 10);
+    const placeCost =
+      (node.attributes["place"].length || 0) * this.COST_PLACE * scarcityFactor;
+
     const breakCost = (node.attributes["break"].length || 0) * this.COST_BREAK;
 
     const totalCost = this.COST_NORMAL + placeCost + breakCost;
+
+    node.attributes["cost"] = totalCost;
 
     neighbors.push(this.makeMovement(node, totalCost));
   }
@@ -114,9 +130,9 @@ class MoveDiagonal extends Move {
       this.isWalkable(headNode)
     ) {
       node.attributes["name"] = this.name;
-      neighbors.push(
-        this.makeMovement(node, this.COST_DIAGONAL ?? this.COST_NORMAL * 1.4)
-      );
+      const cost = this.COST_DIAGONAL;
+      node.attributes["cost"] = cost;
+      neighbors.push(this.makeMovement(node, cost));
     }
   }
 }
@@ -155,29 +171,70 @@ class MoveForwardUp extends Move {
     const belowNode = node.down(1); // Block under landing position
     const headNode = node.up(1); // Head space at landing
 
-    // Must stand on solid block
-    if (!this.isSolid(belowNode) || this.manager.isNodeBroken(belowNode))
-      return;
+    if (this.manager.isNodeBroken(node)) return;
+
+    if (this.manager.isNodeBroken(belowNode)) return;
+
+    const canPlace = this.config.placeBlocks && this.hasScaffoldingBlocks();
+    const isSolidBelow = this.isSolid(belowNode);
+    const isAirBelow = this.isAir(belowNode);
+
+    const canScaffold =
+      !isSolidBelow &&
+      isAirBelow &&
+      canPlace &&
+      this.canPlaceBlock(belowNode) &&
+      !this.manager.isNodeBroken(belowNode) &&
+      !this.manager.isAreaMarkedNode(belowNode);
+
+    // Skip if we can't stand on it and can't scaffold either
+    if (!isSolidBelow && !canScaffold) return;
 
     node.attributes["name"] = this.name;
     node.attributes["break"] = [];
+    node.attributes["place"] = [];
+
+    // Scaffold if needed
+    if (!isSolidBelow && canScaffold) {
+      node.attributes["place"].push(belowNode.clone());
+    }
 
     const testNodes = [upNode, node, headNode];
 
     for (const testNode of testNodes) {
       if (!this.isAir(testNode)) {
         if (this.config.breakBlocks && this.isBreakble(testNode)) {
+          if (this.manager.isNodeBroken(testNode)) return;
           node.attributes["break"].push(testNode.clone());
         } else {
-          return; // Block isn't air and can't be broken
+          return; // Not air and can't be broken
         }
       }
     }
 
     const breakCost = node.attributes["break"].length * this.COST_BREAK;
-    const totalCost = this.COST_UP + breakCost;
+    const placeCost = node.attributes["place"].length * this.COST_PLACE;
+
+    const totalCost = this.COST_UP + breakCost + placeCost;
+    node.attributes["cost"] = totalCost;
+    node.attributes["nJump"] = true;
 
     neighbors.push(this.makeMovement(node, totalCost));
+  }
+
+  canPlaceBlock(pos) {
+    const offsets = [
+      [0, -1, 0],
+      [1, 0, 0],
+      [-1, 0, 0],
+      [0, 0, 1],
+      [0, 0, -1],
+    ];
+
+    return offsets.some(([dx, dy, dz]) => {
+      const neighbor = pos.offset(dx, dy, dz);
+      return this.isSolid(neighbor);
+    });
   }
 }
 
@@ -217,6 +274,7 @@ class MoveForwardDown extends Move {
     const cost =
       this.COST_FALL +
       (fallDistance > 0 ? fallDistance * (this.COST_FALL_PER_BLOCK ?? 1) : 0);
+    targetNode.attributes["cost"] = cost;
     neighbors.push(this.makeMovement(targetNode, cost));
   }
 }
@@ -258,7 +316,11 @@ class MoveDiagonalUp extends Move {
       this.isWalkable(idk)
     ) {
       node.attributes["name"] = this.name;
-      neighbors.push(this.makeMovement(node, this.COST_DIAGONAL));
+      node.attributes["cost"] = this.COST_DIAGONAL + this.COST_UP;
+      node.attributes["nJump"] = true;
+      neighbors.push(
+        this.makeMovement(node, this.COST_DIAGONAL + this.COST_UP)
+      );
     }
   }
 }

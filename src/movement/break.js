@@ -1,102 +1,5 @@
 const { Move, registerMoves, DirectionalVec3 } = require("./");
 
-class MoveBreakForward extends Move {
-  addNeighbors(neighbors, config, manager, name) {
-    if (!config.breakBlocks) return;
-
-    let targetNode = this.forward(1);
-
-    this.manager = manager;
-    // Define forward and upward nodes
-    let forwardNode = targetNode.clone();
-    let forwardUpNode = this.forward(1).up(1);
-    let standingNode = this.down(1, targetNode);
-
-    // if (this.isStandable(forwardNode)) return;
-
-    // Check if the standing node is already broken (air)
-    if (manager.isNodeBroken(standingNode)) return;
-
-    if (!this.isSolid(standingNode)) return;
-
-    // Determine breakable blocks
-    const breakNodes = [];
-    if (this.isBreakble(forwardUpNode, config)) breakNodes.push(forwardUpNode);
-    if (this.isBreakble(forwardNode, config)) breakNodes.push(forwardNode);
-
-    // If no blocks to break, return
-    if (breakNodes.length === 0) return;
-
-    // Calculate the total dig time
-    const totalDigTime = breakNodes.reduce(
-      (time, node) => time + this.getNodeDigTime(node),
-      0
-    );
-    targetNode.blocks.push(...breakNodes);
-
-    targetNode.attributes["name"] = name;
-    // Add the move to neighbors
-    neighbors.push(
-      this.makeBreakable(
-        targetNode,
-        this.COST_BREAK + Math.max(1, totalDigTime)
-      )
-    );
-  }
-}
-class MoveBreakForwardUp extends Move {
-  addNeighbors(neighbors, config, manager, name) {
-    if (!config.breakBlocks) return;
-
-    this.config = config;
-    this.manager = manager;
-
-    // Define relevant nodes
-    const landingNode = this.up(1).forward(1);
-    const standingNode = this.down(1, landingNode);
-
-    const node2 = this.up(1, landingNode);
-
-    const breakNode = landingNode.clone();
-    const upNode = this.up(2);
-
-    if (this.isStandable(landingNode) && this.isAir(upNode)) return;
-
-    // Check if standing node is already broken or not solid
-    if (manager.isNodeBroken(standingNode) || !this.isSolid(standingNode))
-      return;
-
-    // Determine breakable blocks and calculate dig times
-    const blocksToBreak = [];
-
-    if (this.isBreakble(breakNode, config)) blocksToBreak.push(breakNode);
-
-    if (this.isBreakble(upNode, config)) blocksToBreak.push(upNode);
-    if (this.isBreakble(node2, config)) blocksToBreak.push(node2);
-
-    // If no blocks need breaking, return
-    if (blocksToBreak.length === 0) return;
-
-    const totalDigTime = blocksToBreak.reduce(
-      (time, node) => time + this.getNodeDigTime(node),
-      0
-    );
-
-    // this.break = true;
-    landingNode.blocks.push(...blocksToBreak);
-
-    landingNode.attributes["name"] = name;
-
-    // Add the move to neighbors
-    neighbors.push(
-      this.makeBreakable(
-        landingNode,
-        this.COST_BREAK + Math.max(1, totalDigTime)
-      )
-    );
-  }
-}
-
 class MoveForwardDownBreak extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.breakBlocks) return;
@@ -142,13 +45,69 @@ class MoveForwardDownBreak extends Move {
     const cost =
       this.COST_FALL + node.attributes["break"].length * this.COST_BREAK;
 
+    node.attributes["cost"] = cost;
+
     neighbors.push(this.makeMovement(node, cost));
   }
 }
 
-registerMoves([
-  // MoveBreakForward,
-  // MoveBreakForwardUp,
-  new MoveForwardDownBreak(),
-  // MoveBreakDown,
-]);
+class MoveBreakDown extends Move {
+  generate(cardinalDirections, origin, neighbors) {
+    if (!this.config.breakBlocks) return;
+
+    this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, {
+      x: 0,
+      z: 0,
+    });
+    const down = this.origin.offset(0, -1, 0); // drop one
+    this.addNeighbors(neighbors, down);
+  }
+
+  /**
+   *
+   * @param {DirectionalVec3[]} neighbors
+   * @param {DirectionalVec3} node
+   */
+  addNeighbors(neighbors, node) {
+    let current = node.clone();
+    const breakChain = [];
+    let fallDepth = 0;
+
+    // Allow breaking up to 3 blocks downward until solid block found
+    for (let i = 0; i < 3; i++) {
+      const below = current.down(1);
+      if (this.manager.isNodeBroken(current)) return;
+
+      if (this.isBreakble(current, this.config)) {
+        breakChain.push(current.clone());
+      } else if (this.isAir(current)) {
+        // keep going down
+      } else if (this.isSolid(current)) {
+        break; // found floor
+      } else {
+        return; // not breakable or air, e.g. liquid
+      }
+
+      current = below;
+      fallDepth++;
+    }
+
+    if (fallDepth === 0) return;
+
+    const landingBlock = current;
+    if (!this.isSolid(landingBlock)) return;
+
+    const moveNode = landingBlock.up(1); // we land above the solid block
+    moveNode.attributes = {};
+    moveNode.attributes["name"] = this.name;
+    moveNode.attributes["break"] = breakChain;
+
+    const cost =
+      this.COST_FALL + breakChain.length * this.COST_BREAK + fallDepth * 0.5; // slight fall penalty
+    moveNode.attributes["cost"] = cost;
+
+    neighbors.push(this.makeMovement(moveNode, cost));
+  }
+}
+
+registerMoves([new MoveForwardDownBreak(), new MoveBreakDown()]);

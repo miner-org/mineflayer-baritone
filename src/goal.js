@@ -2,6 +2,9 @@ const Vec3 = require("vec3").Vec3;
 
 class Goal {
   constructor(position) {
+    /**
+     * @type {Vec3}
+     */
     this.position = position.floored(); // Already floored
     this.x = this.position.x + 0.5;
     this.y = this.position.y;

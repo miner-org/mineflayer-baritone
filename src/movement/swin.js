@@ -23,6 +23,7 @@ class MoveSwimForward extends Move {
       node.attributes["swimming"] = true;
 
       const cost = this.COST_SWIM ?? this.COST_NORMAL + 1;
+      node.attributes["cost"] = cost;
       neighbors.push(this.makeMovement(node, cost));
     }
   }
@@ -53,13 +54,14 @@ class MoveSwimStart extends Move {
     const nodeBelow = node.down(1);
     const stepInValid =
       steppingFromSolid &&
-      isWater(node) &&
+      this.isWalkable(node) &&
       isWater(nodeBelow) &&
       (this.isAir(head) || isWater(head));
 
     if (stepInValid) {
       node.attributes["name"] = this.name;
       node.attributes["swimming"] = true;
+      node.attributes["cost"] = this.COST_SWIM_START ?? this.COST_NORMAL + 2; // Cost to start swimming
       neighbors.push(
         this.makeMovement(node, this.COST_SWIM_START ?? this.COST_NORMAL + 2)
       );
@@ -81,10 +83,8 @@ class MoveSwimStart extends Move {
 
     // Need at least 2 water blocks to break the fall safely
     const waterTarget = below;
-    const underWater = waterTarget.down(1);
     const diveOk =
       isWater(waterTarget) &&
-      isWater(underWater) &&
       (this.isAir(waterTarget.up(1)) || isWater(waterTarget.up(1)));
 
     if (diveOk) {
@@ -95,6 +95,7 @@ class MoveSwimStart extends Move {
 
       const cost =
         this.COST_SWIM_START + diveDistance * (this.COST_FALL_PER_BLOCK ?? 1);
+      finalNode.attributes["cost"] = cost;
 
       neighbors.push(this.makeMovement(finalNode, cost));
     }
@@ -114,17 +115,15 @@ class MoveSwimExit extends Move {
   }
 
   addNeighbors(neighbors, node) {
-    const below = node.down(1); // The landing block
-    const belowBelow = below.down(1); // Should be water
     const head = node.up(1); // Make sure headroom is clear
 
-    const canStepOut = this.isStandable(node) && this.isSolid(below);
-    const waterUnder = this.isWater(belowBelow);
-    const headClear = this.isAir(head) || this.isWater(head);
+    const canStepOut = this.isStandable(node);
+    const headClear = this.isWalkable(head);
 
-    if (canStepOut && waterUnder && headClear) {
+    if (canStepOut && headClear) {
       node.attributes["name"] = this.name;
       node.attributes["exitWater"] = true;
+      node.attributes["cost"] = this.COST_SWIM_EXIT ?? this.COST_NORMAL + 2; // Cost to exit water]
       neighbors.push(
         this.makeMovement(node, this.COST_SWIM_EXIT ?? this.COST_NORMAL + 3)
       );
@@ -132,4 +131,109 @@ class MoveSwimExit extends Move {
   }
 }
 
-// registerMoves([new MoveSwimForward(), new MoveSwimStart(), new MoveSwimExit()]);
+class MoveSwimUp extends Move {
+  generate(cardinalDirections, origin, neighbors) {
+    this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, {
+      x: 0,
+      z: 0,
+    });
+
+    const node = this.origin.up(1);
+    this.addNeighbors(neighbors, node);
+  }
+
+  addNeighbors(neighbors, node) {
+    const below = node.down(1);
+    const head = node.up(1);
+
+    if (
+      this.isWater(node) &&
+      (this.isAir(head) || this.isWater(head)) &&
+      this.isWater(below)
+    ) {
+      node.attributes["name"] = this.name;
+      node.attributes["swimming"] = true;
+      node.attributes["up"] = true; // Indicate upward swim
+
+      const cost = this.COST_SWIM_VERTICAL ?? this.COST_NORMAL + 1.5;
+      node.attributes["cost"] = cost;
+      neighbors.push(this.makeMovement(node, cost));
+    }
+  }
+}
+
+class MoveSwimDown extends Move {
+  generate(cardinalDirections, origin, neighbors) {
+    this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, {
+      x: 0,
+      z: 0,
+    });
+
+    const node = this.origin.down(1);
+    this.addNeighbors(neighbors, node);
+  }
+
+  addNeighbors(neighbors, node) {
+    const below = node.down(1);
+    const head = node.up(1);
+
+    if (
+      this.isWater(node) &&
+      (this.isAir(head) || this.isWater(head)) &&
+      this.isWater(below)
+    ) {
+      node.attributes["name"] = this.name;
+      node.attributes["swimming"] = true;
+      node.attributes["down"] = true; // Indicate downward swim
+
+      const cost = this.COST_SWIM_VERTICAL ?? this.COST_NORMAL + 1.5;
+      node.attributes["cost"] = cost;
+      neighbors.push(this.makeMovement(node, cost));
+    }
+  }
+}
+
+class MoveSwimDiagonal extends Move {
+  generate(cardinalDirections, origin, neighbors) {
+    const diagonals = [
+      { x: 1, z: 1 },
+      { x: -1, z: 1 },
+      { x: 1, z: -1 },
+      { x: -1, z: -1 },
+    ];
+
+    for (const dir of diagonals) {
+      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+
+      const node = this.origin.offset(dir.x, 0, dir.z);
+      this.addNeighbors(neighbors, node);
+    }
+  }
+
+  addNeighbors(neighbors, node) {
+    const below = node.down(1);
+    const head = node.up(1);
+
+    if (
+      this.isWater(node) &&
+      (this.isAir(head) || this.isWater(head)) &&
+      this.isWater(below)
+    ) {
+      node.attributes["name"] = this.name;
+      node.attributes["swimming"] = true;
+
+      const cost = this.COST_SWIM_DIAGONAL ?? this.COST_NORMAL + 2;
+      node.attributes["cost"] = cost;
+      neighbors.push(this.makeMovement(node, cost));
+    }
+  }
+}
+
+registerMoves([
+  new MoveSwimForward(),
+  new MoveSwimStart(),
+  new MoveSwimExit(),
+  new MoveSwimUp(),
+  new MoveSwimDown(),
+  new MoveSwimDiagonal(),
+]);

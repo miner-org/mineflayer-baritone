@@ -412,6 +412,16 @@ function distanceFromLine(lineStart, lineEnd, point) {
   }
 }
 
+/**
+ *@param {Goal} goal - The goal to reach.
+ *@return {function} A function that returns whether the goal has been reached.
+ */
+function createEndFunc(goal) {
+  return (currentPosition) => {
+    return goal.isReached(currentPosition);
+  };
+}
+
 module.exports = {
   vectorProjection,
   shouldAutoJump,
@@ -425,4 +435,6 @@ module.exports = {
   simulateUntil,
   getController,
   distanceFromLine,
+  getControlState,
+  createEndFunc
 };

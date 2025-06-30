@@ -238,25 +238,39 @@ class BinaryHeapOpenSet {
 
   update(val) {
     const current = this.indexMap.get(val);
-    if (current === undefined) return; // Value not found in the heap
-    this.bubbleUp(current); // Try to move up
-    this.bubbleDown(current); // Try to move down
+    if (current === undefined || this.heap[current] !== val) return; // Value not in heap or map is stale
+    this.bubbleUp(current);
+    this.bubbleDown(current);
   }
 
   pop() {
     if (this.isEmpty()) return null;
-    if (this.size() === 1) {
-      const smallest = this.heap.pop(); // Remove the only element
-      this.indexMap.delete(smallest);
-      return smallest;
+
+    const smallest = this.heap[1];
+    const last = this.heap.pop();
+
+    if (!this.isEmpty()) {
+      this.heap[1] = last;
+      this.indexMap.set(last, 1);
+      this.bubbleDown(1);
     }
 
-    const smallest = this.heap[1]; // Root of the heap
-    this.heap[1] = this.heap.pop(); // Move the last element to the root
-    this.indexMap.set(this.heap[1], 1); // Update index of the new root
-    this.bubbleDown(1); // Restore the heap property
-    this.indexMap.delete(smallest); // Remove from indexMap
+    this.indexMap.delete(smallest);
     return smallest;
+  }
+
+  remove(val) {
+    const index = this.indexMap.get(val);
+    if (index === undefined) return;
+
+    const last = this.heap.pop();
+    if (index < this.heap.length) {
+      this.heap[index] = last;
+      this.indexMap.set(last, index);
+      this.bubbleUp(index);
+      this.bubbleDown(index);
+    }
+    this.indexMap.delete(val);
   }
 
   bubbleDown(index) {
@@ -300,6 +314,10 @@ class BinaryHeapOpenSet {
     for (let i = 1; i <= this.size(); i++) {
       const left = i * 2;
       const right = i * 2 + 1;
+      if (this.indexMap.get(this.heap[i]) !== i) {
+        console.warn("IndexMap desync at", i, this.heap[i]);
+      }
+
       if (
         left <= this.size() &&
         this.compare(this.heap[i], this.heap[left]) > 0
@@ -315,7 +333,6 @@ class BinaryHeapOpenSet {
     }
   }
 }
-
 
 module.exports = {
   BinarySearchTree,
