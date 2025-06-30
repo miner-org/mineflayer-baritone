@@ -27,7 +27,7 @@ To install, run:
 npm install @miner-org/mineflayer-baritone
 ```
 
-Example:
+## Example
 
 ```js
 const mineflayer = require("mineflayer");
@@ -50,8 +50,7 @@ bot.once("spawn", async () => {
 (Yes, it might fail, but that’s part of the experience.)
 
 # Known issues
-
-- Tends to get stuck when parkouring so if your are using this for short distance stuff disable parkour.
+- Tends to get stuck when doing parkour so if you're using this for short distance stuff disable parkour.
 
 # Contributing
 
