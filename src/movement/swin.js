@@ -56,7 +56,7 @@ class MoveSwimStart extends Move {
       steppingFromSolid &&
       this.isWalkable(node) &&
       isWater(nodeBelow) &&
-      (this.isAir(head) || isWater(head));
+      this.isAir(head);
 
     if (stepInValid) {
       node.attributes["name"] = this.name;
@@ -85,7 +85,7 @@ class MoveSwimStart extends Move {
     const waterTarget = below;
     const diveOk =
       isWater(waterTarget) &&
-      (this.isAir(waterTarget.up(1)) || isWater(waterTarget.up(1)));
+      (this.isAir(waterTarget.up(1)));
 
     if (diveOk) {
       const finalNode = waterTarget.clone();
@@ -115,6 +115,8 @@ class MoveSwimExit extends Move {
   }
 
   addNeighbors(neighbors, node) {
+    if (!this.isWater(this.origin)) return;
+
     const head = node.up(1); // Make sure headroom is clear
 
     const canStepOut = this.isStandable(node);
@@ -230,10 +232,10 @@ class MoveSwimDiagonal extends Move {
 }
 
 registerMoves([
-  new MoveSwimForward(),
-  new MoveSwimStart(),
-  new MoveSwimExit(),
-  new MoveSwimUp(),
-  new MoveSwimDown(),
-  new MoveSwimDiagonal(),
+  new MoveSwimForward(10),
+  new MoveSwimStart(10),
+  new MoveSwimExit(10),
+  new MoveSwimUp(10),
+  new MoveSwimDown(10),
+  new MoveSwimDiagonal(10),
 ]);

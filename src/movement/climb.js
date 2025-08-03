@@ -104,7 +104,7 @@ class MoveLadderClimb extends Move {
 }
 
 registerMoves([
-  new MoveLadderEnter(),
-  new MoveLadderExit(),
-  new MoveLadderClimb(),
+  new MoveLadderEnter(10),
+  new MoveLadderExit(10),
+  new MoveLadderClimb(10),
 ]);

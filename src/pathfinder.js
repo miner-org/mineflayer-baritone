@@ -40,6 +40,10 @@ function defaultHash(node) {
 
 class NodeManager {
   constructor() {
+    /**
+     * @type {Map<string, string>}
+     * Maps node hash to its attribute (e.g. "broken", "placed", "areaMarked")
+     */
     this.markedNodes = new Map();
   }
 
@@ -113,23 +117,6 @@ class Cell {
      */
     this.attributes = {};
     /**
-     * @type {DirectionalVec3[]}
-     */
-    this.verticalPlacable = [];
-    /**
-     * @type {DirectionalVec3[]}
-     */
-    this.horizontalPlacable = [];
-    /**
-     * @type {DirectionalVec3[]}
-     */
-    this.placeBlocks = [];
-
-    // to break or place blocks later
-    this.placeHere = false;
-    this.breakThis = false;
-
-    /**
      * @type {string}
      * The name of the move class that is node is associdiated with
      */
@@ -163,40 +150,32 @@ async function Astar(
   let end = endPos.clone();
   let startPos = start.floored().offset(0.5, 0, 0.5);
 
+  if (bot.blockAt(startPos).name === "farmland")
+    startPos = startPos.offset(0, 1, 0);
+
   excludedPositions = excludedPositions.map((pos) =>
     pos.floored().offset(0.5, 0, 0.5)
   );
-  // console.log(start)
 
   const openList = new BinaryHeapOpenSet(compare);
-  /**'
-   * @type {Map<string, Cell>}
-   */
   const openSet = new Map();
   const closedSet = new Set();
   const nodemanager = new NodeManager();
+
+  // Mark excluded positions early
   nodemanager.markNodes(excludedPositions, "areaMarked");
+
   const startNode = new Cell(startPos);
-
-  // console.log(startNode)
-
-  const world = bot.world;
-
-  const blockID = world.getBlock(startNode.worldPos).name;
-
   startNode.gCost = 0;
-  startNode.hCost = averageDist(startPos, end, blockID);
+  startNode.hCost = averageDist(startPos, end);
   startNode.fCost = startNode.gCost + startNode.hCost;
 
   openList.push(startNode);
   openSet.set(defaultHash(startPos), startNode);
 
-  let path = [];
   let bestNode = null;
   let bestScore = Infinity;
-
   let processedAny = false;
-
   let iteration = 0;
 
   return new Promise(async (resolve) => {
@@ -208,48 +187,74 @@ async function Astar(
       iteration++;
 
       if (performance.now() - lastSleep >= 30) {
-        // need to do this so the bot doesnt lag
         await new Promise((r) => setTimeout(r, 0));
         lastSleep = performance.now();
       }
 
-      let currentNode = openList.pop();
+      const currentNode = openList.pop();
 
-      if (currentNode.attributes?.break) {
+      // MARK broken and placed nodes ASAP before neighbor gen
+      if (currentNode.attributes.break?.length) {
         nodemanager.markNodes(currentNode.attributes.break, "broken");
+        if (debug)
+          console.log(
+            "Marked broken nodes:",
+            currentNode.attributes.break.map((n) => n.toString())
+          );
       }
-      if (currentNode.attributes?.place) {
+
+      if (currentNode.attributes.place?.length) {
         nodemanager.markNodes(currentNode.attributes.place, "placed");
+        if (debug)
+          console.log(
+            "Marked placed nodes:",
+            currentNode.attributes.place.map((n) => n.toString())
+          );
       }
-      if (currentNode.placeHere && currentNode.horizontalPlacable) {
-        nodemanager.markNodes(
-          currentNode.horizontalPlacable,
-          "placeHorizontal"
+
+      if (debug) {
+        const distToGoal = currentNode.worldPos.distanceTo(end);
+        const focusPhase = Math.min(1, Math.max(0, 1 - distToGoal / 15));
+
+        // Log the key factors for the node being processed
+        console.log(
+          `Node: ${currentNode.worldPos.toString()} | ` +
+            `Dist: ${distToGoal.toFixed(1)} | ` +
+            `Focus: ${focusPhase.toFixed(2)}`
+        );
+
+        // Optional: show exploration vs focus with colored particles
+        const color =
+          focusPhase < 0.5
+            ? "0.0,0.6,1.0" // blue = exploring
+            : "0.6,1.0,0.0"; // green = focusing
+
+        bot.chat(
+          `/particle dust{color:[${color}],scale:1} ` +
+            `${currentNode.worldPos.x} ${currentNode.worldPos.y} ${currentNode.worldPos.z} 0.1 0.1 0.1 1 4 force`
         );
       }
-      if (currentNode.placeHere && currentNode.verticalPlacable) {
-        nodemanager.markNodes(currentNode.verticalPlacable, "placeVertical");
-      }
 
-      // console.log(
-      //   "Popped node:",
-      //   currentNode.worldPos.toString(),
-      //   "fCost:",
-      //   currentNode.fCost
-      // );
+      // Now neighbors get generated with fresh nodemanager state
+      let neighbors = getNeighbors(currentNode, bot, config, nodemanager);
+
+      openSet.delete(defaultHash(currentNode.worldPos));
+      openList.remove(currentNode);
+      closedSet.add(defaultHash(currentNode.worldPos));
+
+      // Track best node for partial path returns
       const h = averageDist(currentNode.worldPos, end);
       const fromStart = currentNode.worldPos.distanceTo(startPos);
       if (
         h < bestScore ||
-        (h === bestScore && fromStart > bestNode.worldPos.distanceTo(startPos))
+        (h === bestScore && fromStart > bestNode?.worldPos.distanceTo(startPos))
       ) {
         bestNode = currentNode;
         bestScore = h;
       }
 
+      // Check if reached destination
       if (endFunc(currentNode.worldPos)) {
-        // console.log("current", currentNode.worldPos);
-        // console.log("end", end);
         return resolve({
           path: reconstructPath(currentNode),
           cost: currentNode.fCost,
@@ -264,58 +269,15 @@ async function Astar(
           `/particle dust{color:[0.38,0.21,0.51],scale:1} ${currentNode.worldPos.x} ${currentNode.worldPos.y} ${currentNode.worldPos.z} 0.1 0.1 0.1 1 4 force`
         );
 
-      // bot.chat(
-      //   `/particle dust 0.38 0.21 0.51 1 ${currentNode.worldPos.x} ${currentNode.worldPos.y} ${currentNode.worldPos.z} 0.1 0.1 0.1 1 10 force`
-      // );
+      for (const n of neighbors) {
+        if (closedSet.has(defaultHash(n))) continue;
 
-      openSet.delete(defaultHash(currentNode.worldPos));
-      openList.remove(currentNode);
-      closedSet.add(defaultHash(currentNode.worldPos));
-
-      const neighbors = getNeighbors(currentNode, bot, config, nodemanager);
-
-      let safeNeighbors = [];
-      let riskyNeighbors = [];
-
-      for (const neighborData of neighbors) {
-        if (closedSet.has(defaultHash(neighborData))) {
-          continue;
-        }
-
-        const distToGoal = neighborData.distanceTo(end);
-        const nearGoal = distToGoal < 4;
-        const isRisky = nearGoal && neighborData.cost > 5;
-
-        if (isRisky) {
-          riskyNeighbors.push(neighborData);
-        } else {
-          safeNeighbors.push(neighborData);
-        }
-      }
-
-      for (const n of safeNeighbors) {
-        // bot.chat(
-        //   `/particle dust{color:[0.10,0.80,0.40],scale:1} ${n.x} ${n.y} ${n.z} 0.1 0.1 0.1 1 4 force`
-        // );
         processNeighbor(currentNode, n);
-      }
-
-      // If we didn’t process anything, consider risky moves as fallback
-      if (!processedAny) {
-        for (const n of riskyNeighbors) {
-          // Lower cost penalty to allow block placement as last resort
-          if (n.place?.length) n.cost *= 0.6; // encourage fallback
-          // bot.chat(
-          //   `/particle dust{color:[0.53,0.15,0.10],scale:1} ${n.x} ${n.y} ${n.z} 0.1 0.1 0.1 1 4 force`
-          // );
-          processNeighbor(currentNode, n);
-        }
       }
 
       let currentTime = performance.now();
       if (currentTime - startTime >= config.thinkTimeout) {
-        // Time limit exceeded, return the best partial path found within the time limit
-
+        // Timeout: return partial path
         if (bestNode) {
           return resolve({
             path: reconstructPath(bestNode),
@@ -329,7 +291,7 @@ async function Astar(
           });
         } else {
           return resolve({
-            path,
+            path: [],
             status: "no path",
             exploredNodes: closedSet.size,
             remainingNodes: openList.size(),
@@ -339,8 +301,9 @@ async function Astar(
       }
     }
 
+    // No path found
     return resolve({
-      path,
+      path: [],
       status: "no path",
       exploredNodes: closedSet.size,
       remainingNodes: openList.size(),
@@ -348,15 +311,20 @@ async function Astar(
     });
   });
 
-  /**
-   *
-   * @param {Cell} currentNode
-   * @param {DirectionalVec3} neighborData
-   */
   function processNeighbor(currentNode, neighborData) {
     const tempG = currentNode.gCost + neighborData.cost;
     const hash = defaultHash(neighborData);
     let neighbor = openSet.get(hash);
+
+    // Build virtual block overlay
+    // if (!neighborData.virtualBlocks) {
+    //   neighborData.virtualBlocks = new Map(currentNode.virtualBlocks || []);
+    //   // Apply queued changes
+    //   for (const b of neighborData.attributes.break || [])
+    //     neighborData.virtualBlocks.set(b.toString(), "air");
+    //   for (const p of neighborData.attributes.place || [])
+    //     neighborData.virtualBlocks.set(p.toString(), "placed");
+    // }
 
     if (!neighbor) {
       neighbor = new Cell();
@@ -368,10 +336,11 @@ async function Astar(
       neighbor.direction = neighborData.dir;
       neighbor.gCost = tempG;
       neighbor.hCost = averageDist(neighborData, end);
-      neighbor.fCost = computeScore(neighbor, end);
+      neighbor.fCost = computeScore(neighbor, end, startPos);
       neighbor.parent = currentNode;
       neighbor.moveName = neighborData.attributes.name;
       neighbor.attributes = neighborData.attributes;
+      neighbor.virtualBlocks = neighborData.virtualBlocks;
 
       openSet.set(hash, neighbor);
       openList.push(neighbor);
@@ -379,21 +348,23 @@ async function Astar(
     } else if (tempG < neighbor.gCost) {
       neighbor.gCost = tempG;
       neighbor.hCost = averageDist(neighborData, end);
-      neighbor.fCost = computeScore(neighbor, end);
+      neighbor.fCost = computeScore(neighbor, end, startPos);
       neighbor.parent = currentNode;
-      neighbor.attributes = neighborData.attributes;
+      neighbor.virtualBlocks = neighborData.virtualBlocks;
       openList.update(neighbor);
       processedAny = true;
     }
   }
 }
+
 /**
  *
  * @param {Cell} node
  * @param {Vec3} goal
+ * @param {Vec3} startPos
  * @returns
  */
-function computeScore(node, goal) {
+function computeScore(node, goal, startPos) {
   const g = node.gCost;
   const h = averageDist(node.worldPos, goal);
 
@@ -406,21 +377,6 @@ function computeScore(node, goal) {
 
   const directionPenalty = distToGoal > 2 ? (1 - dot) * 0.4 : 0;
 
-  const riskyMovePenalty = distToGoal < 4 && node.attributes?.cost > 5 ? 3 : 0;
-  const placedBlocks = node.attributes?.place?.length || 0;
-  const scaffoldingPenalty = placedBlocks * 20;
-
-  const maxFallBonus = -2;
-  const fallingBonus =
-    node.parent &&
-    node.worldPos.y < node.parent.worldPos.y &&
-    !node.attributes?.place?.length
-      ? Math.max(
-          maxFallBonus,
-          -0.5 * (node.parent.worldPos.y - node.worldPos.y)
-        )
-      : 0;
-
   const explorationBonus = Math.sqrt(g) * 0.8;
 
   // Slight directional preference
@@ -431,19 +387,51 @@ function computeScore(node, goal) {
   // Randomness when far from goal
   const randomness = distToGoal > 6 ? (Math.random() - 0.5) * 0.4 : 0;
 
-  // Optional: scale g cost weight down near goal
-  const gWeight = distToGoal > 10 ? 1 : 0.7;
-
-  let score = g * gWeight + w * h;
+  let score = g * w + h;
   score += directionPenalty;
-  score += explorationBonus * 0.6;
-  score += riskyMovePenalty;
-  score += scaffoldingPenalty;
-  score += fallingBonus;
   score += dirBias;
-  score += randomness;
+  score -= explorationBonus;
 
   return score;
+}
+
+function averageDist(node, goal) {
+  const verticalGap = Math.abs(goal.y - node.y);
+  const PUSH_FACTOR = verticalGap > 4 ? 1.8 : 1.3;
+
+  const m = manhattanDistance(node, goal, PUSH_FACTOR);
+  const o = octileDistance(node, goal, PUSH_FACTOR);
+
+  const verticalReward =
+    verticalGap > 1 ? Math.max(0, 6 - verticalGap) * 0.1 : 0;
+
+  const distXZ = node.offset(0, -Math.abs(node.y - goal.y), 0).distanceTo(goal);
+  const climbingPenalty =
+    node.y > goal.y && node.y - goal.y > 2 && distXZ < 4 ? 0.4 : 0;
+
+  const steepPenalty = goal.y < node.y && node.y - goal.y > 3 ? 0.5 : 0;
+
+  return (m + o) / 2 + verticalReward + climbingPenalty + steepPenalty;
+}
+
+function manhattanDistance(node, goal, push = 1.3) {
+  const dx = Math.abs(node.x - goal.x);
+  const dy = Math.abs(node.y - goal.y);
+  const dz = Math.abs(node.z - goal.z);
+  return dx + dz + dy * push;
+}
+
+function octileDistance(node, goal, push = 1.3) {
+  const dx = Math.abs(goal.x - node.x);
+  const dy = Math.abs(goal.y - node.y) * push;
+  const dz = Math.abs(goal.z - node.z);
+
+  const sorted = [dx, dy, dz].sort((a, b) => a - b);
+  const min = sorted[0];
+  const mid = sorted[1];
+  const max = sorted[2];
+
+  return 1.41 * min + 1.41 * (mid - min) + (max - mid);
 }
 
 function clamp(val, min, max) {
@@ -462,39 +450,6 @@ function euclideanDistance(node, goal, blockID = null) {
   const cost = blockMapCost.get(blockID) ?? 1;
 
   return (horizontalDistance + verticalDistance) * cost;
-}
-
-function averageDist(node, goal) {
-  const m = manhattanDistance(node, goal);
-  const o = octileDistance(node, goal);
-
-  const verticalCuriosity = Math.abs(goal.y - node.y) > 0 ? -0.3 : 0;
-
-  return (m + o) / 2 + verticalCuriosity;
-}
-
-function manhattanDistance(node, goal, blockID = null) {
-  const dx = Math.abs(node.x - goal.x);
-  const dy = Math.abs(node.y - goal.y);
-  const dz = Math.abs(node.z - goal.z);
-
-  const horizontalDistance = dx + dz;
-  const verticalDistance = dy;
-
-  return horizontalDistance + verticalDistance * PUSH_FACTOR;
-}
-
-function octileDistance(node, goal) {
-  const dx = Math.abs(goal.x - node.x);
-  const dy = Math.abs(goal.y - node.y) * PUSH_FACTOR;
-  const dz = Math.abs(goal.z - node.z);
-
-  const sorted = [dx, dy, dz].sort((a, b) => a - b);
-  const min = sorted[0];
-  const mid = sorted[1];
-  const max = sorted[2];
-
-  return 1.41 * min + 1.41 * (mid - min) + (max - mid);
 }
 
 function reconstructPath(node) {

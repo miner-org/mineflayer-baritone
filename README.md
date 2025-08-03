@@ -1,5 +1,7 @@
 # 🏃‍♂️ Mineflayer Pathfinder (WIP)
 
+## ⚠️ DISCLAIMER: DOES NOT WORK WELL FOR LONG DISTANCES, PLEASE USE FOR GENERAL THINGS ⚠️
+
 ## Overview
 
 This is a **basic pathfinder** for [Mineflayer](https://github.com/PrismarineJS/mineflayer) that includes:

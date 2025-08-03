@@ -1,39 +1,60 @@
-const { Move, registerMoves } = require("./");
-
-class MovePlaceForward extends Move {
-  addNeighbors(neighbors, config) {
-    if (!config.placeBlocks) return;
-    let landingNode = this.forward(1);
-
-    let placeNode = this.forward(1).down(1);
-
-    if (this.isSolid(landingNode)) return;
-
-    if (this.isAir(placeNode) && this.isWalkable(landingNode)) {
-      this.placeHorizontal = true;
-      landingNode.blocks.push(placeNode);
-      neighbors.push(this.makeHorizontalPlace(landingNode, this.COST_PLACE));
-    }
-  }
-}
-
-//for 1x1 towering
+const { Move, registerMoves, DirectionalVec3 } = require("./");
 class MovePlaceUp extends Move {
-  addNeighbors(neighbors, config, manager, name) {
-    if (!config.placeBlocks) return;
+  generate(cardinalDirections, origin, neighborArray) {
+    if (!this.config.placeBlocks) return;
 
-    if (!this.hasScaffoldingBlocks()) return;
+    this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, {
+      x: 0,
+      z: 0,
+    });
+    const up = this.origin.offset(0, 1, 0);
+    this.addNeighbors(neighborArray, up);
+  }
 
-    let target = this.up(1);
-    let current = this.up(0);
+  /**
+   *
+   * @param {DirectionalVec3[]} neighbors
+   * @param {DirectionalVec3} node
+   */
+  addNeighbors(neighbors, node) {
+    if (!this.isAir(node)) return;
 
-    if (!this.isWalkable(target)) return;
+    node.attributes["name"] = this.name;
+    node.attributes["place"] = [];
+    const belowNode = node.down(1); // Standing support
 
-    if (!this.isAir(current)) return;
+    if (!this.isSolid(belowNode)) return;
 
-    target.attributes["name"] = name;
-    target.blocks.push(current);
-    neighbors.push(this.makePlace(target, this.COST_PLACE));
+    const canPlace = this.config.placeBlocks && this.hasScaffoldingBlocks();
+
+    if (!canPlace) return;
+
+    if (!this.canPlaceBlock(belowNode)) return;
+
+    if (!this.isWalkable(node.up(1))) return;
+
+    const cost = this.COST_PLACE + this.COST_UP;
+
+    node.attributes["place"].push(node.clone());
+    node.attributes["cost"] = cost;
+    node.attributes["ascend"] = true;
+    neighbors.push(this.makeMovement(node, cost));
+  }
+
+  canPlaceBlock(pos) {
+    const offsets = [
+      [0, -1, 0],
+      [1, 0, 0],
+      [-1, 0, 0],
+      [0, 0, 1],
+      [0, 0, -1],
+    ];
+
+    return offsets.some(([dx, dy, dz]) => {
+      const neighbor = pos.offset(dx, dy, dz);
+      return this.isSolid(neighbor);
+    });
   }
 }
 // registerMoves([MovePlaceUp]);
+registerMoves([new MovePlaceUp(20)]);

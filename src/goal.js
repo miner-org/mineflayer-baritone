@@ -1,5 +1,9 @@
 const Vec3 = require("vec3").Vec3;
 
+/**
+ * @typedef {"top" | "bottom" | "north" | "south" | "east" | "west"} FaceDirection
+ */
+
 class Goal {
   constructor(position) {
     /**
@@ -172,11 +176,107 @@ class GoalXZNear extends Goal {
   isReached(otherPosition) {
     if (!otherPosition) return false;
 
-    const xDistance = Math.abs(this.x - otherPosition.x);
-    const zDistance = Math.abs(this.z - otherPosition.z);
-
-    return xDistance <= this.distance && zDistance <= this.distance;
+    const dx = Math.abs(this.x - otherPosition.x);
+    const dz = Math.abs(this.z - otherPosition.z);
+    return dx <= this.distance && dz <= this.distance;
   }
+}
+
+class GoalLookAtBlock extends Goal {
+  constructor(position, world, options = {}) {
+    super(position);
+    this.world = world;
+    this.reach = options.reach ?? 4.5;
+    this.entityHeight = options.entityHeight ?? 1.6;
+  }
+
+  isReached(nodePos) {
+    const node = nodePos.offset(0.5, this.entityHeight, 0.5);
+    if (
+      node.distanceTo(this.position.offset(0.5, this.entityHeight, 0.5)) >
+      this.reach
+    )
+      return false;
+
+    const dx = node.x - (this.position.x + 0.5);
+    const dy = node.y - (this.position.y + 0.5);
+    const dz = node.z - (this.position.z + 0.5);
+
+    const visible = {
+      y: Math.sign(Math.abs(dy) > 0.5 ? dy : 0),
+      x: Math.sign(Math.abs(dx) > 0.5 ? dx : 0),
+      z: Math.sign(Math.abs(dz) > 0.5 ? dz : 0),
+    };
+
+    for (const axis in visible) {
+      if (visible[axis] === 0) continue;
+
+      const faceOffset = new Vec3(
+        axis === "x" ? visible[axis] * 0.5 : 0,
+        axis === "y" ? visible[axis] * 0.5 : 0,
+        axis === "z" ? visible[axis] * 0.5 : 0
+      );
+
+      const target = this.position.offset(0.5, 0.5, 0.5).plus(faceOffset);
+      const dir = target.minus(node).normalize();
+
+      const hit = this.world.raycast(node, dir, this.reach);
+      if (hit?.position.equals(this.position)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+}
+
+class GoalLookAtBlockWithFace extends Goal {
+  /**
+   * @param {Vec3} position - The block position to look at
+   * @param {import('mineflayer').World} world - The bot's world object
+   * @param {{
+   *   reach?: number,
+   *   entityHeight?: number,
+   *   face?: FaceDirection
+   * }} options
+   */
+  constructor(position, world, options = {}) {
+    super(position);
+    this.world = world;
+    this.reach = options.reach ?? 4.5;
+    this.entityHeight = options.entityHeight ?? 1.6;
+    this.face = options.face;
+  }
+
+  isReached(nodePos) {
+    const eye = nodePos.offset(0.5, this.entityHeight, 0.5);
+    const blockCenter = this.position.offset(0.5, 0.5, 0.5);
+    if (eye.distanceTo(blockCenter) > this.reach) return false;
+
+    let target = blockCenter;
+    if (this.face) {
+      const offset = {
+        top: new Vec3(0, 0.5, 0),
+        bottom: new Vec3(0, -0.5, 0),
+        north: new Vec3(0, 0, -0.5),
+        south: new Vec3(0, 0, 0.5),
+        west: new Vec3(-0.5, 0, 0),
+        east: new Vec3(0.5, 0, 0),
+      }[this.face];
+      if (offset) target = target.plus(offset);
+    }
+
+    const dir = target.minus(eye).normalize();
+    const hit = this.world.raycast(eye, dir, this.reach);
+
+    return hit?.position?.equals(this.position) ?? false;
+  }
+}
+
+function getShapeFaceCenters(shapes, face, half) {
+  return [
+    new Vec3(0.5, half === "top" ? 0.875 : 0.125, 0.5).plus(face.scaled(0.5)),
+  ];
 }
 
 module.exports = {
@@ -190,4 +290,6 @@ module.exports = {
   GoalInvert,
   GoalXZ,
   GoalXZNear,
+  GoalLookAtBlock,
+  GoalLookAtBlockWithFace,
 };

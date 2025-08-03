@@ -422,6 +422,63 @@ function createEndFunc(goal) {
   };
 }
 
+async function forceDig(bot, block) {
+  const pos = block.position;
+  const center = pos.offset(0.5, 0.5, 0.5);
+
+  const face = 1;
+
+  // 1. Look at block
+  await bot.lookAt(center, true);
+  await bot.waitForTicks(1);
+
+  // 2. Force server to register our view
+  const conv = (yaw, pitch) => ({
+    yaw: 180 - (yaw * 180) / Math.PI, // Flip around PI
+    pitch: -((pitch * 180) / Math.PI), // Invert pitch
+  });
+
+  bot._client.write("position_look", {
+    x: bot.entity.position.x,
+    y: bot.entity.position.y,
+    z: bot.entity.position.z,
+    yaw: conv(bot.entity.yaw, bot.entity.pitch).yaw,
+    pitch: conv(bot.entity.yaw, bot.entity.pitch).pitch,
+    flags: 0,
+    onGround: bot.entity.onGround ?? true,
+  });
+
+  await bot.waitForTicks(1); // give server time to update
+
+  // 3. Start dig
+  bot.swingArm();
+  bot._client.write("block_dig", {
+    status: 0, // START_DESTROY_BLOCK
+    location: pos,
+    face,
+  });
+
+  // 4. Wait realistic time
+  const digTime = bot.digTime(block);
+  await bot.waitForTicks(Math.ceil(digTime / 50));
+
+  // 5. Finish dig
+  bot._client.write("block_dig", {
+    status: 2, // STOP_DESTROY_BLOCK
+    location: pos,
+    face,
+  });
+
+  return new Promise((resolve) => {
+    const key = pos.toString();
+    const handler = (oldBlock, newBlock) => {
+      bot.off(`blockUpdate:${key}`, handler);
+      resolve({ success: newBlock.type === 0, newBlock });
+    };
+    bot.on(`blockUpdate:${key}`, handler);
+  });
+}
+
 module.exports = {
   vectorProjection,
   shouldAutoJump,
@@ -436,5 +493,6 @@ module.exports = {
   getController,
   distanceFromLine,
   getControlState,
-  createEndFunc
+  createEndFunc,
+  dig: forceDig,
 };

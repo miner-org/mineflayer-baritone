@@ -97,6 +97,24 @@ class DirectionalVec3 extends Vec3 {
       this.attributes
     );
   }
+
+  equals(other) {
+    return (
+      this.x === other.x &&
+      this.y === other.y &&
+      this.z === other.z &&
+      this.dir.x === other.dir.x &&
+      this.dir.z === other.dir.z
+    );
+  }
+
+  toString() {
+    return `(${this.x}, ${this.y}, ${this.z}) dir: (${this.dir.x}, ${this.dir.z})`;
+  }
+
+  detailsString() {
+    return `(${this.x}, ${this.y}, ${this.z}) dir: (${this.dir.x}, ${this.dir.z}) cost: ${this.cost}`;
+  }
 }
 
 const climbableBlocks = ["ladder", "vines"];
@@ -113,438 +131,222 @@ const unbreakableBlocks = [
 const moveClasses = [];
 
 class Move {
-  constructor() {
+  constructor(priority = 50) {
     this.name = this.constructor.name;
-    this.COST_BREAK = 5;
+    this.priority = priority; // Lower number = higher priority
+
+    // Movement costs
     this.COST_NORMAL = 1;
-    this.COST_LADDER = 2;
-    this.COST_DIAGONAL = 1.41;
     this.COST_UP = 1;
-    this.COST_PLACE = 5;
-    this.COST_PARKOUR = 5;
     this.COST_FALL = 1;
+    this.COST_BREAK = 5;
+    this.COST_PLACE = 5;
     this.COST_SWIM = 2.2;
-    this.COST_SWIM_EXIT = 2;
     this.COST_SWIM_START = 2;
+    this.COST_SWIM_EXIT = 2;
     this.COST_CLIMB = 1;
+    this.COST_LADDER = 2;
+    this.COST_PARKOUR = 5;
+    this.COST_DIAGONAL = 1.41;
   }
 
-  setValues(world, bot, config, manager) {
+  generate(cardinalDirections, origin, neighbors) {
+    // To be implemented in subclasses
+  }
+
+  setValues(world, bot, config, manager, node = null) {
     this.world = world;
-    /**
-     * @type {import("mineflayer").Bot}
-     */
     this.bot = bot;
     this.manager = manager;
     this.config = config;
+    this.node = node;
+    this.mcData = require("minecraft-data")(bot.version);
   }
 
+  // === Inventory / Block Checks ===
+
   hasScaffoldingBlocks() {
-    const bot = this.bot;
-    const scaffoldingBlocks = this.config.disposableBlocks;
-
-    // check if the bot has atleast one scaffolding block in its inventory
-    for (const item of bot.inventory.items()) {
-      if (scaffoldingBlocks.includes(item.name)) {
-        return true;
-      }
-    }
-
-    return false;
+    const blocks = this.config.disposableBlocks;
+    return this.bot.inventory
+      .items()
+      .some((item) => blocks.includes(item.name));
   }
 
   scaffoldingLeft() {
-    const bot = this.bot;
-    const scaffoldingBlocks = this.config.disposableBlocks;
-
-    return bot.inventory.items().reduce((count, item) => {
-      if (scaffoldingBlocks.includes(item.name)) {
-        return count + item.count;
-      }
-      return count;
-    }, 0);
+    const blocks = this.config.disposableBlocks;
+    return this.bot.inventory
+      .items()
+      .reduce(
+        (sum, item) => sum + (blocks.includes(item.name) ? item.count : 0),
+        0
+      );
   }
 
-  // Function to determine an avoidance penalty if near a certain block
-  getAvoidancePenalty(node, distance) {
-    let penalty = 0;
-    for (let dx = -distance; dx <= distance; dx++) {
-      for (let dz = -distance; dz <= distance; dz++) {
-        for (let dy = -1; dy <= 1; dy++) {
-          // Slight vertical check
-          let checkNode = node.offset(dx, dy, dz);
-          if (this.isBlockToAvoid(checkNode)) {
-            penalty += 10; // Increase penalty for closer avoidable blocks
-          }
-        }
-      }
+  getBlock(pos) {
+    const key = pos.toString();
+
+    // Use virtualBlocks overlay if available
+    if (
+      this.node &&
+      this.node.virtualBlocks &&
+      this.node.virtualBlocks.has(key)
+    ) {
+      const state = this.node.virtualBlocks.get(key);
+      if (state === "air") return this.mcData.blocksByName["air"];
+      if (state === "placed") return this.mcData.blocksByName["stone"]; // or disposable block
     }
-    return penalty;
+
+    return this.bot.blockAt(pos.floored());
   }
 
-  // Define which blocks to avoid
-  isBlockToAvoid(node) {
-    let block = this.getBlock(node);
-    return block && this.config.blocksToStayAway.includes(block.name);
+  // === Core Node Checks ===
+
+  isAir(node) {
+    const block = this.getBlock(node);
+    if (!block) return false;
+    return (
+      (block.boundingBox === "empty" &&
+        block.name !== "water" &&
+        !this.manager.isNodePlaced(node)) ||
+      this.manager.isNodeBroken(node)
+    );
   }
+
+  isSolid(node) {
+    const block = this.getBlock(node);
+    if (!block) return false;
+    return (
+      (block.boundingBox === "block" && !this.manager.isNodeBroken(node)) ||
+      this.manager.isNodePlaced(node)
+    );
+  }
+
+  isWalkable(node) {
+    const block = this.getBlock(node);
+    if (!block) return false;
+    const above = this.getBlock(node.offset(0, 1, 0));
+    return (
+      block.boundingBox === "empty" &&
+      above.boundingBox === "empty" &&
+      block.name !== "water" &&
+      !this.config.blocksToStayAway.includes(block.name) &&
+      !this.isStair(node)
+    );
+  }
+
+  isJumpable(node) {
+    const block = this.getBlock(node);
+    if (!block) return false;
+    const above = this.getBlock(node.offset(0, 1, 0));
+    const above2 = this.getBlock(node.offset(0, 2, 0));
+    return (
+      block.boundingBox === "empty" &&
+      above.boundingBox === "empty" &&
+      above2.boundingBox === "empty" &&
+      block.name !== "water" &&
+      !this.config.blocksToStayAway.includes(block.name) &&
+      !this.isStair(node) &&
+      !this.isSlab(node) &&
+      !this.isFence(node)
+    );
+  }
+
+  isStandable(node) {
+    const below = node.offset(0, -1, 0);
+    const blockBelow = this.getBlock(below);
+    if (!blockBelow || this.config.blocksToAvoid.includes(blockBelow.name))
+      return false;
+    return (
+      this.isSolid(below) &&
+      this.isFullBlock(below) &&
+      this.isWalkable(node) &&
+      !this.isLava(node)
+    );
+  }
+
+  isBreakable(node) {
+    const block = this.getBlock(node);
+    if (!block || this.manager.isAreaMarkedNode(node)) return false;
+    return (
+      this.isSolid(node) && !this.config.blocksToAvoid.includes(block.name)
+    );
+  }
+
+  // === Block Types ===
+
+  isStair(node) {
+    const block = this.getBlock(node);
+    return block?.name.includes("stairs");
+  }
+
+  isSlab(node) {
+    const block = this.getBlock(node);
+    return block?.name.includes("slab");
+  }
+
+  isFence(node) {
+    const block = this.getBlock(node);
+    if (!block) return false;
+    return ["fence", "wall", "cobblestone_wall"].some((n) =>
+      block.name.includes(n)
+    );
+  }
+
+  isFullBlock(node) {
+    const block = this.getBlock(node);
+    if (!block) return false;
+    if (block.name.includes("farmland")) return true;
+    const maxY = block.shapes[0]?.[4];
+    return maxY === 1;
+  }
+
+  // === Liquids & Misc ===
+
+  isWater(node) {
+    return this.getBlock(node)?.name === "water";
+  }
+
+  isLava(node) {
+    return this.getBlock(node)?.name === "lava";
+  }
+
+  isClimbable(node) {
+    return this.config.climbableBlocks.includes(this.getBlock(node)?.name);
+  }
+
+  isInteractable(node) {
+    return this.config.interactableBlocks.includes(this.getBlock(node)?.name);
+  }
+
+  // === Helpers ===
 
   makeMovement(position, cost) {
     position.cost = cost;
     return position;
   }
 
-  makeBreakable(position, costToBreak) {
-    position.break = true;
-    position.cost = costToBreak;
-    // console.log(position);
-    return position;
-  }
-
-  makePlace(pos, costToPlace) {
-    pos.place = true;
-    pos.cost = costToPlace;
-    return pos;
-  }
-
-  makeHorizontalPlace(position, costToPlace) {
-    position.placeHorizontal = true;
-    position.cost = costToPlace;
-    return position;
-  }
-
-  makeVerticalPlace(position, costToPlace) {
-    position.placeVertical = true;
-    position.cost = costToPlace;
-    return position;
-  }
-
-  makeFlyMovement(position, cost) {
-    position.fly = true;
-    position.cost = cost;
-    return position;
-  }
-
-  isStair(node) {
-    const block = this.getBlock(node);
-    if (!block) return false;
-    return block.name.includes("stairs");
-  }
-
-  isStairBB(node) {
-    const block = this.getBlock(node);
-
-    if (!block) return false;
-
-    const shapes = block.shapes;
-    const firstShapeArray = shapes[0];
-    const secondShapeArray = shapes[1] ? shapes[1] : null;
-
-    if (!firstShapeArray) return false;
-
-    if (!secondShapeArray) return false;
-
-    const maxY = firstShapeArray[4];
-    const maxY2 = secondShapeArray ? secondShapeArray[4] : null;
-
-    if (maxY2 && maxY === 0.5 && maxY2 === 1) return true;
-  }
-
-  isSlab(node) {
-    const block = this.getBlock(node);
-    if (!block) return false;
-    return block.name.includes("slab");
-  }
-
-  isNearBaddie(node, config, range) {
-    const baddies = config.blocksToStayAway;
-
-    const block = this.getBlock(node);
-
-    if (!block) return false;
-
-    const nearestBaddie = this.bot.findBlock({
-      matching: (block) => baddies.includes(block.name),
-      maxDistance: range,
-      point: node,
-    });
-
-    // we arent near a baddie so we good
-    if (!nearestBaddie) return false;
-
-    return true;
-  }
-
-  isAir(node) {
-    const block = this.getBlock(node);
-    if (!block) return false;
-    return block.boundingBox === "empty" && block.name !== "water";
-  }
-
-  isWater(node) {
-    const block = this.getBlock(node);
-    if (!block) return false;
-    return block.name === "water";
-  }
-
-  isLava(node) {
-    const block = this.getBlock(node);
-    if (!block) return false;
-    return block.name === "lava";
-  }
-
-  isWalkable(node) {
-    const block = this.getBlock(node);
-    if (!block) return false;
-
-    const blockAbove = this.getBlock(node.offset(0, 1, 0));
-
-    const walk =
-      block.boundingBox === "empty" && blockAbove.boundingBox === "empty";
-
-    return (
-      !this.isStair(node) &&
-      walk &&
-      block.name !== "water" &&
-      !this.config.blocksToStayAway.includes(block.name)
-    );
-  }
-
-  isBreakble(node, config) {
-    const block = this.getBlock(node);
-    if (!block) return false;
-
-    if (this.manager.isAreaMarkedNode(node)) return false;
-
-    return (
-      this.isSolid(node) && !this.config.blocksToAvoid.includes(block.name)
-    );
-  }
-
-  getNodeDigTime(node) {
-    const block = this.world.getBlock(node);
-
-    if (!block) return -1;
-
-    const tool = bestHarvestTool(this.bot, block);
-    const enchants =
-      tool && tool.nbt ? nbt.simplify(tool.nbt).Enchantments : [];
-    const effects = this.bot.entity.effects;
-    const digTime = block.digTime(
-      tool ? tool.type : null,
-      false,
-      false,
-      false,
-      enchants,
-      effects
-    );
-
-    return 1 + digTime / 1000;
-  }
-
-  getStandingBlock() {
-    const position = this.bot.entity.position.offset(0, -1, 0);
-    const block = this.world.getBlock(position);
-
-    if (!block) return null;
-
-    return block;
-  }
-
-  getStandingNode() {
-    const block = this.getStandingBlock();
-
-    if (!block) return null;
-
-    const { x, y, z } = block.position;
-
-    let node = new DirectionalVec3(x, y, z, cardinalDirections[2]);
-
-    return node;
-  }
-
-  isJumpable(node) {
-    return (
-      this.isAir(node) &&
-      this.isAir(node.offset(0, 1, 0)) &&
-      this.isAir(node.offset(0, 2, 0))
-    );
-  }
-
-  isWaterLogged(node) {
-    const block = this.world.getBlock(node);
-    if (!block) return false;
-    return block.getProperties()?.waterlogged;
-  }
-
-  getBlock(node) {
-    const block = this.bot.blockAt(node);
-    return block;
-  }
-
-  isSolid(node) {
-    const block = this.getBlock(node);
-    if (!block) {
-      return false;
-    }
-
-    return block.boundingBox === "block" || this.manager.isNodePlaced(node);
-  }
-
-  isStandable(node) {
-    const blockBelow = this.getBlock(node.offset(0, -1, 0));
-
-    if (!blockBelow) return false;
-
-    if (this.config.blocksToAvoid.includes(blockBelow.name)) return false;
-
-    return (
-      this.isSolid(node.offset(0, -1, 0)) &&
-      this.isWalkable(node) &&
-      !this.isFence(node.offset(0, -1, 0)) &&
-      this.isFullBlock(node.offset(0, -1, 0)) &&
-      !this.isLava(node)
-    );
-  }
-
-  almostFullBlock(node) {
-    const block = this.getBlock(node);
-
-    if (!block) return false;
-
-    const shapes = block.shapes;
-    const firstShapeArray = shapes[0];
-
-    if (!firstShapeArray) return false;
-
-    const maxY = firstShapeArray[4];
-
-    if (maxY === 0.9375) return true;
-  }
-
-  isFullBlock(node) {
-    const block = this.getBlock(node);
-
-    if (!block) return false;
-
-    // if (block.name === "farmland") return true;
-
-    const shapes = block.shapes;
-    const firstShapeArray = shapes[0];
-
-    if (!firstShapeArray) return false;
-
-    const maxY = firstShapeArray[4];
-
-    if (maxY === 1) return true;
-  }
-
-  isHalfBlock(node) {
-    const block = this.getBlock(node);
-
-    if (!block) return false;
-
-    if (this.isStair(node)) return;
-
-    const shapes = block.shapes;
-    const firstShapeArray = shapes[0];
-    const secondShapeArray = shapes[1] ? shapes[1] : null;
-
-    if (!firstShapeArray) return false;
-
-    const maxY = firstShapeArray[4];
-
-    if (maxY === 0.5) return true;
-  }
-
-  isFence(node) {
-    const block = this.getBlock(node);
-
-    if (!block) return false;
-
-    if (block.name.includes("fence") && block.name.includes("wall"))
-      return true;
-  }
-
-  isClimbable(node) {
-    const block = this.getBlock(node);
-    if (!block) return false;
-    return climbableBlocks.includes(block.name);
-  }
-
-  isInteractable(node, config) {
-    const block = this.getBlock(node);
-    if (!block) return false;
-    return config.interactableBlocks.includes(block.name);
-  }
-
-  /**
-   *
-   * @param {number} amount
-   * @param {DirectionalVec3} node
-   * @param {object} attributes
-   * @returns {DirectionalVec3}
-   */
   forward(amount = 1, node = null, attributes) {
-    if (!node) node = this.origin;
-    return node.forward(amount, attributes);
-  }
-  /**
-   *
-   * @param {number} amount
-   * @param {DirectionalVec3} node
-   * @param {object} attributes
-   * @returns {DirectionalVec3}
-   */
-  right(amount = 1, node = null, attributes) {
-    if (!node) node = this.origin;
-    let offset = node.right(amount, attributes);
-    return offset;
-  }
-  /**
-   *
-   * @param {number} amount
-   * @param {DirectionalVec3} node
-   * @param {object} attributes
-   * @returns {DirectionalVec3}
-   */
-  left(amount = 1, node = null, attributes) {
-    if (!node) node = this.origin;
-    return node.left(amount, attributes);
-  }
-  /**
-   *
-   * @param {number} amount
-   * @param {DirectionalVec3} node
-   * @param {object} attributes
-   * @returns {DirectionalVec3}
-   */
-  up(amount = 1, node = null, attributes) {
-    if (!node) node = this.origin;
-    return node.up(amount, attributes);
-  }
-  /**
-   *
-   * @param {number} amount
-   * @param {DirectionalVec3} node
-   * @param {object} attributes
-   * @returns {DirectionalVec3}
-   */
-  down(amount = 1, node = null, attributes) {
-    if (!node) node = this.origin;
-    return node.down(amount, attributes);
+    return (node ?? this.origin).forward(amount, attributes);
   }
 
-  /**
-   *
-   * @param {number} dx
-   * @param {number} dy
-   * @param {number} dz
-   * @param {DirectionalVec3} [node=null]
-   * @returns {DirectionalVec3}
-   */
+  right(amount = 1, node = null, attributes) {
+    return (node ?? this.origin).right(amount, attributes);
+  }
+
+  left(amount = 1, node = null, attributes) {
+    return (node ?? this.origin).left(amount, attributes);
+  }
+
+  up(amount = 1, node = null, attributes) {
+    return (node ?? this.origin).up(amount, attributes);
+  }
+
+  down(amount = 1, node = null, attributes) {
+    return (node ?? this.origin).down(amount, attributes);
+  }
+
   offset(dx, dy, dz, node = null) {
-    if (!node) node = this.origin;
-    return node.offset(dx, dy, dz);
+    return (node ?? this.origin).offset(dx, dy, dz);
   }
 }
 
@@ -575,30 +377,58 @@ function bestHarvestTool(bot, block) {
 }
 
 function registerMoves(moves) {
-  for (const moveClass of moves) {
-    moveClasses.push(moveClass);
-  }
-  // console.log(moveClasses);
+  moveClasses.push(...moves);
 }
 
 function getNeighbors2(world, node, config, manager, bot) {
-  /**
-   * @type {DirectionalVec3[]}
-   */
-  let neighbors = [];
-  for (const move of moveClasses) {
-    move.setValues(world, bot, config, manager);
+  const neighborMap = new Map();
 
+  // Sort moves by priority first (lower = preferred)
+  const sortedMoves = [...moveClasses].sort((a, b) => a.priority - b.priority);
+
+  for (const move of sortedMoves) {
+    move.setValues(world, bot, config, manager, node);
     const origin = node.worldPos;
-    move.generate(cardinalDirections, origin, neighbors);
+
+    /** @type {DirectionalVec3[]} */
+    const generatedNeighbors = [];
+    move.generate(cardinalDirections, origin, generatedNeighbors);
+
+    for (const neighbor of generatedNeighbors) {
+      const key = `${neighbor.x},${neighbor.y},${neighbor.z}`;
+      const existing = neighborMap.get(key);
+
+      if (!existing) {
+        neighborMap.set(key, neighbor);
+        continue;
+      }
+
+      // Compare existing vs new
+      const existingMoveName = existing.attributes?.name ?? "Unknown";
+      const existingMove = moveClasses.find((m) => m.name === existingMoveName);
+      const existingPriority = existingMove?.priority ?? 999;
+
+      const newPriority = move.priority;
+
+      // Debug conflicts
+      // console.log(
+      //   `[Conflict] Node ${key}: ${move.name} (P:${newPriority} C:${neighbor.cost}) vs ${existingMoveName} (P:${existingPriority} C:${existing.cost})`
+      // );
+
+      // Prefer lower priority first, then lower cost
+      if (
+        newPriority < existingPriority ||
+        (newPriority === existingPriority && neighbor.cost < existing.cost)
+      ) {
+        // console.log(`  -> ${move.name} WINS`);
+        neighborMap.set(key, neighbor);
+      } else {
+        // console.log(`  -> ${existingMoveName} STAYS`);
+      }
+    }
   }
 
-    neighbors = neighbors.filter(
-      (neighbor, index, self) =>
-        index === self.findIndex((n) => n.equals(neighbor))
-    );
-
-  return neighbors;
+  return Array.from(neighborMap.values());
 }
 
 function clamp(value, min, max) {

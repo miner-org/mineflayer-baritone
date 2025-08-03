@@ -267,6 +267,14 @@ bot.once("spawn", async () => {
       bot.ashfinder.stop();
     }
 
+        if (command === "f!binfo") {
+      const eyePos = bot.blockAtEntityCursor(bot.players[username].entity);
+
+      if (eyePos) {
+        console.log(eyePos);
+      } else bot.chat("too far");
+    }
+
     if (command === "f!test") {
       const x = parseInt(args[0]);
       const y = parseInt(args[1]);

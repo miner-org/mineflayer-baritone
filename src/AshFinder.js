@@ -4,6 +4,7 @@ const { Goal } = require("./goal");
 const { createEndFunc } = require("./utils");
 
 const Vec3 = require("vec3");
+const { Cell } = require("./pathfinder");
 
 const astar = require("./pathfinder").Astar;
 
@@ -47,8 +48,43 @@ class AshFinderPlugin extends EventEmitter {
       bot,
       endFunc,
       this.config,
-      excludedPositions
+      excludedPositions,
+      this.debug
     );
+
+    return result;
+  }
+
+  disableBreaking() {
+    this.config.breakBlocks = false;
+  }
+  disablePlacing() {
+    this.config.placeBlocks = false;
+  }
+
+  enableBreaking() {
+    this.config.breakBlocks = true;
+  }
+  enablePlacing() {
+    this.config.placeBlocks = true;
+  }
+
+  /**
+   *
+   * @param {Vec3[]} positions
+   * Creates a cell[] from given positions
+   */
+  createPathFromPositions(positions) {
+    let result = {};
+
+    result.path = [];
+    for (const pos of positions) {
+      const cell = new Cell(pos, 0);
+
+      result.path.push(cell);
+    }
+
+    result.status = "found";
 
     return result;
   }
@@ -56,7 +92,7 @@ class AshFinderPlugin extends EventEmitter {
   stop() {
     this.path = [];
     this.stopped = true;
-    bot.clearControlStates();
+    this.bot.clearControlStates();
     this.emit("stopped");
   }
 
@@ -70,27 +106,74 @@ class AshFinderPlugin extends EventEmitter {
       this.stopped = false;
 
       const result = await this.generatePath(goal, excludedPositions);
-      // console.log(result)
       const { path, status } = result;
 
-      if (this.debug) console.log(path.map((node) => node.attributes.name));
+      if (this.debug) {
+        console.log(path.map((node) => node.attributes.name));
+        console.log(status);
+      }
 
-      if (this.debug) console.log(status);
-
-      this.#pathExecutor.setPath(path, {
+      // Set the path and get the execution promise
+      const executionPromise = this.#pathExecutor.setPath(path, {
         partial: status === "partial",
         targetGoal: goal,
         bestNode: result.bestNode,
       });
+
       this.emit("pathStarted", {
         path,
         status,
         goal,
       });
+
+      // Wait for the path to complete
+      try {
+        await executionPromise;
+        return { status: "success" };
+      } catch (err) {
+        if (this.debug) console.error("Path execution failed:", err);
+        return { status: "failed", error: err };
+      }
     } else {
-      console.log(
-        "Already going to a goal, please wait until the current path is completed."
-      );
+      const error =
+        "Already going to a goal, please wait until the current path is completed.";
+      console.log(error);
+      throw new Error(error);
+    }
+  }
+
+  /**
+   *
+   * @param {{
+   * path: Cell[],
+   * status: "found" | "partial"
+   * }} object
+   *
+   * @param {Goal} goal
+   */
+  async gotoWithPath(object, goal) {
+    // console.log(object);
+
+    const { path, status } = object;
+
+    const executionPromise = this.#pathExecutor.setPath(path, {
+      partial: status === "partial",
+      targetGoal: goal,
+    });
+
+    this.emit("pathStarted", {
+      path,
+      status,
+      goal,
+    });
+
+    // Wait for the path to complete
+    try {
+      await executionPromise;
+      return { status: "success" };
+    } catch (err) {
+      if (this.debug) console.error("Path execution failed:", err);
+      return { status: "failed", error: err };
     }
   }
 }
@@ -98,13 +181,7 @@ class AshFinderPlugin extends EventEmitter {
 class AshFinderConfig {
   constructor() {
     // blocks to avoid breaking
-    this.blocksToAvoid = [
-      "crafting_table",
-      "chest",
-      "furnace",
-      "gravel",
-      "farmland",
-    ];
+    this.blocksToAvoid = ["crafting_table", "chest", "furnace", "gravel"];
     this.blocksToStayAway = ["cactus", "cobweb", "lava", "gravel"];
     this.avoidDistance = 8;
     this.swimming = true;
@@ -146,6 +223,11 @@ class AshFinderConfig {
       "mangrove_fence_gate",
       "warped_fence_gate",
       "crimson_fence_gate",
+    ];
+    this.climbableBlocks = [
+      "vine",
+      "ladder",
+      "scaffolding",
     ];
 
     this.thinkTimeout = 5000;
