@@ -2,69 +2,92 @@ const { Move, registerMoves, DirectionalVec3 } = require("./");
 
 class MoveForwardDownBreak extends Move {
   generate(cardinalDirections, origin, neighbors) {
-    // ❌ If breaking blocks is disabled, skip this move
     if (!this.config.breakBlocks) return;
 
     for (const dir of cardinalDirections) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
-      // We are moving diagonally down one block
-      const forwardNode = this.origin.offset(dir.x, -1, dir.z);
-      this.addNeighbors(neighbors, forwardNode);
+      // moving diagonally down one block
+      const forwardNode = originVec.offset(dir.x, -1, dir.z);
+
+      this.addNeighbors(neighbors, forwardNode, originVec);
     }
   }
 
-  addNeighbors(neighbors, node) {
-    const belowNode = node.down(1); // support block
-    const bodyNode = node; // feet position
-    const headNode = node.up(1); // head space
-    const topNode = node.up(2); // clearance above head
+  addNeighbors(neighbors, node, originVec) {
+    const belowNode = node.down(1); // landing support
+    const bodyNode = node; // feet
+    const headNode = node.up(1);
+    const topNode = node.up(2);
 
-    // ✅ Must actually be lower than origin
-    // In addNeighbors():
-    if (node.y !== this.origin.y - 1) return; // ✅ must be exactly 1 down
+    // must be exactly one lower than origin
+    if (Math.floor(node.y) !== Math.floor(originVec.y) - 1) return;
 
-    // ❌ If we can already stand there, no need for a "break" move
+    // if it's already standable, no need for a break move
     if (this.isStandable(node)) return;
 
-    // ✅ Ensure we land on something solid
+    // we must land on solid ground (and that ground must not be scheduled as broken)
     if (!this.isSolid(belowNode) || this.manager.isNodeBroken(belowNode))
       return;
 
-    // ✅ Initialize attributes
-    node.attributes["name"] = this.name;
-    node.attributes["break"] = [];
+    // initialize
+    node.attributes = node.attributes || {};
+    node.attributes.name = this.name;
+    node.attributes.break = [];
 
-    // --- Check body block (feet position) ---
+    // --- BODY (feet) ---
     if (!this.isAir(bodyNode)) {
-      if (this.isBreakable(bodyNode)) {
-        if (this.manager.isNodeBroken(bodyNode)) return;
-        node.attributes["break"].push(bodyNode.clone());
-      } else return;
+      // if body is non-air and not breakable -> fail
+      if (!this.isBreakable(bodyNode) || this.manager.isNodeBroken(bodyNode)) {
+        if (this.config.debugMoves)
+          console.debug(
+            `[${this.name}] body unbreakable: ${bodyNode.toString()}`
+          );
+        return;
+      }
+      node.attributes.break.push(bodyNode.clone());
     }
 
-    // --- Check head block ---
+    // --- HEAD ---
     if (!this.isAir(headNode)) {
-      if (this.isBreakable(headNode)) {
-        if (this.manager.isNodeBroken(headNode)) return;
-        node.attributes["break"].push(headNode.clone());
-      } else return;
+      if (!this.isBreakable(headNode) || this.manager.isNodeBroken(headNode)) {
+        if (this.config.debugMoves)
+          console.debug(
+            `[${this.name}] head unbreakable: ${headNode.toString()}`
+          );
+        return;
+      }
+      node.attributes.break.push(headNode.clone());
     }
 
-    // --- Check block above head for jump clearance ---
+    // --- ABOVE HEAD clearance ---
     if (!this.isAir(topNode)) {
-      if (this.isBreakable(topNode)) {
-        if (this.manager.isNodeBroken(topNode)) return;
-        node.attributes["break"].push(topNode.clone());
-      } else return;
+      if (!this.isBreakable(topNode) || this.manager.isNodeBroken(topNode)) {
+        if (this.config.debugMoves)
+          console.debug(
+            `[${this.name}] top unbreakable: ${topNode.toString()}`
+          );
+        return;
+      }
+      node.attributes.break.push(topNode.clone());
     }
 
-    // ✅ Compute cost (fall + breaking)
-    const breakCost = node.attributes["break"].length * this.COST_BREAK;
-    const totalCost = this.COST_FALL + breakCost + 0.5; // slight penalty
+    // --- Important: ensure this is actually a "break" scenario ---
+    // If nothing would be broken (all air), then this move is redundant — bail.
+    if ((node.attributes.break || []).length === 0) {
+      if (this.config.debugMoves)
+        console.debug(
+          `[${this.name}] no blocks to break at ${node.toString()} — skipping`
+        );
+      return;
+    }
 
-    node.attributes["cost"] = totalCost;
-    node.attributes["fallDistance"] = 1; // always 1-block down break
+    // compute cost + push
+    const breakCost = node.attributes.break.length * this.COST_BREAK;
+    const totalCost = this.COST_FALL + breakCost + 0.5;
+
+    node.attributes.cost = totalCost;
+    node.attributes.fallDistance = 1;
 
     neighbors.push(this.makeMovement(node, totalCost));
   }

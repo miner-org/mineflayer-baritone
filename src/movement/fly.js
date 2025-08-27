@@ -1,42 +1,70 @@
-const { Move, registerMoves } = require("./");
+const { Move, registerMoves, DirectionalVec3 } = require("./");
 
 class MoveFlyForward extends Move {
-  addNeighbors(neighbors, config, manager) {
-    if (!config.fly) return;
+  generate(cardinalDirections, origin, neighbors) {
+    if (!this.config.fly) return;
 
-    let targetNode = this.forward(1);
+    for (const dir of cardinalDirections) {
+      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const node = this.origin.forward(1);
+      this.addNeighbors(neighbors, node);
+    }
+  }
+
+  addNeighbors(neighbors, targetNode) {
     let node = this.down(1);
 
     if (!this.isAir(node)) return;
 
     if (this.isWalkable(targetNode)) {
-      neighbors.push(this.makeFlyMovement(targetNode, this.COST_NORMAL));
+      targetNode.attributes.isFlying = true;
+      targetNode.attributes.name = this.name;
+      neighbors.push(this.makeMovement(targetNode, this.COST_NORMAL));
     }
   }
 }
 
 class MoveFlyUp extends Move {
-  addNeighbors(neighbors, config, manager) {
-    if (!config.fly) return;
+  generate(cardinalDirections, origin, neighbors) {
+    if (!this.config.fly) return;
+    this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, {
+      x: 0,
+      z: 0,
+    });
+    const up = this.origin.offset(0, 1, 0); // drop one
 
-    let targetNode = this.up(1);
+    this.addNeighbors(neighbors, up);
+  }
 
+  addNeighbors(neighbors, targetNode) {
     if (this.isWalkable(targetNode)) {
-      neighbors.push(this.makeFlyMovement(targetNode, this.COST_UP));
+      targetNode.attributes.isFlying = true;
+      targetNode.attributes.flyUp = true;
+      targetNode.attributes.name = this.name;
+      neighbors.push(this.makeMovement(targetNode, this.COST_UP));
     }
   }
 }
 
 class MoveFlyDown extends Move {
-  addNeighbors(neighbors, config, manager) {
-    if (!config.fly) return;
+  generate(cardinalDirections, origin, neighbors) {
+    if (!this.config.fly) return;
+    this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, {
+      x: 0,
+      z: 0,
+    });
+    const down = this.origin.offset(0, -1, 0); // drop one
+    this.addNeighbors(neighbors, down);
+  }
 
-    let targetNode = this.down(1);
-
+  addNeighbors(neighbors, targetNode) {
     if (this.isWalkable(targetNode)) {
-      neighbors.push(this.makeFlyMovement(targetNode, this.COST_FALL));
+      targetNode.attributes.isFlying = true;
+      targetNode.attributes.flyDown = true;
+      targetNode.attributes.name = this.name;
+      neighbors.push(this.makeMovement(targetNode, this.COST_FALL));
     }
   }
 }
 
-// registerMoves([MoveFlyForward, MoveFlyUp, MoveFlyDown]);
+// registerMoves([new MoveFlyForward(50), new MoveFlyUp(50), new MoveFlyDown(50)]);

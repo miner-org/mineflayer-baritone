@@ -3,21 +3,14 @@ const { Move, registerMoves, DirectionalVec3 } = require("./");
 class MoveLadderEnter extends Move {
   generate(cardinalDirections, origin, neighbors) {
     for (const dir of cardinalDirections) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
-
-      const node = new DirectionalVec3(
-        this.origin.x + dir.x,
-        this.origin.y,
-        this.origin.z + dir.z,
-        dir
-      );
-
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const node = originVec.offset(dir.x, 0, dir.z);
       this.addNeighbors(neighbors, node);
     }
   }
 
   addNeighbors(neighbors, node) {
-    const below = this.origin.down(1);
+    const below = node.down(1);
     const head = node.up(1);
 
     const isFromSolid = this.isSolid(below);
@@ -38,13 +31,23 @@ class MoveLadderEnter extends Move {
 
 class MoveLadderExit extends Move {
   generate(cardinalDirections, origin, neighbors) {
-    if (!this.config.ladders) return;
-
     for (const dir of cardinalDirections) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const node = originVec.offset(dir.x, 1, dir.z);
+      if (this.isStandable(node)) {
+        node.attributes["name"] = this.name + "_up";
+        node.attributes["cost"] =
+          (this.COST_LADDER_EXIT ?? this.COST_NORMAL + 1) + 0.5;
+        neighbors.push(this.makeMovement(node, node.attributes["cost"]));
+        break;
+      }
+    }
 
-      const exitNode = this.origin.offset(dir.x, 0, dir.z);
-      this.addNeighbors(neighbors, exitNode);
+    // --- Check lateral exits ---
+    for (const dir of cardinalDirections) {
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const node = originVec.offset(dir.x, 0, dir.z);
+      this.addNeighbors(neighbors, node);
     }
   }
 
@@ -52,7 +55,7 @@ class MoveLadderExit extends Move {
     const below = node.down(1);
     const head = node.up(1);
 
-    const fromLadder = this.isClimbable(this.origin);
+    const fromLadder = this.isClimbable(node);
     const toStandable = this.isStandable(node);
     const blockBelow = this.isSolid(below);
     const headClear = this.isAir(head);
@@ -61,9 +64,7 @@ class MoveLadderExit extends Move {
       node.attributes["name"] = this.name;
       node.attributes["ladder"] = false;
       node.attributes["cost"] = this.COST_LADDER_EXIT ?? this.COST_NORMAL + 1;
-      neighbors.push(
-        this.makeMovement(node, this.COST_LADDER_EXIT ?? this.COST_NORMAL + 1)
-      );
+      neighbors.push(this.makeMovement(node, node.attributes["cost"]));
     }
   }
 }
@@ -72,13 +73,14 @@ class MoveLadderClimb extends Move {
   generate(cardinalDirections, origin, neighbors) {
     // For each cardinal direction, check if ladder climb is possible at origin
     for (const dir of cardinalDirections) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const node = originVec.offset(dir.x, 0, dir.z);
 
       // We only consider climbing if the bot is currently on a ladder block or next to one
-      if (!this.isClimbable(this.origin)) continue;
+      if (!this.isClimbable(node)) continue;
 
       // From the origin, climb upwards along the ladder stack
-      let climbPos = this.origin.clone();
+      let climbPos = node.clone();
 
       let lastValid = climbPos.clone(); // Start with origin
 

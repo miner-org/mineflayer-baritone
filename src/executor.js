@@ -32,6 +32,10 @@ class PathExecutor {
     this.jumpState = null;
     this.toweringState = { active: false, phase: 0 };
     this.swimmingState = { active: false, sinking: false, floating: false };
+    this.climbingState = false;
+    this.interactingState = false;
+
+    this.placedNodes = new Set();
 
     this.executing = false;
     this.partial = false;
@@ -48,8 +52,14 @@ class PathExecutor {
     this.rejectCurrentPromise = null;
     this.finalGoal = null;
 
+    this.previousNode = null;
+
+    this.lastPosition = null; // Vec3 of last check
+    this.stuckTimer = 0; // ticks stuck count
+    this.stuckThreshold = 100; // ticks to consider stuck (~1 sec at 20 ticks/sec)
+    this.stuckDistanceThreshold = 0.2; // how much movement counts as NOT stuck
+
     this.params = {};
-    this.moveState = null; // <-- current move action lock
 
     this.bot.on("physicsTick", () => {
       if (this.executing) this.tick();
@@ -93,6 +103,7 @@ class PathExecutor {
 
     this.path = path;
     this.currentIndex = 0;
+    this.placedNodes.clear();
     this.jumpState = null;
     this.executing = true;
     this.partial = partial;
@@ -111,58 +122,286 @@ class PathExecutor {
   /**
    * Called on every physics tick
    */
-  tick() {
+  async tick() {
     if (!this.executing) return;
 
-    const stillMoving = this._progressPath();
-    if (!stillMoving) return;
+    const pos = this.bot.entity.position;
+
+    // stuck detection: only skip stuck counting while performing actions (not movement)
+    if (this.lastPosition) {
+      const distMoved = pos.distanceTo(this.lastPosition);
+      if (this._isActionBusy()) {
+        this.lastPosition = pos.clone();
+        return;
+      }
+
+      if (distMoved < this.stuckDistanceThreshold) {
+        this.stuckTimer++;
+        if (this.stuckTimer > this.stuckThreshold) {
+          console.warn("Bot stuck detected! Triggering replanner...");
+          this.stuckTimer = 0;
+          this.replanPath();
+          return;
+        }
+      } else {
+        this.stuckTimer = 0;
+      }
+    }
+    this.lastPosition = pos.clone();
+
+    // path complete check
+    if (this.currentIndex >= this.path.length) {
+      this._onGoalReached();
+      return;
+    }
 
     const node = this.path[this.currentIndex];
-    if (!this._isBusy()) {
-      this._executeMove(node); // async runs sequentially
+
+    if (this._isActionBusy()) return;
+
+    const reached = this._hasReachedNode(
+      node,
+      this.jumpState?.jumped ||
+        this.swimmingState?.active ||
+        !!this.climbingState
+    );
+
+    if (reached) {
+      // stop climbing controls if this was a ladder node
+      if (node.attributes.ladder) {
+        this.bot.setControlState("forward", false);
+        this.bot.setControlState("jump", false);
+        this.bot.setControlState("sneak", false);
+        this.climbingState = false;
+        this.climbingTarget = null;
+      }
+
+      // ---- SAVE PREVIOUS NODE BEFORE ADVANCING ----
+      this.previousNode = node;
+
+      // handle interactables on previous node
+      // if (
+      //   this.previousNode?.attributes.interact &&
+      //   this.ashfinder.config.closeInteractables
+      // ) {
+      //   const blockAt = this.bot.blockAt(this.previousNode.worldPos);
+      //   if (blockAt && blockAt.getProperties().open) {
+      //     if (this.ashfinder.debug)
+      //       console.log(`Closing block at ${this.previousNode.worldPos}`);
+      //     await this.bot.lookAt(this.previousNode.worldPos, true);
+      //     try {
+      //       await this.bot.activateBlock(blockAt);
+      //     } catch (error) {
+      //       console.log("Error closing block:", error);
+      //     }
+      //   }
+      // }
+
+      this.currentIndex++;
+      this.jumpState = null;
+      this.bot.clearControlStates();
+
+      if (this.ashfinder.debug)
+        console.log(
+          `Reached node: ${node.attributes.name} at ${node.worldPos}`
+        );
+      return;
+    }
+
+    this.currentPromise = this._executeMove(node);
+    await this.currentPromise;
+    this.currentPromise = null;
+  }
+
+  replanPath() {
+    if (this.ashfinder.debug) console.log("Replanning path...");
+    // Logic to trigger your pathfinding algorithm again,
+    // reset currentIndex, clear placed/breaking states etc.
+    this.currentIndex = 0;
+    this.placedNodes.clear();
+    // call your pathfinding start function
+    this.findPathToGoal();
+  }
+
+  /**
+   *
+   * @returns {Promise<void>}
+   * */
+  async findPathToGoal() {
+    if (!this.finalGoal) {
+      console.warn("No final goal set for pathfinding!");
+      return;
+    }
+
+    const endFunc = createEndFunc(this.finalGoal);
+    const newPath = await Astar(
+      this.bot.entity.position.clone().floored(),
+      this.finalGoal.position,
+      this.bot,
+      endFunc,
+      this.config,
+      [],
+      this.ashfinder.debug
+    );
+
+    if (newPath.status === "no path") {
+      console.warn("No path found to the goal!");
+      if (this.rejectCurrentPromise) {
+        this.rejectCurrentPromise(new Error("No path found"));
+        this.rejectCurrentPromise = null;
+        this.resolveCurrentPromise = null;
+        this.currentPromise = null;
+      }
+      return;
+    }
+
+    return this.setPath(newPath.path, {
+      partial: newPath.status === "partial",
+      targetGoal: this.finalGoal,
+      bestNode: newPath.bestNode,
+    });
+  }
+
+  /**
+   * Executes the current move
+   * @param {Cell} node
+   */
+  async _executeMove(node) {
+    if (this._isActionBusy()) return;
+
+    if (this.ashfinder.debug) {
+      showPathParticleEffect(this.bot, node.worldPos, {
+        r: 0.1,
+        g: 0.5,
+        b: 0.4,
+      });
+    }
+
+    const attributes = node.attributes;
+    const block = this.bot.blockAt(node.worldPos);
+
+    if (this.ashfinder.debug)
+      console.log(
+        `Executing move: ${node.attributes.name} at ${node.worldPos} (${attributes.place?.length} places, ${attributes.break?.length} breaks)`
+      );
+
+    if (attributes.sJump) {
+      this._sprintJump(node);
+    } else if (attributes.nJump) {
+      if (
+        attributes.place?.length > 0 &&
+        !this.placedNodes.has(node.worldPos.toString())
+      ) {
+        await this._placeBlock(node); // ⬅ wait here
+        this.placedNodes.add(node.worldPos.toString());
+      }
+
+      if (attributes.break?.length > 0) {
+        await this._handleBreakingBlocks(node); // ⬅ also wait here
+      }
+
+      this._simpleJump(node);
+    } else if (attributes.ladder) {
+      // start climbing if not already climbing this target
+      if (!this.climbingState) {
+        this._startClimb(node);
+      }
+      // return immediately — tick() will detect arrival and stop climbing
+      return;
+    } else if (
+      attributes.interact &&
+      !this.interactingState &&
+      !block.getProperties().open
+    ) {
+      if (this.ashfinder.debug)
+        console.log(`Interacting with block at ${node.worldPos}`);
+
+      await this.bot.lookAt(node.worldPos, true);
+
+      this.interactingState = true;
+
+      try {
+        await this.bot.activateBlock(block);
+      } catch (error) {
+        console.log("Error interacting with block:", error);
+      } finally {
+        this.interactingState = false;
+      }
+    } else {
+      if (
+        attributes.place?.length > 0 &&
+        !this.placedNodes.has(node.worldPos.toString())
+      ) {
+        await this._placeBlock(node); // ⬅ wait here
+        this.placedNodes.add(node.worldPos.toString());
+      }
+
+      if (attributes.break?.length > 0) {
+        await this._handleBreakingBlocks(node);
+      }
+
+      this._walkTo(node.worldPos);
     }
   }
 
-  _progressPath() {
-    while (
-      this.currentIndex < this.path.length &&
-      this._passedNode(this.path[this.currentIndex])
-    ) {
+  _isActionBusy() {
+    return (
+      this.placingState ||
+      this.breakingState ||
+      this.digging ||
+      this.toweringState.active ||
+      this.interactingState
+    );
+  }
+
+  /**
+   * Place all blocks required for a node, sequentially.
+   */
+  async _placeBlock(node) {
+    const bot = this.bot;
+    const blockPlace = getBlockToPlace(bot);
+
+    this.bot.clearControlStates();
+    await bot.waitForTicks(5);
+
+    if (this.placingState) {
       if (this.ashfinder.debug)
-        console.log(
-          `Skipping overshot node ${this.path[this.currentIndex].worldPos}`
-        );
-      this.currentIndex++;
-      this.jumpState = null;
-      this.bot.clearControlStates();
+        console.warn("Already placing blocks, skipping node.");
+      return;
     }
 
-    if (this.currentIndex >= this.path.length) {
-      this._onGoalReached();
-      return false;
-    }
+    this.placingState = true;
 
-    const node = this.path[this.currentIndex];
-    if (
-      this._hasReachedNode(
-        node,
-        this.jumpState?.jumped || this.swimmingState
-      ) &&
-      !this._isBusy()
-    ) {
-      if (this.ashfinder.debug)
-        console.log(`Reached node ${node.worldPos}, advancing index`);
-      this.currentIndex++;
-      this.jumpState = null;
-      this.bot.clearControlStates();
+    for (const poss of node.attributes.place) {
+      const vec3 = new Vec3(poss.x, poss.y, poss.z);
+      const block = bot.blockAt(vec3);
 
-      if (this.currentIndex >= this.path.length) {
-        this._onGoalReached();
-        return false;
+      if (!block || block.boundingBox !== "empty") continue;
+
+      try {
+        // Move bot if inside target spot
+        const p = bot.entity.position;
+        if (
+          p.x > block.position.x &&
+          p.x < block.position.x + 1 &&
+          p.y > block.position.y - 0.1 &&
+          p.y < block.position.y + 2 &&
+          p.z > block.position.z &&
+          p.z < block.position.z + 1
+        ) {
+          bot.setControlState("back", true);
+          await bot.waitForTicks(2);
+          bot.setControlState("back", false);
+        }
+
+        await equipBlockIfNeeded(bot, blockPlace);
+        await placeBlockAtTarget(bot, poss, poss.dir, blockPlace);
+      } catch (error) {
+        console.error(`Error placing block at ${vec3}:`, error);
       }
     }
 
-    return true;
+    this.placingState = false;
   }
 
   _onGoalReached() {
@@ -256,115 +495,68 @@ class PathExecutor {
     });
   }
 
-  /**
-   * Executes the current move
-   * @param {Cell} node
-   */
-  async _executeMove(node) {
-    if (this.moveState) return; // already executing this move
-    this.moveState = node;
+  async _flyTo(node) {
+    const bot = this.bot;
+    const target = node.worldPos.offset(0.5, 0.5, 0.5); // center-ish
 
-    if (this.ashfinder.debug)
-      console.log(
-        `Executing move: ${node.attributes.name} at ${node.worldPos}`
-      );
+    while (!this._hasReachedNode(node, true)) {
+      const pos = bot.entity.position;
+      const dir = target.minus(pos);
 
-    const attributes = node.attributes;
-
-    try {
-      if (attributes.swimming) {
-        this._swimTo(node);
-        return;
+      // --- Normalize horizontal movement ---
+      const horizontalDir = new Vec3(dir.x, 0, dir.z);
+      if (horizontalDir.norm() > 0.05) {
+        horizontalDir.normalize();
+        bot.setControlState("forward", true);
+        bot.entity.yaw = Math.atan2(-horizontalDir.x, -horizontalDir.z);
+      } else {
+        bot.setControlState("forward", false);
       }
 
-      if (attributes.sJump) {
-        const dist = attributes.dist || 1;
-        this._sprintJump(node);
-        if (this.ashfinder.debug) console.log("Executing a jump!");
-        return;
+      // --- Vertical control (gravity on) ---
+      const yDist = dir.y;
+      if (yDist > 0.25) {
+        bot.setControlState("jump", true);
+        bot.setControlState("sneak", false);
+      } else if (yDist < -0.25) {
+        bot.setControlState("jump", false);
+        bot.setControlState("sneak", true);
+      } else {
+        bot.setControlState("jump", false);
+        bot.setControlState("sneak", false);
       }
 
-      if (attributes.nJump) {
-        // Handle breaking first
-        if (attributes.break?.length > 0) {
-          await this._handleBreakingBlocks(node);
-        }
-
-        // Then block placement
-        if (attributes.place?.length > 0) {
-          await this._placeBlock(node);
-        }
-
-        // Finally jump
-        this._simpleJump(node);
-        return;
+      // --- Close enough? stop controls ---
+      if (dir.norm() < 0.2) {
+        bot.clearControlStates();
+        break;
       }
 
-      // --- Normal moves ---
-      if (attributes.place?.length > 0) {
-        if (attributes.ascend) {
-          this._walkTo(node.worldPos);
-          await this.jumpAndPlaceBlock(node);
-        } else {
-          await this._placeBlock(node);
-        }
-      }
-
-      if (attributes.break?.length > 0) {
-        await this._handleBreakingBlocks(node);
-      }
-
-      const block = this.bot.blockAt(node.worldPos);
-      if (
-        attributes.interact &&
-        isInteractable(block) &&
-        !block.getProperties().open
-      ) {
-        await this.bot.activateBlock(block);
-      }
-
-      if (attributes.ladder) {
-        await this._climbLadder(node);
-        return;
-      }
-
-      this._walkTo(node.worldPos);
-    } finally {
-      this.moveState = null; // unlock
+      await bot.waitForTicks(1);
     }
+
+    bot.clearControlStates();
   }
 
   /**
    * Handles climbing ladders to reach the target node.
    */
-  async _climbLadder(node) {
+  _startClimb(node) {
     const bot = this.bot;
     const target = node.worldPos;
 
-    // Always face the ladder
-    bot.lookAt(target.offset(0.5, 1.0, 0.5), true);
+    // face ladder
+    bot.lookAt(target.offset(0, 1, 0), true);
 
-    // Start holding forward
+    // mark climbing state (movement, not action busy)
+    this.climbingState = true;
+    this.climbingTarget = target.clone(); // for optional timeout/diagnostics
+
+    // press controls to stick to the ladder and climb
     bot.setControlState("forward", true);
+    bot.setControlState("jump", true);
 
-    // Decide climb direction
-    if (node.worldPos.y > bot.entity.position.y) {
-      // climbing up
-      bot.setControlState("jump", true);
-    } else {
-      // climbing down
-      bot.setControlState("sneak", true);
-    }
-
-    // Wait until we are close enough to the node center
-    while (!this._hasReachedNode(node, true)) {
-      await bot.waitForTicks(1);
-    }
-
-    // Stop movement
-    bot.setControlState("forward", false);
-    bot.setControlState("jump", false);
-    bot.setControlState("sneak", false);
+    // note: we do NOT await here. tick() will watch for reaching the node and stop the controls.
   }
 
   /**
@@ -545,16 +737,6 @@ class PathExecutor {
     }
   }
 
-  _isBusy() {
-    return (
-      this.placingState ||
-      this.breakingState ||
-      this.digging ||
-      this.toweringState.active ||
-      this.moveState !== null // <-- block if a move is mid-execution
-    );
-  }
-
   /**
    * Swims to the specified node, adjusting controls based on attributes.
    * Handles vertical movement in water using jump/sneak controls.
@@ -674,9 +856,15 @@ class PathExecutor {
       if (!canMakeIt) {
         if (this.ashfinder.debug)
           console.warn("Jump simulation failed. Replanning or fallback?");
-        this.stop(); // or trigger replanner
-        return;
+        //using gen's mineflayer
+        if (!bot.physicsEngine) {
+          this.stop(); // or trigger replanner
+          return;
+        }
       }
+
+      if (this.ashfinder.debug)
+        console.log("Attempting sprint jump to", node.worldPos);
 
       this.jumpState = { jumped: false, timer: 0 };
       bot.setControlState("sprint", true);
@@ -702,110 +890,55 @@ class PathExecutor {
   }
 
   /**
-   * Place all blocks required for a node, sequentially.
-   */
-  async _placeBlock(node) {
-    const bot = this.bot;
-    const blockPlace = getBlockToPlace(bot);
-    bot.clearControlStates();
-
-    await bot.waitForTicks(1);
-
-    if (this.placingState) {
-      if (this.ashfinder.debug)
-        console.warn("Already placing blocks, skipping this node.");
-      return;
-    }
-
-    this.placingState = true;
-
-    try {
-      for (const poss of node.attributes.place) {
-        const vec3 = new Vec3(poss.x, poss.y, poss.z);
-        const block = bot.blockAt(vec3);
-
-        // Only try if target is empty
-        if (!block || block.boundingBox !== "empty") continue;
-
-        try {
-          // --- If bot standing inside target, jump first ---
-          if (vec3.floored().equals(bot.entity.position.floored())) {
-            bot.setControlState("jump", true);
-            while (true) {
-              const blockBelow = bot.blockAt(
-                bot.entity.position.offset(0, -1, 0)
-              );
-              if (blockBelow.name === "air") break; // Wait until bot is in the air
-              await bot.waitForTicks(1);
-            }
-            bot.setControlState("jump", false);
-          }
-
-          // --- Step back if too close ---
-          if (vec3.distanceTo(bot.entity.position) <= 0.6) {
-            bot.setControlState("back", true);
-            await sleep(10);
-            bot.setControlState("back", false);
-          }
-
-          // --- Equip and place ---
-          await equipBlockIfNeeded(bot, blockPlace);
-          await placeBlockAtTarget(bot, poss, poss.dir, blockPlace);
-        } catch (err) {
-          console.error(`Error placing block at ${vec3}:`, err);
-        }
-      }
-
-      if (this.ashfinder.debug)
-        console.log(`✅ Placed ${node.attributes.place.length} block(s).`);
-    } finally {
-      this.placingState = false;
-    }
-  }
-
-  /**
    * Break all blocks required for a node, sequentially.
    */
   async _handleBreakingBlocks(node) {
-    const bot = this.bot;
-    const breakNodes = node.attributes.break || [];
+    let promises = [];
 
-    if (this.breakingState) {
-      if (this.ashfinder.debug)
-        console.warn("Already breaking blocks, skipping this node.");
-      return;
-    }
+    const bot = this.bot;
+    this.bot.clearControlStates();
+
+    // and array of directional vec3
+    const breakNodes = node.attributes.break;
 
     this.breakingState = true;
-    bot.clearControlStates();
 
-    try {
-      for (const pos of breakNodes) {
-        const block = bot.blockAt(pos);
-        if (!block || block.boundingBox !== "block") continue;
+    for (const pos of breakNodes) {
+      const block = bot.blockAt(pos);
 
-        if (bot.ashfinder.debug)
-          showPathParticleEffect(bot, block.position, {
-            r: 0.11,
-            g: 0.11,
-            b: 0.11,
-          });
+      // console.log(block.position)
 
-        try {
-          // Sequential dig with lock
-          this.digging = true;
-          await autoTool(bot, block);
-          await bot.lookAt(block.position.offset(0.5, 0, 0.5), true);
-          await dig(bot, block);
-        } catch (err) {
-          console.error(`Error digging block at ${block.position}:`, err);
-        } finally {
-          this.digging = false;
-        }
+      if (bot.ashfinder.debug)
+        showPathParticleEffect(bot, block.position, {
+          r: 0.11,
+          b: 0.11,
+          g: 0.11,
+        });
+
+      if (block.boundingBox === "block") {
+        promises.push(
+          (async () => {
+            try {
+              if (!this.digging) {
+                this.digging = true;
+
+                await autoTool(bot, block);
+                await bot.lookAt(block.position.offset(0.5, 0, 0.5), true);
+                await dig(bot, block);
+                this.digging = false;
+              }
+            } catch (error) {
+              console.error(`Error digging block at ${block.position}:`, error);
+              this.digging = false;
+            }
+          })()
+        );
       }
-    } finally {
-      this.breakingState = false;
     }
+
+    await Promise.all(promises);
+
+    this.breakingState = false;
   }
 
   /**
@@ -827,6 +960,7 @@ class PathExecutor {
     else if (blockName === "soul_sand") yOffset = 0.875;
     else if (blockName === "carpet") yOffset = 0.0625;
     else if (blockName === "snow") yOffset = 0.125;
+    else if (blockName.includes("path")) yOffset = 0.9375;
 
     const topOfBlockY = node.worldPos.y + yOffset;
 
@@ -839,6 +973,11 @@ class PathExecutor {
     if (this.ashfinder.debug)
       console.log(
         `dx: ${dx.toFixed(4)}, dy: ${dy.toFixed(4)}, dz: ${dz.toFixed(4)}`
+      );
+
+    if (this.ashfinder.debug)
+      console.log(
+        `onGround: ${this.bot.entity.onGround}, ignoreGround: ${ignoreGround}`
       );
 
     const isCloseEnough = dx < 0.35 && dy <= 0.35 && dz < 0.35;
@@ -908,15 +1047,11 @@ class PathExecutor {
    */
   _shouldJumpNow(from, to, bot, isNJump = false) {
     const pos = bot.entity.position.clone();
-    const dir = to.minus(from).normalize(); // direction we're moving
+    const dir = to.minus(from).floored().normalize(); // direction we're moving
 
     // The block we're currently standing on
     const curBlockX = Math.floor(pos.x);
     const curBlockZ = Math.floor(pos.z);
-
-    // Determine the forward edge of that block in our movement direction
-    const edgeX = curBlockX + 0.5 + Math.sign(dir.x) * 0.5;
-    const edgeZ = curBlockZ + 0.5 + Math.sign(dir.z) * 0.5;
 
     // Project bot position onto movement axis
     const botForwardDist =
@@ -926,13 +1061,20 @@ class PathExecutor {
     const blockEdgeDist = 0.5; // half-block from center to edge
     const distToEdge = blockEdgeDist - botForwardDist;
 
+    const nextPos = pos.offset(bot.entity.velocity.x, 0, bot.entity.velocity.z);
+    const nextDistToEdge =
+      blockEdgeDist -
+      ((nextPos.x - (curBlockX + 0.5)) * dir.x +
+        (nextPos.z - (curBlockZ + 0.5)) * dir.z);
+
     // Threshold: jump slightly before falling off the edge
-    const margin = isNJump ? 0.12 : 0.18;
+    const margin = isNJump ? 0.12 : 0.3;
 
     if (this.ashfinder.debug)
       console.log(`distToEdge: ${distToEdge.toFixed(3)}, margin: ${margin}`);
 
-    return bot.entity.onGround && distToEdge <= margin;
+    const onGroundish = bot.entity.onGround || bot.entity.velocity.y < 0.05;
+    return onGroundish && nextDistToEdge <= margin;
   }
 
   /**
@@ -966,8 +1108,12 @@ class PathExecutor {
 
   stop() {
     this.executing = false;
+    this.placedNodes.clear();
     this.bot.clearControlStates();
     this.jumpState = null;
+    this.toweringState.active = false;
+    this.swimmingState.active = false;
+    this.ashfinder.stopped = true;
 
     if (this.rejectCurrentPromise) {
       this.rejectCurrentPromise(new Error("Path execution was stopped"));
@@ -1008,20 +1154,20 @@ async function placeBlockAtTarget(bot, cell, dir, blockPlace) {
 
     const blockBelow = bot.blockAt(pos.offset(0, -1, 0));
     //TODO: make this not shit
-    const block1 = bot.blockAt(pos.offset(1, 0, 0));
-    const block2 = bot.blockAt(pos.offset(-1, 0, 0));
-    const block3 = bot.blockAt(pos.offset(0, 0, 1));
-    const block4 = bot.blockAt(pos.offset(0, 0, -1));
-    if (
-      blockBelow.boundingBox === "empty" &&
-      block1.boundingBox === "empty" &&
-      block2.boundingBox === "empty" &&
-      block3.boundingBox === "empty" &&
-      block4.boundingBox === "empty"
-    ) {
-      //place a support
-      await placeBlock(bot, bot.heldItem?.name, blockBelow.position.floored());
-    }
+    // const block1 = bot.blockAt(pos.offset(1, 0, 0));
+    // const block2 = bot.blockAt(pos.offset(-1, 0, 0));
+    // const block3 = bot.blockAt(pos.offset(0, 0, 1));
+    // const block4 = bot.blockAt(pos.offset(0, 0, -1));
+    // if (
+    //   blockBelow.boundingBox === "empty" &&
+    //   block1.boundingBox === "empty" &&
+    //   block2.boundingBox === "empty" &&
+    //   block3.boundingBox === "empty" &&
+    //   block4.boundingBox === "empty"
+    // ) {
+    //   //place a support
+    //   await placeBlock(bot, bot.heldItem?.name, blockBelow.position.floored());
+    // }
 
     await placeBlock(bot, bot.heldItem?.name, pos.floored());
   } catch (error) {
@@ -1079,6 +1225,25 @@ function isInteractable(block) {
 
 async function sleep(ms = 2000) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function enableCreativeFlight(bot) {
+  const abilities = {
+    // Packet structure for client abilities
+    flags: 0b00000101, // invulnerable + flying
+    flyingSpeed: 0.05,
+    walkingSpeed: 0.1,
+  };
+  bot._client.write("abilities", abilities);
+}
+
+function disableCreativeFlight(bot) {
+  const abilities = {
+    flags: 0b00000001, // invulnerable only
+    flyingSpeed: 0.05,
+    walkingSpeed: 0.1,
+  };
+  bot._client.write("abilities", abilities);
 }
 
 module.exports = PathExecutor;

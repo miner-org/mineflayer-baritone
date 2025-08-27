@@ -18,6 +18,9 @@
   "license": "ISC",
   "dependencies": {
     "@nxg-org/mineflayer-physics-util": "^1.7.11",
+    "minecraft-data": "^3.94.0",
+    "minecraft-protocol": "^1.57.0",
+    "protodef": "^1.17.0",
     "require-dir": "^1.2.0"
   },
   "repository": {
@@ -25,6 +28,7 @@
     "type": "git"
   },
   "devDependencies": {
+    "gen-mineflayer": "github:GenerelSchwerz/mineflayer",
     "mineflayer": "^4.25.0"
   }
 }

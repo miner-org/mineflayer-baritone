@@ -99,13 +99,19 @@ function simulateUntil(
   state = null
 ) {
   // const physics = new BotcraftPhysics(bot.registry);
-  // let ctx = EPhysicsCtx.FROM_BOT(bot.physicsEngine, bot, bot.physicsSettings);
+  // let ctx =
 
   if (!state) {
     const controls = getControlState(bot);
 
     state = new PlayerState(bot, controls);
   }
+
+  // let ctx = null;
+  // //prob using gen mineflayer
+  // if (bot.physicsEngine) {
+  //   ctx = EPhysicsCtx.FROM_BOT(bot.physicsEngine, bot, bot.physicsSettings);
+  // }
 
   // console.log("problem is here");
   // console.log(bot);
@@ -126,6 +132,8 @@ function simulateUntil(
 
     if (satisfyFunction(state)) return state;
   }
+
+  // console.log(state);
 
   return state;
 }
@@ -479,6 +487,64 @@ async function forceDig(bot, block) {
   });
 }
 
+// Re-check whether a cell can still be produced by any move from its parent
+function isCellStillValid(cell, moveClasses, manager, bot, config) {
+  // If no parent we can't validate reliably — assume valid
+  if (!cell.parent || !cell.parent.worldPos) return true;
+
+  const origin = cell.parent.worldPos;
+  const target = cell.worldPos;
+
+  for (const move of moveClasses) {
+    // Give each move the Cell as 'node' so getBlock() uses virtual blocks overlay
+    move.setValues(bot, config, manager, cell);
+
+    const tmp = [];
+    try {
+      move.generate(cardinalDirections, origin, tmp);
+    } catch (e) {
+      // move generator threw — skip this move
+      continue;
+    }
+
+    // If any generated neighbor matches the cell coords (dir irrelevant), it's still valid
+    if (
+      tmp.some((n) => n.x === target.x && n.y === target.y && n.z === target.z)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Prune invalid cells from openSet and openList (uses searchController.openSet/openList)
+function pruneOpenSet(searchController, bot, config) {
+  if (
+    !searchController ||
+    !searchController.openSet ||
+    !searchController.openList
+  )
+    return;
+
+  const openSet = searchController.openSet;
+  const openList = searchController.openList;
+  const manager = searchController.nodemanager;
+
+  for (const [hash, cell] of Array.from(openSet.entries())) {
+    if (!isCellStillValid(cell, moveClasses, manager, bot, config)) {
+      // remove from heap + map
+      openList.remove(cell);
+      openSet.delete(hash);
+      if (searchController.debug) {
+        console.debug(
+          `[pruneOpenSet] removed invalid cell ${cell.worldPos.toString()}`
+        );
+      }
+    }
+  }
+}
+
 module.exports = {
   vectorProjection,
   shouldAutoJump,
@@ -495,4 +561,6 @@ module.exports = {
   getControlState,
   createEndFunc,
   dig: forceDig,
+  pruneOpenSet,
+  cellStillValid: isCellStillValid,
 };

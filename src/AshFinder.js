@@ -39,8 +39,11 @@ class AshFinderPlugin extends EventEmitter {
   async generatePath(goal, excludedPositions = []) {
     const endFunc = createEndFunc(goal);
     const bot = this.bot;
-
     const position = goal.position.clone();
+
+    // ensure controller exists for this run
+    this._searchController = this._searchController || {};
+    this._searchController.debug = this.debug;
 
     const result = await astar(
       bot.entity.position.clone(),
@@ -49,8 +52,13 @@ class AshFinderPlugin extends EventEmitter {
       endFunc,
       this.config,
       excludedPositions,
-      this.debug
+      this.debug,
+      this._searchController // <-- pass controller
     );
+
+    // once astar resolves, controller.active will be set to false by astar
+    this._searchController = this._searchController || {};
+    this._searchController.active = false;
 
     return result;
   }
@@ -176,6 +184,55 @@ class AshFinderPlugin extends EventEmitter {
       return { status: "failed", error: err };
     }
   }
+
+  // helper to produce the same key format used by DirectionalVec3.toString
+  posKey(pos) {
+    // pos might be Vec3 or BlockPosition; ensure consistent formatting
+    const p = pos.floored ? pos.floored() : pos;
+    return `${p.x},${p.y},${p.z}`;
+  }
+
+  // apply a virtual state and prune if search running
+  applyVirtualToSearch(pos, state) {
+    const key = this.posKey(pos);
+    // store globally so future searches start with it
+    this._globalVirtual = this._globalVirtual || new Map();
+    this._globalVirtual.set(key, state);
+
+    // apply to running search (if active)
+    if (this._searchController && this._searchController.active) {
+      // apply to all cells
+      this._searchController.applyVirtual(key, state);
+      // prune invalid nodes
+      this._searchController.prune();
+    }
+  }
+
+  // notify external break
+  notifyBlockBroken(pos) {
+    const p = pos.floored ? pos.floored() : pos;
+    if (this.debug)
+      console.log(`[AshFinder] notifyBlockBroken ${p.toString()}`);
+    // mark node manager as well (keeps areaMarked semantics if used)
+    // NOTE: we still prefer overlay for branch-local state, nodemanager used only for areaMarked
+    if (this._searchController?.nodemanager) {
+      this._searchController.nodemanager.markNode(p, "broken");
+    }
+
+    // apply overlay + prune
+    this.applyVirtualToSearch(p, "air");
+  }
+
+  // notify external place
+  notifyBlockPlaced(pos) {
+    const p = pos.floored ? pos.floored() : pos;
+    if (this.debug)
+      console.log(`[AshFinder] notifyBlockPlaced ${p.toString()}`);
+    if (this._searchController?.nodemanager) {
+      this._searchController.nodemanager.markNode(p, "placed");
+    }
+    this.applyVirtualToSearch(p, "placed");
+  }
 }
 
 class AshFinderConfig {
@@ -185,8 +242,8 @@ class AshFinderConfig {
     this.blocksToStayAway = ["cactus", "cobweb", "lava", "gravel"];
     this.avoidDistance = 8;
     this.swimming = true;
-    this.placeBlocks = true;
-    this.breakBlocks = true;
+    this.placeBlocks = false;
+    this.breakBlocks = false;
     this.parkour = true;
     this.checkBreakUpNodes = true;
     this.proParkour = false;
@@ -224,13 +281,79 @@ class AshFinderConfig {
       "warped_fence_gate",
       "crimson_fence_gate",
     ];
-    this.climbableBlocks = [
-      "vine",
-      "ladder",
-      "scaffolding",
-    ];
+    this.climbableBlocks = ["vine", "ladder", "scaffolding"];
+    this.closeInteractables = true;
 
     this.thinkTimeout = 5000;
+  }
+
+  /**
+   * Resets the configuration to default values.
+   */
+  reset() {
+    this.blocksToAvoid = ["crafting_table", "chest", "furnace", "gravel"];
+    this.blocksToStayAway = ["cactus", "cobweb", "lava", "gravel"];
+    this.avoidDistance = 8;
+    this.swimming = true;
+    this.placeBlocks = false;
+    this.breakBlocks = false;
+    this.parkour = true;
+    this.checkBreakUpNodes = true;
+    this.proParkour = false;
+    this.fly = false;
+    this.maxFallDist = 3;
+    this.maxWaterDist = 256;
+    this.disposableBlocks = [
+      "dirt",
+      "cobblestone",
+      "stone",
+      "andesite",
+      "coarse_dirt",
+      "blackstone",
+      "end_stone",
+      "basalt",
+    ];
+    this.interactableBlocks = [
+      "oak_door",
+      "spruce_door",
+      "birch_door",
+      "jungle_door",
+      "acacia_door",
+      "dark_oak_door",
+      "mangrove_door",
+      "warped_door",
+      "crimson_door",
+      // gates
+      "oak_fence_gate",
+      "spruce_fence_gate",
+      "birch_fence_gate",
+      "jungle_fence_gate",
+      "acacia_fence_gate",
+      "dark_oak_fence_gate",
+      "mangrove_fence_gate",
+      "warped_fence_gate",
+      "crimson_fence_gate",
+    ];
+    this.climbableBlocks = ["vine", "ladder", "scaffolding"];
+    this.closeInteractables = true;
+
+    this.thinkTimeout = 5000;
+  }
+
+  set(key, value) {
+    if (this.hasOwnProperty(key)) {
+      this[key] = value;
+    } else {
+      throw new Error(`Invalid configuration key: ${key}`);
+    }
+  }
+
+  get(key) {
+    if (this.hasOwnProperty(key)) {
+      return this[key];
+    } else {
+      throw new Error(`Invalid configuration key: ${key}`);
+    }
   }
 }
 

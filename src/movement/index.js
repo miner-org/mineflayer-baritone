@@ -139,8 +139,8 @@ class Move {
     this.COST_NORMAL = 1;
     this.COST_UP = 1;
     this.COST_FALL = 1;
-    this.COST_BREAK = 5;
-    this.COST_PLACE = 5;
+    this.COST_BREAK = 2.5;
+    this.COST_PLACE = 2.5;
     this.COST_SWIM = 2.2;
     this.COST_SWIM_START = 2;
     this.COST_SWIM_EXIT = 2;
@@ -154,13 +154,13 @@ class Move {
     // To be implemented in subclasses
   }
 
-  setValues(world, bot, config, manager, node = null) {
-    this.world = world;
+  setValues(bot, config, manager, node = null) {
     this.bot = bot;
     this.manager = manager;
     this.config = config;
-    this.node = node;
+    this.node = node; // keep the Cell (or null). 
     this.mcData = require("minecraft-data")(bot.version);
+    // do NOT set this.origin = node; that causes confusion
   }
 
   // === Inventory / Block Checks ===
@@ -185,18 +185,14 @@ class Move {
   getBlock(pos) {
     const key = pos.toString();
 
-    // Use virtualBlocks overlay if available
-    if (
-      this.node &&
-      this.node.virtualBlocks &&
-      this.node.virtualBlocks.has(key)
-    ) {
+    // Virtual overlay
+    if (this.node?.virtualBlocks?.has(key)) {
       const state = this.node.virtualBlocks.get(key);
       if (state === "air") return this.mcData.blocksByName["air"];
-      if (state === "placed") return this.mcData.blocksByName["stone"]; // or disposable block
+      if (state === "placed") return this.mcData.blocksByName["stone"]; // disposable
     }
 
-    return this.bot.blockAt(pos.floored());
+    return this.bot.blockAt(pos);
   }
 
   // === Core Node Checks ===
@@ -204,21 +200,14 @@ class Move {
   isAir(node) {
     const block = this.getBlock(node);
     if (!block) return false;
-    return (
-      (block.boundingBox === "empty" &&
-        block.name !== "water" &&
-        !this.manager.isNodePlaced(node)) ||
-      this.manager.isNodeBroken(node)
-    );
+    return block.boundingBox === "empty" && block.name !== "water";
   }
 
   isSolid(node) {
     const block = this.getBlock(node);
     if (!block) return false;
-    return (
-      (block.boundingBox === "block" && !this.manager.isNodeBroken(node)) ||
-      this.manager.isNodePlaced(node)
-    );
+    // treat torches, etc as non-solid (your old code excluded torches)
+    return block.boundingBox === "block" && !block.name.includes("torch");
   }
 
   isWalkable(node) {
@@ -266,7 +255,10 @@ class Move {
 
   isBreakable(node) {
     const block = this.getBlock(node);
-    if (!block || this.manager.isAreaMarkedNode(node)) return false;
+    if (!block) return false;
+    // areaMarked check should still use NodeManager
+    if (this.manager.isAreaMarkedNode(node)) return false;
+    // breakable if block is solid and not in blocksToAvoid
     return (
       this.isSolid(node) && !this.config.blocksToAvoid.includes(block.name)
     );
@@ -380,14 +372,14 @@ function registerMoves(moves) {
   moveClasses.push(...moves);
 }
 
-function getNeighbors2(world, node, config, manager, bot) {
+function getNeighbors2(node, config, manager, bot) {
   const neighborMap = new Map();
 
   // Sort moves by priority first (lower = preferred)
   const sortedMoves = [...moveClasses].sort((a, b) => a.priority - b.priority);
 
   for (const move of sortedMoves) {
-    move.setValues(world, bot, config, manager, node);
+    move.setValues(bot, config, manager, node);
     const origin = node.worldPos;
 
     /** @type {DirectionalVec3[]} */
@@ -403,28 +395,37 @@ function getNeighbors2(world, node, config, manager, bot) {
         continue;
       }
 
-      // Compare existing vs new
+      // Grab move data
       const existingMoveName = existing.attributes?.name ?? "Unknown";
       const existingMove = moveClasses.find((m) => m.name === existingMoveName);
       const existingPriority = existingMove?.priority ?? 999;
 
       const newPriority = move.priority;
 
-      // Debug conflicts
-      // console.log(
-      //   `[Conflict] Node ${key}: ${move.name} (P:${newPriority} C:${neighbor.cost}) vs ${existingMoveName} (P:${existingPriority} C:${existing.cost})`
-      // );
+      // Extra: simple moves list
+      const simpleMoves = ["MoveForward", "MoveForwardUp", "MoveForwardDown"];
+      const isExistingSimple = simpleMoves.includes(existingMoveName);
+      const isNewSimple = simpleMoves.includes(move.name);
 
-      // Prefer lower priority first, then lower cost
-      if (
-        newPriority < existingPriority ||
-        (newPriority === existingPriority && neighbor.cost < existing.cost)
-      ) {
-        // console.log(`  -> ${move.name} WINS`);
-        neighborMap.set(key, neighbor);
+      // --- Conflict resolution ---
+      let replace = false;
+
+      // 1️⃣ Simple beats Parkour if same node
+      if (isNewSimple && !isExistingSimple) {
+        replace = true;
+      } else if (!isNewSimple && isExistingSimple) {
+        replace = false;
       } else {
-        // console.log(`  -> ${existingMoveName} STAYS`);
+        // 2️⃣ Otherwise, prefer lower priority first
+        if (
+          newPriority < existingPriority ||
+          (newPriority === existingPriority && neighbor.cost < existing.cost)
+        ) {
+          replace = true;
+        }
       }
+
+      if (replace) neighborMap.set(key, neighbor);
     }
   }
 

@@ -15,8 +15,15 @@ const compare = (a, b) => {
   if (a.fCost !== b.fCost) {
     return a.fCost - b.fCost; // Prioritize lower fCost
   }
-  return a.hCost - b.hCost; // Break ties by lower hCost
+  // return a.hCost - b.hCost; // Break ties by lower hCost
 };
+
+function posHash(node) {
+  const x = node.x | 0;
+  const y = node.y | 0;
+  const z = node.z | 0;
+  return `${x},${y},${z}`;
+}
 
 /**
  * Generates a unique number-based hash for a DirectionalVec3.
@@ -40,15 +47,11 @@ function defaultHash(node) {
 
 class NodeManager {
   constructor() {
-    /**
-     * @type {Map<string, string>}
-     * Maps node hash to its attribute (e.g. "broken", "placed", "areaMarked")
-     */
-    this.markedNodes = new Map();
+    this.markedNodes = new Map(); // posHash -> attribute
   }
 
   markNode(node, attribute) {
-    this.markedNodes.set(defaultHash(node), attribute);
+    this.markedNodes.set(posHash(node), attribute);
   }
 
   markNodes(nodes, attribute) {
@@ -58,39 +61,27 @@ class NodeManager {
   }
 
   unmarkNode(node) {
-    this.markedNodes.delete(defaultHash(node));
+    this.markedNodes.delete(posHash(node));
   }
 
   isNodeMarked(node) {
-    return this.markedNodes.has(defaultHash(node));
+    return this.markedNodes.has(posHash(node));
   }
 
   getNodeAttribute(node) {
-    return this.markedNodes.get(defaultHash(node));
+    return this.markedNodes.get(posHash(node));
   }
 
   isNodeBroken(node) {
-    const attribute = this.getNodeAttribute(node);
-
-    if (!attribute) return false;
-
-    return attribute === "broken";
+    return this.getNodeAttribute(node) === "broken";
   }
 
   isNodePlaced(node) {
-    const attribute = this.getNodeAttribute(node);
-
-    if (!attribute) return false;
-
-    return attribute === "placed";
+    return this.getNodeAttribute(node) === "placed";
   }
 
   isAreaMarkedNode(node) {
-    const attribute = this.getNodeAttribute(node);
-
-    if (!attribute) return false;
-
-    return attribute === "areaMarked";
+    return this.getNodeAttribute(node) === "areaMarked";
   }
 }
 
@@ -145,7 +136,8 @@ async function Astar(
   endFunc,
   config,
   excludedPositions = [],
-  debug = false
+  debug = false,
+  searchController = null
 ) {
   let end = endPos.clone();
   let startPos = start.floored().offset(0.5, 0, 0.5);
@@ -169,6 +161,7 @@ async function Astar(
   startNode.gCost = 0;
   startNode.hCost = averageDist(startPos, end);
   startNode.fCost = startNode.gCost + startNode.hCost;
+  startNode.virtualBlocks = new Map([]);
 
   openList.push(startNode);
   openSet.set(defaultHash(startPos), startNode);
@@ -177,6 +170,31 @@ async function Astar(
   let bestScore = Infinity;
   let processedAny = false;
   let iteration = 0;
+
+  if (searchController) {
+    searchController.openSet = openSet;
+    searchController.openList = openList;
+    searchController.nodemanager = nodemanager;
+    searchController.active = true;
+
+    // apply a virtual state to all current cells in openSet
+    searchController.applyVirtual = (posKey, state) => {
+      for (const cell of openSet.values()) {
+        cell.virtualBlocks = cell.virtualBlocks || new Map();
+        cell.virtualBlocks.set(posKey, state);
+      }
+    };
+
+    // prune function (calls pruneOpenSet defined below)
+    searchController.prunedHashes = new Set();
+
+    searchController.prune = (positions) => {
+      // positions is array of Vec3
+      for (const pos of positions) {
+        searchController.prunedHashes.add(defaultHash(pos));
+      }
+    };
+  }
 
   return new Promise(async (resolve) => {
     let startTime = performance.now();
@@ -191,26 +209,34 @@ async function Astar(
         lastSleep = performance.now();
       }
 
-      const currentNode = openList.pop();
+      let currentNode;
+      do {
+        currentNode = openList.pop();
+      } while (
+        currentNode &&
+        searchController?.prunedHashes.has(defaultHash(currentNode.worldPos))
+      );
+
+      if (!currentNode) break; // heap empty after pruning skips
 
       // MARK broken and placed nodes ASAP before neighbor gen
-      if (currentNode.attributes.break?.length) {
-        nodemanager.markNodes(currentNode.attributes.break, "broken");
-        if (debug)
-          console.log(
-            "Marked broken nodes:",
-            currentNode.attributes.break.map((n) => n.toString())
-          );
-      }
+      // if (currentNode.attributes.break?.length) {
+      //   nodemanager.markNodes(currentNode.attributes.break, "broken");
+      //   if (debug)
+      //     console.log(
+      //       "Marked broken nodes:",
+      //       currentNode.attributes.break.map((n) => n.toString())
+      //     );
+      // }
 
-      if (currentNode.attributes.place?.length) {
-        nodemanager.markNodes(currentNode.attributes.place, "placed");
-        if (debug)
-          console.log(
-            "Marked placed nodes:",
-            currentNode.attributes.place.map((n) => n.toString())
-          );
-      }
+      // if (currentNode.attributes.place?.length) {
+      //   nodemanager.markNodes(currentNode.attributes.place, "placed");
+      //   if (debug)
+      //     console.log(
+      //       "Marked placed nodes:",
+      //       currentNode.attributes.place.map((n) => n.toString())
+      //     );
+      // }
 
       if (debug) {
         const distToGoal = currentNode.worldPos.distanceTo(end);
@@ -236,10 +262,11 @@ async function Astar(
       }
 
       // Now neighbors get generated with fresh nodemanager state
-      let neighbors = getNeighbors(currentNode, bot, config, nodemanager);
+      let neighbors = getNeighbors2(currentNode, config, nodemanager, bot);
 
       openSet.delete(defaultHash(currentNode.worldPos));
       openList.remove(currentNode);
+
       closedSet.add(defaultHash(currentNode.worldPos));
 
       // Track best node for partial path returns
@@ -255,6 +282,10 @@ async function Astar(
 
       // Check if reached destination
       if (endFunc(currentNode.worldPos)) {
+        if (searchController) {
+          searchController.active = false;
+        }
+
         return resolve({
           path: reconstructPath(currentNode),
           cost: currentNode.fCost,
@@ -279,6 +310,9 @@ async function Astar(
       if (currentTime - startTime >= config.thinkTimeout) {
         // Timeout: return partial path
         if (bestNode) {
+          if (searchController) {
+            searchController.active = false;
+          }
           return resolve({
             path: reconstructPath(bestNode),
             status: "partial",
@@ -290,6 +324,9 @@ async function Astar(
             iterations: iteration,
           });
         } else {
+          if (searchController) {
+            searchController.active = false;
+          }
           return resolve({
             path: [],
             status: "no path",
@@ -299,6 +336,10 @@ async function Astar(
           });
         }
       }
+    }
+
+    if (searchController) {
+      searchController.active = false;
     }
 
     // No path found
@@ -312,19 +353,29 @@ async function Astar(
   });
 
   function processNeighbor(currentNode, neighborData) {
+    if (!neighborData.virtualBlocks) {
+      // clone parent's overlay (if any) so we don't mutate parent
+      neighborData.virtualBlocks = new Map(currentNode.virtualBlocks || []);
+      // apply this neighbor's planned changes
+      for (const b of neighborData.attributes.break || []) {
+        neighborData.virtualBlocks.set(b.toString(), "air");
+      }
+      for (const p of neighborData.attributes.place || []) {
+        neighborData.virtualBlocks.set(p.toString(), "placed");
+      }
+    }
+
     const tempG = currentNode.gCost + neighborData.cost;
     const hash = defaultHash(neighborData);
     let neighbor = openSet.get(hash);
 
-    // Build virtual block overlay
-    // if (!neighborData.virtualBlocks) {
-    //   neighborData.virtualBlocks = new Map(currentNode.virtualBlocks || []);
-    //   // Apply queued changes
-    //   for (const b of neighborData.attributes.break || [])
-    //     neighborData.virtualBlocks.set(b.toString(), "air");
-    //   for (const p of neighborData.attributes.place || [])
-    //     neighborData.virtualBlocks.set(p.toString(), "placed");
-    // }
+    // Prevent illogical sequences
+    if (
+      currentNode?.moveName === "MoveForwardDown" &&
+      neighborData.attributes?.name === "MoveForwardParkour"
+    ) {
+      return; // can't parkour immediately after a fall
+    }
 
     if (!neighbor) {
       neighbor = new Cell();
@@ -387,7 +438,21 @@ function computeScore(node, goal, startPos) {
   // Randomness when far from goal
   const randomness = distToGoal > 6 ? (Math.random() - 0.5) * 0.4 : 0;
 
+  // console.log("Score details:", {
+  //   g,
+  //   h,
+  //   w,
+  //   dot: dot.toFixed(2),
+  //   directionPenalty: directionPenalty.toFixed(2),
+  //   dirBias: dirBias.toFixed(2),
+  //   explorationBonus: explorationBonus.toFixed(2),
+  //   randomness: randomness.toFixed(2),
+  // });
+
+  const yBonus = Math.min(0, Math.abs(node.worldPos.y - goal.y) * 0.15);
+
   let score = g * w + h;
+  score -= yBonus;
   score += directionPenalty;
   score += dirBias;
   score -= explorationBonus;
@@ -466,15 +531,9 @@ function reconstructPath(node) {
 
   return path;
 }
-
-function getNeighbors(node, bot, config, manager) {
-  return getNeighbors2(bot.world, node, config, manager, bot);
-}
-
 module.exports = {
   Astar,
   Cell,
-  getNeighbors,
   defaultHash,
   reconstructPath,
   manhattanDistance,

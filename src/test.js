@@ -1,4 +1,5 @@
 const mineflayer = require("mineflayer");
+const genMineflayer  = require("gen-mineflayer");
 const inject = require("./loader");
 const Vec3 = require("vec3").Vec3;
 const { argv } = require("process");
@@ -24,6 +25,7 @@ bot.once("spawn", async () => {
   await bot.waitForChunksToLoad();
   bot.chat("hi");
   bot.ashfinder.debug = true;
+  // bot.ashfinder.enableBreaking();
   pathExecutor = new PathExecutor(bot);
 
   bot.on("chat", async (username, message) => {
@@ -286,6 +288,10 @@ bot.once("spawn", async () => {
       const goal = new GoalNear(endPos, 1);
 
       await bot.ashfinder.goto(goal);
+    }
+
+    if (command === "f!disableOutput") {
+      bot.chat("/gamerule sendCommandFeedback false");
     }
 
     if (command === "f!find") {
