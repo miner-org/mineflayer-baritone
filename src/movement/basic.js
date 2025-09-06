@@ -64,7 +64,7 @@ class MoveForward extends Move {
 
     // --- FEET (node) handling ---
     if (!this.isAir(node) && !interactable) {
-        if (
+      if (
         canBreak &&
         this.isBreakable(node) &&
         !this.manager.isNodeBroken(node)
@@ -213,61 +213,54 @@ class MoveForwardUp extends Move {
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       const step = originVec.forward(1).up(1); // where feet land
-      const head = step.up(1); // head space
-      this.addNeighbors(neighbors, step, head, originVec);
+      this.addNeighbors(neighbors, step, originVec);
     }
   }
 
-  addNeighbors(neighbors, node, head, originVec) {
-    const below = node.down(1);
+  /**
+   * Add valid upward movement neighbors
+   * @param {Array} neighbors
+   * @param {DirectionalVec3} node - the target position (feet)
+   * @param {DirectionalVec3} originVec - the original position (for Y comparison)
+   */
+  addNeighbors(neighbors, node, originVec) {
+    const below = node.down(1); // block we stand on for the target
+    const above = node.up(1);
+    const head = originVec.up(2);
+
     const canPlace = this.config.placeBlocks && this.hasScaffoldingBlocks();
     const canBreak = this.config.breakBlocks;
 
-    node.attributes = { name: this.name, break: [], place: [], nJump: true };
-
-    const isSolidBelow = this.isSolid(below) && !this.isFence(below);
-
+    //check if we can place a block under us if needed
     const canScaffold =
-      !isSolidBelow &&
-      this.isAir(below) &&
-      canPlace &&
-      this.canPlaceBlock(below);
+      !this.isSolid(below) && this.canPlaceBlock(below) && canPlace;
 
-    if (!isSolidBelow && !canScaffold) return;
+    node.attributes = { name: this.name, break: [], place: [], nJump: true };
 
     if (canScaffold) node.attributes.place.push(below.clone());
 
-    // --- Check foot block (node) ---
-    if (!this.isAir(node)) {
-      if (!canBreak || !this.isBreakable(node)) return;
-      node.attributes.break.push(node.clone());
-    }
-
-    // --- Check head + clearance ---
-    const clearanceNodes = [head, originVec.up(2)];
-    for (const check of clearanceNodes) {
-      if (!this.isAir(check)) {
-        if (!canBreak) return;
-        if (!this.isBreakable(check)) return;
-        node.attributes.break.push(check.clone());
+    let testNodes = [node, head, above];
+    if (canBreak) {
+      for (const testNode of testNodes) {
+        if (this.isSolid(testNode) && this.isBreakable(testNode)) {
+          node.attributes.break.push(testNode.clone());
+        }
       }
     }
 
-    // --- If no scaffold and foot block was breakable, make sure standing works ---
-    if (
-      !canScaffold &&
-      !this.isStandable(node) &&
-      node.attributes.break.length === 0
-    )
-      return;
+    if (!canScaffold && this.isAir(below)) return;
 
-    const totalCost =
+    if (!canBreak && !this.isStandable(node)) return;
+
+    if (!canBreak && !this.isAir(head)) return;
+
+    const cost =
       this.COST_UP +
       node.attributes.break.length * this.COST_BREAK +
       node.attributes.place.length * this.COST_PLACE;
+    node.attributes.cost = cost;
 
-    node.attributes.cost = totalCost;
-    neighbors.push(this.makeMovement(node, totalCost));
+    neighbors.push(this.makeMovement(node, cost));
   }
 
   canPlaceBlock(pos) {
@@ -298,12 +291,15 @@ class MoveForwardDown extends Move {
     }
   }
 
+  /**
+   * Add valid downward movement neighbors
+   * @param {Array} neighbors
+   * @param {DirectionalVec3} forward - the forward position at same Y as origin
+   * @param {DirectionalVec3} originVec - the original position (for Y comparison)
+   */
   addNeighbors(neighbors, forward, originVec) {
-    // head space while moving down (for the forward position)
-    const headClear = forward.up(1);
-
     // Must be walkable at the "forward" location and have head clearance there
-    if (!this.isWalkable(forward) || !this.isWalkable(headClear)) return;
+    if (!this.isWalkable(forward)) return;
 
     const maxFall = this.config.maxFallDist ?? 3;
     let fallDistance = 0;

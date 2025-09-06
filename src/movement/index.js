@@ -146,7 +146,7 @@ class Move {
     this.COST_SWIM_EXIT = 2;
     this.COST_CLIMB = 1;
     this.COST_LADDER = 2;
-    this.COST_PARKOUR = 5;
+    this.COST_PARKOUR = 3.5; // ian
     this.COST_DIAGONAL = 1.41;
   }
 
@@ -158,7 +158,7 @@ class Move {
     this.bot = bot;
     this.manager = manager;
     this.config = config;
-    this.node = node; // keep the Cell (or null). 
+    this.node = node; // keep the Cell (or null).
     this.mcData = require("minecraft-data")(bot.version);
     // do NOT set this.origin = node; that causes confusion
   }
@@ -206,7 +206,6 @@ class Move {
   isSolid(node) {
     const block = this.getBlock(node);
     if (!block) return false;
-    // treat torches, etc as non-solid (your old code excluded torches)
     return block.boundingBox === "block" && !block.name.includes("torch");
   }
 
@@ -220,6 +219,24 @@ class Move {
       block.name !== "water" &&
       !this.config.blocksToStayAway.includes(block.name) &&
       !this.isStair(node)
+    );
+  }
+
+  isStandable(node) {
+    const below = node.down(1);
+
+    // Overlay wins over world
+    if (this.node?.virtualBlocks?.get(below.toString()) === "air") return false;
+
+    const blockBelow = this.getBlock(below);
+    if (!blockBelow || blockBelow.name === "air") return false;
+
+    if (this.config.blocksToAvoid.includes(blockBelow.name)) return false;
+    return (
+      this.isSolid(below) &&
+      this.isFullBlock(below) &&
+      this.isWalkable(node) &&
+      !this.isLava(node)
     );
   }
 
@@ -240,28 +257,24 @@ class Move {
     );
   }
 
-  isStandable(node) {
-    const below = node.offset(0, -1, 0);
-    const blockBelow = this.getBlock(below);
-    if (!blockBelow || this.config.blocksToAvoid.includes(blockBelow.name))
-      return false;
-    return (
-      this.isSolid(below) &&
-      this.isFullBlock(below) &&
-      this.isWalkable(node) &&
-      !this.isLava(node)
-    );
-  }
-
   isBreakable(node) {
     const block = this.getBlock(node);
     if (!block) return false;
+
     // areaMarked check should still use NodeManager
     if (this.manager.isAreaMarkedNode(node)) return false;
-    // breakable if block is solid and not in blocksToAvoid
-    return (
-      this.isSolid(node) && !this.config.blocksToAvoid.includes(block.name)
-    );
+
+    // virtual overlay check: air blocks cannot be broken again
+    if (this.node?.virtualBlocks?.get(node.toString()) === "air") return false;
+
+    // Check if block is absolutely unbreakable (bedrock, barriers, etc.)
+    if (this.config.unbreakableBlocks?.includes(block.name)) return false;
+
+    // Check if block should be avoided breaking (chests, valuable blocks, etc.)
+    if (this.config.blocksToAvoid?.includes(block.name)) return false;
+
+    // breakable if block is solid and passed all other checks
+    return this.isSolid(node);
   }
 
   // === Block Types ===

@@ -4,71 +4,75 @@ class MoveForwardParkour extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.parkour) return;
 
-    const minDistance = 2; // leave 1-block hops to MoveForward/Up
-    const maxDistance = 3;
-
     for (const dir of cardinalDirections) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      // console.log(originVec);
 
-      // ✅ Require stable starting surface (no falling / stepping down)
-      const standNode = this.origin.down(1);
-      if (!this.isSolid(standNode) || this.isFence(standNode)) continue;
-
-      // ✅ Don’t start parkour in water or above water
-      if (this.isWater(this.origin) || this.isWater(standNode)) continue;
-
-      for (let dist = minDistance; dist <= maxDistance; dist++) {
-        const landingNode = this.origin.forward(dist + 1);
-        this.addNeighbors(neighbors, landingNode, dist);
-      }
+      this.addNeighbors(neighbors, originVec);
     }
   }
 
-  addNeighbors(neighbors, landingNode, dist) {
-    const standingNode = landingNode.down(1);
+  /**
+   *
+   * @param {DirectionalVec3[]} neighbors
+   * @param {DirectionalVec3} originVec
+   */
+  addNeighbors(neighbors, originVec) {
+    // const minDistance = 1;
+    const maxDistance = 3;
+    let count = 0;
 
-    // ❌ Must be horizontal jump, no vertical drift
-    if (landingNode.y !== this.origin.y) return;
-    if (standingNode.y !== this.origin.y - 1) return;
+    for (let distance = count; distance <= maxDistance; distance++) {
+      const landingNode = originVec.forward(distance + 1);
+      const standingNode = landingNode.down(1);
 
-    // ❌ Landing must be standable and not broken
-    if (
-      !this.isStandable(landingNode) ||
-      this.manager.isNodeBroken(standingNode)
-    )
-      return;
+      // ❌ Must land exactly same height
+      if (landingNode.y !== originVec.y) continue;
+      if (standingNode.y !== originVec.y - 1) continue;
 
-    // ✅ Check gap nodes (body clearance + feet space)
-    const gapNodes = [];
-    const airNodes = [];
+      // ❌ Broken or unsafe landing
+      if (!this.isStandable(landingNode)) continue;
 
-    let last = this.origin;
-    for (let i = 1; i <= dist; i++) {
-      const forward = last.forward(1);
+      // ✅ Check gap clearance
+      const bodyClear = [];
+      const feetGap = [];
 
-      if (forward.y !== this.origin.y) return; // no weird vertical drift
+      let last = originVec;
+      for (let i = 1; i <= distance; i++) {
+        const forward = last.forward(1);
 
-      gapNodes.push(forward.up(1)); // body space
-      airNodes.push(forward.down(1)); // feet space
-      last = forward;
+        // Parkour assumes flat until the final step up
+        if (forward.y !== originVec.y) break;
+
+        bodyClear.push(forward.up(1)); // body space
+        feetGap.push(forward.down(1)); // must be air/water
+        last = forward;
+      }
+
+      // console.log(`Feet gap for distance ${distance}:`, feetGap);
+
+      // ❌ Must be actual gap (air/water only)
+      if (!feetGap.every((node) => this.isAir(node) || this.isWater(node)))
+        continue;
+
+      // ❌ Body clearance must be fully walkable
+      if (!bodyClear.every((node) => this.isWalkable(node))) continue;
+
+      // ✅ Valid Parkour
+      const parkourNode = landingNode.clone();
+      parkourNode.attributes = {
+        name: this.name,
+        cost: this.COST_PARKOUR * distance,
+        nJump: distance === 1,
+        sJump: distance >= 2,
+        dist: distance,
+      };
+      neighbors.push(
+        this.makeMovement(parkourNode, parkourNode.attributes.cost)
+      );
+
+      break; // only add the shortest valid parkour move
     }
-
-    // ❌ Must be a clean gap (air or water only)
-    if (!airNodes.every((node) => this.isAir(node) || this.isWater(node)))
-      return;
-
-    // ❌ Body path must be walkable (headroom)
-    if (!gapNodes.every((node) => this.isWalkable(node))) return;
-
-    // ✅ All good: mark as Parkour jump
-    landingNode.attributes = {
-      name: this.name,
-      cost: this.COST_PARKOUR * dist,
-      sJump: true,
-      dist,
-    };
-
-    neighbors.push(this.makeMovement(landingNode, landingNode.attributes.cost));
   }
 }
 
@@ -77,65 +81,60 @@ class MoveForwardParkourUp extends Move {
     if (!this.config.parkour) return;
 
     for (const dir of cardinalDirections) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
-
-      // ✅ Must start grounded (no floating or stepping down)
-      const standNode = this.origin.down(1);
-      if (!this.isSolid(standNode) || this.isFence(standNode)) continue;
-      if (this.isWater(this.origin) || this.isWater(standNode)) continue;
-
-      for (let distance = 2; distance <= 3; distance++) {
-        // Parkour-Up is for 2+ blocks, not 1-block normal steps
-        const landingNode = this.origin.forward(distance).up(1);
-        this.addNeighbors(neighbors, distance, landingNode);
-      }
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      this.addNeighbors(neighbors, originVec);
     }
   }
 
-  addNeighbors(neighbors, distance, landingNode) {
-    const manager = this.manager;
-    const standingNode = landingNode.down(1);
+  addNeighbors(neighbors, originVec) {
+    const minDistance = 1;
+    const maxDistance = 3; // small parkour forward
 
-    // ❌ Must land exactly 1 block higher
-    if (landingNode.y !== this.origin.y + 1) return;
-    if (standingNode.y !== this.origin.y) return;
+    for (let distance = minDistance; distance <= maxDistance; distance++) {
+      const landingNode = originVec.forward(distance).up(1); // step up 1
+      const standingNode = landingNode.down(1); // block under feet
 
-    // ❌ Broken or unsafe landing
-    if (!this.isStandable(landingNode) || manager.isNodeBroken(standingNode))
-      return;
+      // ❌ Must land exactly 1 block higher
+      if (landingNode.y !== originVec.y + 1) continue;
+      if (standingNode.y !== originVec.y) continue;
 
-    // ✅ Check gap clearance
-    const bodyClear = [];
-    const feetGap = [];
+      // ❌ Landing must be standable
+      if (!this.isStandable(landingNode)) continue;
 
-    let last = this.origin;
-    for (let i = 1; i <= distance; i++) {
-      const forward = last.forward(1);
+      // ❌ Check gap clearance along path
+      const bodyClear = [];
+      const feetGap = [];
+      let last = originVec;
 
-      // Parkour-Up assumes flat until the final step up
-      if (forward.y !== this.origin.y) return;
+      for (let i = 1; i < distance; i++) {
+        const forward = last.forward(1);
+        if (forward.y !== originVec.y) break; // must stay flat until final jump
 
-      bodyClear.push(forward.up(1)); // body space
-      feetGap.push(forward.down(1)); // must be air/water
-      last = forward;
+        bodyClear.push(forward.up(1)); // head/body space
+        feetGap.push(forward.down(1)); // gap under feet
+        last = forward;
+      }
+
+      // must have actual gap
+      if (!feetGap.every((n) => this.isAir(n) || this.isWater(n))) continue;
+      if (!bodyClear.every((n) => this.isWalkable(n))) continue;
+
+      // ✅ Valid parkour up move
+      const parkourNode = landingNode.clone();
+      parkourNode.attributes = {
+        name: this.name,
+        cost: this.COST_PARKOUR * distance,
+        nJump: distance === 2 || 1,
+        sJump: distance > 2,
+        dist: distance,
+        up: true, // mark as upward jump
+      };
+
+      neighbors.push(
+        this.makeMovement(parkourNode, parkourNode.attributes.cost)
+      );
+      break; // only add shortest valid jump
     }
-
-    // ❌ Must be actual gap (air/water only)
-    if (!feetGap.every((node) => this.isAir(node) || this.isWater(node)))
-      return;
-
-    // ❌ Body clearance must be fully walkable
-    if (!bodyClear.every((node) => this.isWalkable(node))) return;
-
-    // ✅ Valid Parkour-Up
-    landingNode.attributes = {
-      name: this.name,
-      cost: this.COST_PARKOUR * distance,
-      sJump: true,
-      dist: distance,
-    };
-
-    neighbors.push(this.makeMovement(landingNode, landingNode.attributes.cost));
   }
 }
 
@@ -144,59 +143,60 @@ class MoveForwardParkourDown extends Move {
     if (!this.config.parkour) return;
 
     for (const dir of cardinalDirections) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
-
-      // Only check parkour jumps for gaps of 2-4 blocks
-      for (let distance = 2; distance <= 4; distance++) {
-        const landingNode = this.forward(distance).down(1);
-        this.addNeighbors(neighbors, distance, landingNode);
-      }
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      this.addNeighbors(neighbors, originVec);
     }
   }
 
-  addNeighbors(neighbors, distance, landingNode) {
-    const manager = this.manager;
+  addNeighbors(neighbors, originVec) {
+    const minDistance = 1;
+    const maxDistance = 2; // small parkour forward
 
-    const standingNode = this.forward(distance).down(2);
+    for (let distance = minDistance; distance <= maxDistance; distance++) {
+      const landingNode = originVec.forward(distance).down(1); // step down 1
+      const standingNode = landingNode.down(1); // block under feet
 
-    // Don’t parkour into a node queued to break
-    if (manager.isNodeBroken(this.origin) || manager.isNodeBroken(standingNode))
-      return;
+      // ❌ Must land exactly 1 block lower
+      if (landingNode.y !== originVec.y - 1) continue;
+      if (standingNode.y !== originVec.y - 2) continue; // floor under feet
 
-    // Must be able to stand where we land
-    if (!this.isStandable(landingNode)) return;
+      // ❌ Landing must be standable
+      if (!this.isStandable(landingNode)) continue;
 
-    // ✅ Ensure this is an actual gap, not a small drop
-    const belowLanding = landingNode.down(1);
-    let fallDistance = 0;
-    while (
-      fallDistance <= (this.config.maxFallDist ?? 3) &&
-      this.isAir(belowLanding)
-    ) {
-      fallDistance++;
-      belowLanding.y -= 1;
+      // ❌ Check gap clearance along path
+      const bodyClear = [];
+      const feetGap = [];
+      let last = originVec;
+
+      for (let i = 1; i <= distance; i++) {
+        const forward = last.forward(1);
+        if (forward.y !== originVec.y) break; // must stay flat until final drop
+
+        bodyClear.push(forward.up(1)); // head/body space
+        feetGap.push(forward.down(1)); // gap under feet
+        last = forward;
+      }
+
+      // must have actual gap (air/water)
+      if (!feetGap.every((n) => this.isAir(n) || this.isWater(n))) continue;
+      if (!bodyClear.every((n) => this.isWalkable(n))) continue;
+
+      // ✅ Valid parkour down move
+      const parkourNode = landingNode.clone();
+      parkourNode.attributes = {
+        name: this.name,
+        cost: this.COST_PARKOUR * distance,
+        nJump: distance === 2 || 1,
+        sJump: distance > 2,
+        dist: distance,
+        down: true, // mark as downward jump
+      };
+
+      neighbors.push(
+        this.makeMovement(parkourNode, parkourNode.attributes.cost)
+      );
+      break; // only add shortest valid jump
     }
-    if (fallDistance <= 1) return; // skip small drops, let MoveForwardDown handle them
-
-    // Check mid-air path is actually clear for the jump
-    for (let i = 2; i < distance; i++) {
-      const fwd = this.forward(i);
-      const feet = this.down(1, fwd);
-      const head = fwd; // jump arc
-      const under = this.down(2, fwd);
-
-      if (!this.isWalkable(feet) || !this.isWalkable(head)) return;
-      if (!(this.isAir(under) || this.isWater(under))) return;
-    }
-
-    landingNode.attributes = {
-      name: this.name,
-      cost: this.COST_PARKOUR * (distance - 1),
-      dist: distance,
-      ...(distance === 2 ? { nJump: true } : { sJump: true }),
-    };
-
-    neighbors.push(this.makeMovement(landingNode, landingNode.attributes.cost));
   }
 }
 
@@ -344,7 +344,7 @@ registerMoves([
   // parkour
   new MoveForwardParkour(50),
   // // up parkour
-  // new MoveForwardParkourUp(55),
+  new MoveForwardParkourUp(55),
 
   // // down parkour
   new MoveForwardParkourDown(55),

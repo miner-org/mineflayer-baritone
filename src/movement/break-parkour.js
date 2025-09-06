@@ -27,7 +27,7 @@ class MoveBreakParkour1 extends Move {
     if (
       this.isWalkable(spaceNode1) &&
       this.isWalkable(spaceNode2) &&
-      this.isBreakble(breakNode1, config) &&
+      this.isBreakable(breakNode1) &&
       !this.isSolid(breakNode2) &&
       this.isStandable(landingNode)
     ) {
@@ -41,8 +41,8 @@ class MoveBreakParkour1 extends Move {
     if (
       this.isWalkable(spaceNode1) &&
       this.isWalkable(spaceNode2) &&
-      this.isBreakble(breakNode1, config) &&
-      this.isBreakble(breakNode2, config) &&
+      this.isBreakable(breakNode1) &&
+      this.isBreakable(breakNode2) &&
       this.isStandable(landingNode)
     ) {
       this.break = true;
@@ -60,7 +60,7 @@ class MoveBreakParkour1 extends Move {
     let breakNode1 = this.up(1, landingNode);
     let breakNode2 = this.up(2, landingNode);
 
-    if (this.isBreakble(breakNode1, this.config)) {
+    if (this.isBreakable(breakNode1)) {
       neighbors.push({
         parent: landingNode,
         blocks: [breakNode1],
@@ -68,8 +68,8 @@ class MoveBreakParkour1 extends Move {
     }
 
     if (
-      this.isBreakble(breakNode1, this.config) &&
-      this.isBreakble(breakNode2, this.config)
+      this.isBreakable(breakNode1) &&
+      this.isBreakable(breakNode2)
     ) {
       neighbors.push({
         parent: landingNode,

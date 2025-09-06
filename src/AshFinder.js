@@ -283,8 +283,28 @@ class AshFinderConfig {
     ];
     this.climbableBlocks = ["vine", "ladder", "scaffolding"];
     this.closeInteractables = true;
+    
+    // Blocks that cannot be broken under any circumstances
+    this.unbreakableBlocks = [
+      "bedrock",
+      "barrier",
+      "command_block",
+      "chain_command_block",
+      "repeating_command_block", 
+      "structure_block",
+      "jigsaw",
+      "end_portal_frame",
+      "end_portal",
+      "nether_portal",
+      "spawner",
+      "end_gateway",
+      "structure_void",
+      "moving_piston",
+      "piston_head"
+    ];
 
-    this.thinkTimeout = 5000;
+    this.thinkTimeout = 15000;
+    this.debugMoves = false;
   }
 
   /**
@@ -312,6 +332,13 @@ class AshFinderConfig {
       "blackstone",
       "end_stone",
       "basalt",
+      "sandstone",
+      "diorite",
+      "granite",
+      "tuff",
+      "cobbled_deepslate",
+      "deepslate",
+      "calcite",
     ];
     this.interactableBlocks = [
       "oak_door",
@@ -336,8 +363,28 @@ class AshFinderConfig {
     ];
     this.climbableBlocks = ["vine", "ladder", "scaffolding"];
     this.closeInteractables = true;
+    
+    // Blocks that cannot be broken under any circumstances
+    this.unbreakableBlocks = [
+      "bedrock",
+      "barrier",
+      "command_block",
+      "chain_command_block",
+      "repeating_command_block", 
+      "structure_block",
+      "jigsaw",
+      "end_portal_frame",
+      "end_portal",
+      "nether_portal",
+      "spawner",
+      "end_gateway",
+      "structure_void",
+      "moving_piston",
+      "piston_head"
+    ];
 
     this.thinkTimeout = 5000;
+    this.debugMoves = false;
   }
 
   set(key, value) {

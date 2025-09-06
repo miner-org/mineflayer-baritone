@@ -9,7 +9,7 @@ class Goal {
     /**
      * @type {Vec3}
      */
-    this.position = position.floored(); // Already floored
+    this.position = new Vec3(position.x, position.y, position.z).floor();
     this.x = this.position.x + 0.5;
     this.y = this.position.y;
     this.z = this.position.z + 0.5;
@@ -191,7 +191,7 @@ class GoalLookAtBlock extends Goal {
   }
 
   isReached(nodePos) {
-    const node = nodePos.offset(0.5, this.entityHeight, 0.5);
+    const node = nodePos.offset(0, this.entityHeight, 0);
     if (
       node.distanceTo(this.position.offset(0.5, this.entityHeight, 0.5)) >
       this.reach

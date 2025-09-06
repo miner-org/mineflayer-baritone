@@ -28,6 +28,10 @@ bot.once("spawn", async () => {
   // bot.ashfinder.enableBreaking();
   pathExecutor = new PathExecutor(bot);
 
+  // bot.ashfinder.enableBreaking();
+  // bot.ashfinder.enablePlacing();
+  bot.ashfinder.config.debugMoves = true;
+
   bot.on("chat", async (username, message) => {
     if (username === bot.username) return;
 
