@@ -14,7 +14,6 @@ class DirectionalVec3 extends Vec3 {
     super(x, y, z);
     this.dir = direction;
     this.attributes = attributes;
-    this.blocks = [];
     this.cost = 0;
   }
 
@@ -130,17 +129,43 @@ const unbreakableBlocks = [
  */
 const moveClasses = [];
 
+/**
+ * Enhanced move registry with metadata
+ * @type {Map<string, {instance: Move, metadata: MoveMetadata}>}
+ */
+const moveRegistry = new Map();
+
+/**
+ * Move metadata for testing and introspection
+ * @typedef {Object} MoveMetadata
+ * @property {string} name - Move class name
+ * @property {string} category - Movement category (basic, parkour, breaking, etc.)
+ * @property {Array<string>} tags - Tags for filtering
+ * @property {string} description - Human readable description
+ * @property {Object} testConfig - Default test configuration
+ */
+
 class Move {
-  constructor(priority = 50) {
+  constructor(priority = 50, metadata = {}) {
     this.name = this.constructor.name;
     this.priority = priority; // Lower number = higher priority
+    
+    // Enhanced metadata for testing and introspection
+    this.metadata = {
+      name: this.name,
+      category: metadata.category || 'basic',
+      tags: metadata.tags || [],
+      description: metadata.description || `${this.name} movement`,
+      testConfig: metadata.testConfig || {},
+      ...metadata
+    };
 
     // Movement costs
     this.COST_NORMAL = 1;
     this.COST_UP = 1;
     this.COST_FALL = 1;
-    this.COST_BREAK = 2.5;
-    this.COST_PLACE = 2.5;
+    this.COST_BREAK = 1.5;
+    this.COST_PLACE = 1.5;
     this.COST_SWIM = 2.2;
     this.COST_SWIM_START = 2;
     this.COST_SWIM_EXIT = 2;
@@ -152,6 +177,10 @@ class Move {
 
   generate(cardinalDirections, origin, neighbors) {
     // To be implemented in subclasses
+  }
+
+  log(...args) {
+    if (this.config.debugMoves) console.log(`[Move:${this.name}]`, ...args);
   }
 
   setValues(bot, config, manager, node = null) {
@@ -236,7 +265,8 @@ class Move {
       this.isSolid(below) &&
       this.isFullBlock(below) &&
       this.isWalkable(node) &&
-      !this.isLava(node)
+      !this.isLava(node) &&
+      !this.isClimbable(below)
     );
   }
 
@@ -292,6 +322,7 @@ class Move {
   isFence(node) {
     const block = this.getBlock(node);
     if (!block) return false;
+    if (this.isInteractable(node)) return false;
     return ["fence", "wall", "cobblestone_wall"].some((n) =>
       block.name.includes(n)
     );
@@ -353,6 +384,75 @@ class Move {
   offset(dx, dy, dz, node = null) {
     return (node ?? this.origin).offset(dx, dy, dz);
   }
+
+  // === Testing and Introspection Methods ===
+
+  /**
+   * Get all cost constants as an object
+   * @returns {Object} All cost constants
+   */
+  getCostConstants() {
+    const constants = {};
+    for (const key in this) {
+      if (key.startsWith('COST_')) {
+        constants[key] = this[key];
+      }
+    }
+    return constants;
+  }
+
+  /**
+   * Get current move state for testing
+   * @returns {Object} Current state including config, bot, manager
+   */
+  getCurrentState() {
+    return {
+      name: this.name,
+      priority: this.priority,
+      metadata: this.metadata,
+      costs: this.getCostConstants(),
+      hasBot: !!this.bot,
+      hasConfig: !!this.config,
+      hasManager: !!this.manager,
+      currentNode: this.node,
+      origin: this.origin
+    };
+  }
+
+  /**
+   * Get move configuration requirements
+   * @returns {Object} Required configuration flags
+   */
+  getConfigRequirements() {
+    const requirements = {};
+    const methodString = this.generate.toString();
+    
+    // Detect common config requirements from method body
+    if (methodString.includes('breakBlocks')) requirements.breakBlocks = true;
+    if (methodString.includes('placeBlocks')) requirements.placeBlocks = true;
+    if (methodString.includes('parkour')) requirements.parkour = true;
+    if (methodString.includes('swimming')) requirements.swimming = true;
+    if (methodString.includes('fly')) requirements.fly = true;
+    
+    return requirements;
+  }
+
+  /**
+   * Check if this move can run with given configuration
+   * @param {Object} config - Test configuration
+   * @returns {boolean} Whether move can run
+   */
+  canRunWithConfig(config) {
+    const requirements = this.getConfigRequirements();
+    
+    for (const [requirement, needed] of Object.entries(requirements)) {
+      if (needed && !config[requirement]) {
+        return false;
+      }
+    }
+    
+    return true;
+  }
 }
 
 function bestHarvestTool(bot, block) {
@@ -381,8 +481,77 @@ function bestHarvestTool(bot, block) {
   return bestTool;
 }
 
+/**
+ * Register moves with enhanced metadata support
+ * @param {Array<Move>} moves - Array of move instances
+ */
 function registerMoves(moves) {
   moveClasses.push(...moves);
+  
+  // Enhanced registry with metadata
+  for (const move of moves) {
+    moveRegistry.set(move.name, {
+      instance: move,
+      metadata: move.metadata
+    });
+  }
+}
+
+/**
+ * Get all registered moves
+ * @returns {Array<Move>} All registered move instances
+ */
+function getAllMoves() {
+  return [...moveClasses];
+}
+
+/**
+ * Get registered moves by category
+ * @param {string} category - Category to filter by
+ * @returns {Array<Move>} Moves in the specified category
+ */
+function getMovesByCategory(category) {
+  return [...moveRegistry.values()]
+    .filter(entry => entry.metadata.category === category)
+    .map(entry => entry.instance);
+}
+
+/**
+ * Get registered moves by tag
+ * @param {string} tag - Tag to filter by
+ * @returns {Array<Move>} Moves with the specified tag
+ */
+function getMovesByTag(tag) {
+  return [...moveRegistry.values()]
+    .filter(entry => entry.metadata.tags.includes(tag))
+    .map(entry => entry.instance);
+}
+
+/**
+ * Get move metadata by name
+ * @param {string} name - Move class name
+ * @returns {MoveMetadata|null} Move metadata or null if not found
+ */
+function getMoveMetadata(name) {
+  const entry = moveRegistry.get(name);
+  return entry ? entry.metadata : null;
+}
+
+/**
+ * Get all move names
+ * @returns {Array<string>} All registered move names
+ */
+function getAllMoveNames() {
+  return [...moveRegistry.keys()];
+}
+
+/**
+ * Get moves that can run with given configuration
+ * @param {Object} config - Configuration to check against
+ * @returns {Array<Move>} Moves compatible with the configuration
+ */
+function getCompatibleMoves(config) {
+  return [...moveClasses].filter(move => move.canRunWithConfig(config));
 }
 
 function getNeighbors2(node, config, manager, bot) {
@@ -449,6 +618,20 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-module.exports = { getNeighbors2, Move, registerMoves, DirectionalVec3, clamp };
+module.exports = { 
+  getNeighbors2, 
+  Move, 
+  registerMoves, 
+  DirectionalVec3, 
+  clamp,
+  // Enhanced move system exports
+  getAllMoves,
+  getMovesByCategory,
+  getMovesByTag,
+  getMoveMetadata,
+  getAllMoveNames,
+  getCompatibleMoves,
+  moveRegistry
+};
 
 requireDir("./");

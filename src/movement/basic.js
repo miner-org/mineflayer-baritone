@@ -10,28 +10,21 @@ class MoveForward extends Move {
   }
 
   addNeighbors(neighbors, node, originVec) {
-    const below = node.down(1); // block we stand on for the target
-    const head = node.up(1); // head clearance
+    const below = node.down(1);
+    const head = node.up(1);
     const canPlace = this.config.placeBlocks && this.hasScaffoldingBlocks();
     const canBreak = this.config.breakBlocks;
 
-    const originFloorY = Math.floor(originVec.y) - 1; // block Y we're standing on at origin
-    const targetFloorY = Math.floor(below.y); // candidate floor Y
+    const originFloorY = Math.floor(originVec.y) - 1;
+    const targetFloorY = Math.floor(below.y);
 
-    // === STRICT FLAT RULE ===
-    // MoveForward is *only* flattened horizontal movement.
-    if (targetFloorY !== originFloorY) {
-      if (this.config.debugMoves)
-        console.debug(
-          `[MoveForward] skip: not same-level (originFloor=${originFloorY} targetFloor=${targetFloorY}) node=${node.toString()}`
-        );
-      return;
-    }
+    if (targetFloorY !== originFloorY) return;
 
     const isSolidBelow = this.isSolid(below);
     const isWalkableBelow = isSolidBelow && !this.manager.isNodeBroken(below);
 
-    // Only scaffold if it's actually a gap at same level and target spot is empty
+    const interactable = this.isInteractable(node);
+
     const canScaffold =
       !isSolidBelow &&
       this.isAir(node) &&
@@ -40,116 +33,99 @@ class MoveForward extends Move {
       !this.manager.isAreaMarkedNode(below);
 
     const canStand = isWalkableBelow || canScaffold;
-    if (!canStand) {
-      if (this.config.debugMoves)
-        console.debug(`[MoveForward] can't stand at ${node.toString()}`);
-      return;
+    if (!canStand && !interactable) return;
+
+    if (interactable) {
+      this.log("Node is interactable");
     }
 
-    // init attributes
     node.attributes = { name: this.name, break: [], place: [] };
 
-    // add scaffold if needed
     if (canScaffold) node.attributes.place.push(below.clone());
-
-    // if still can't stand after optional scaffold, bail
     if (!isSolidBelow && node.attributes.place.length === 0) return;
-
-    // fences are always invalid
     if (this.isFence(node)) return;
 
-    const interactable = this.isInteractable(node);
-
-    // console.log(interactable);
-
-    // --- FEET (node) handling ---
+    // --- FEET check ---
     if (!this.isAir(node) && !interactable) {
       if (
         canBreak &&
         this.isBreakable(node) &&
         !this.manager.isNodeBroken(node)
       ) {
-        // breaking the feet block is allowed — but it MUST NOT change the floor level
-        // (we already enforce same-level above, so below must still be originFloor)
         node.attributes.break.push(node.clone());
       } else {
-        // unbreakable block in feet => cannot move here
-        if (this.config.debugMoves)
-          console.debug(
-            `[MoveForward] feet blocked/unbreakable: ${node.toString()}`
-          );
         return;
       }
     }
 
-    // --- HEAD handling ---
+    // --- HEAD check ---
     if (!this.isAir(head) && !interactable) {
-      if (
-        !canBreak ||
-        !this.isBreakable(head) ||
-        this.manager.isNodeBroken(head)
-      ) {
-        if (this.config.debugMoves)
-          console.debug(
-            `[MoveForward] head blocked/unbreakable: ${head.toString()}`
-          );
-        return;
+      // ✅ allow crouch under slab/trapdoor instead of breaking
+      if (this.isCrouchPassable(this.getBlock(head))) {
+        node.attributes.crouch = true;
+        // do NOT push to break[]
+      } else {
+        // fallback to break-or-deny
+        if (
+          !canBreak ||
+          !this.isBreakable(head) ||
+          this.manager.isNodeBroken(head)
+        ) {
+          return;
+        }
+        const breakingFeet = node.attributes.break.length > 0;
+        const feetIsAir = this.isAir(node);
+
+        if (!breakingFeet && !feetIsAir) return;
+        node.attributes.break.push(head.clone());
       }
-
-      const breakingFeet = node.attributes.break.length > 0;
-      const feetIsAir = this.isAir(node);
-
-      // disallow only-head-break when feet is solid and not being broken (avoid acting as step-up)
-      if (!breakingFeet && !feetIsAir) {
-        if (this.config.debugMoves)
-          console.debug(
-            `[MoveForward] refuse only-head-break at ${node.toString()}`
-          );
-        return;
-      }
-
-      node.attributes.break.push(head.clone());
     }
 
-    // --- final sanity: ensure support underfoot after planned actions ---
+    // --- support sanity ---
     if (node.attributes.break.some((b) => b.equals(node))) {
-      // we're breaking the feet block — ensure there's a solid block underfoot (or we placed one)
       const supportBelowSolid =
         this.isSolid(below) && !this.manager.isNodeBroken(below);
       const willPlaceBelow = node.attributes.place.length > 0;
-      if (!supportBelowSolid && !willPlaceBelow) {
-        if (this.config.debugMoves)
-          console.debug(
-            `[MoveForward] would fall after breaking feet: ${node.toString()}`
-          );
-        return;
-      }
+      if (!supportBelowSolid && !willPlaceBelow) return;
     } else {
-      // feet not being broken — must be standable (or scaffolding already planned) unless it's an interactable
       if (
         !this.isStandable(node) &&
         node.attributes.place.length === 0 &&
-        !interactable
+        !interactable &&
+        !node.attributes.crouch
       ) {
-        if (this.config.debugMoves)
-          console.debug(
-            `[MoveForward] not standable after checks: ${node.toString()}`
-          );
         return;
       }
     }
 
-    // cost calc
+    // cost
     const totalCost =
       this.COST_NORMAL +
       (node.attributes.break.length || 0) * this.COST_BREAK +
-      (node.attributes.place.length || 0) * this.COST_PLACE;
+      (node.attributes.place.length || 0) * this.COST_PLACE +
+      (node.attributes.crouch ? this.COST_CROUCH || 0.5 : 0); // crouch penalty if you want
 
     node.attributes.cost = totalCost;
     node.attributes.interact = interactable;
-    // console.log(node.attributes);
 
     neighbors.push(this.makeMovement(node, totalCost));
+  }
+
+  /**
+   * Returns true if block is a slab/trapdoor/etc. you can sneak under
+   */
+  isCrouchPassable(block) {
+    if (!block) return false;
+    const name = block.name;
+    if (!name) return false;
+
+    // this.log("checking crouch passable for", block);
+
+    return (
+      name.includes("slab") ||
+      name.includes("trapdoor") ||
+      name.includes("carpet")
+    );
   }
 
   canPlaceBlock(pos) {
@@ -221,45 +197,46 @@ class MoveForwardUp extends Move {
    * Add valid upward movement neighbors
    * @param {Array} neighbors
    * @param {DirectionalVec3} node - the target position (feet)
-   * @param {DirectionalVec3} originVec - the original position (for Y comparison)
+   * @param {DirectionalVec3} originVec - the original position (for dir reference)
    */
   addNeighbors(neighbors, node, originVec) {
-    const below = node.down(1); // block we stand on for the target
-    const above = node.up(1);
-    const head = originVec.up(2);
+    const below = node.down(1); // landing support
+    const head = node.up(1); // where your head will be after landing
+    const above = originVec.up(2);
 
     const canPlace = this.config.placeBlocks && this.hasScaffoldingBlocks();
     const canBreak = this.config.breakBlocks;
 
-    //check if we can place a block under us if needed
-    const canScaffold =
-      !this.isSolid(below) && this.canPlaceBlock(below) && canPlace;
-
     node.attributes = { name: this.name, break: [], place: [], nJump: true };
 
-    if (canScaffold) node.attributes.place.push(below.clone());
+    // scaffold if needed
+    if (!this.isSolid(below) && canPlace && this.canPlaceBlock(below)) {
+      node.attributes.place.push(below.clone());
+    }
 
-    let testNodes = [node, head, above];
+    // mark breakables
     if (canBreak) {
-      for (const testNode of testNodes) {
+      for (const testNode of [node, head, above]) {
         if (this.isSolid(testNode) && this.isBreakable(testNode)) {
           node.attributes.break.push(testNode.clone());
         }
       }
     }
 
-    if (!canScaffold && this.isAir(below)) return;
+    // landing must be standable (either solid below or scaffolded)
+    if (!this.isStandable(node)) return;
 
-    if (!canBreak && !this.isStandable(node)) return;
+    // head + space above must be air OR breakable
+    if (!this.isAir(head) && !(canBreak && this.isBreakable(head))) return;
+    if (!this.isAir(above) && !(canBreak && this.isBreakable(above))) return;
 
-    if (!canBreak && !this.isAir(head)) return;
-
+    // cost calc
     const cost =
       this.COST_UP +
       node.attributes.break.length * this.COST_BREAK +
       node.attributes.place.length * this.COST_PLACE;
-    node.attributes.cost = cost;
 
+    node.attributes.cost = cost;
     neighbors.push(this.makeMovement(node, cost));
   }
 
@@ -405,9 +382,35 @@ class MoveDiagonalUp extends Move {
 }
 
 registerMoves([
-  new MoveForward(10), // Basic walk = low cost priority
-  new MoveDiagonal(10),
-  new MoveForwardUp(10), // Step/jump up slightly higher priority
-  new MoveForwardDown(10),
-  new MoveDiagonalUp(10),
+  new MoveForward(10, {
+    category: "basic",
+    tags: ["ground", "horizontal", "breaking", "placing"],
+    description:
+      "Basic forward movement on flat ground with optional breaking/placing",
+    testConfig: { breakBlocks: true, placeBlocks: true },
+  }),
+  new MoveDiagonal(10, {
+    category: "basic",
+    tags: ["ground", "diagonal"],
+    description: "Diagonal movement on flat ground",
+    testConfig: { breakBlocks: false, placeBlocks: false },
+  }),
+  new MoveForwardUp(10, {
+    category: "basic",
+    tags: ["vertical", "up", "jumping", "breaking", "placing"],
+    description: "Step up movement with jump and optional breaking/placing",
+    testConfig: { breakBlocks: true, placeBlocks: true },
+  }),
+  new MoveForwardDown(10, {
+    category: "basic",
+    tags: ["vertical", "down", "falling"],
+    description: "Movement down to lower level with falling",
+    testConfig: { breakBlocks: false, placeBlocks: false },
+  }),
+  new MoveDiagonalUp(10, {
+    category: "basic",
+    tags: ["diagonal", "vertical", "up"],
+    description: "Diagonal upward movement",
+    testConfig: { breakBlocks: false, placeBlocks: false },
+  }),
 ]);

@@ -33,6 +33,8 @@ class MoveLadderExit extends Move {
   generate(cardinalDirections, origin, neighbors) {
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      if (!this.isClimbable(originVec)) continue;
+
       const node = originVec.offset(dir.x, 1, dir.z);
       if (this.isStandable(node)) {
         node.attributes["name"] = this.name + "_up";
@@ -105,8 +107,84 @@ class MoveLadderClimb extends Move {
   }
 }
 
+class MoveLadderDescend extends Move {
+  generate(cardinalDirections, origin, neighbors) {
+    const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
+      x: 1,
+      z: 0,
+    });
+
+    //we are most likely coming from MoveLadderEnterDescend
+    const node = originVec.down(1);
+
+    // We only consider climbing if the bot is currently on a ladder block or next to one
+    if (!this.isClimbable(node)) return;
+
+    // From the origin, climb downwards along the ladder stack
+    let climbPos = node.clone();
+
+    let lastValid = climbPos.clone(); // Start with origin
+
+    while (true) {
+      if (!this.isClimbable(climbPos)) break;
+      const belowPos = climbPos.down(1);
+      if (!(this.isAir(belowPos) || this.isClimbable(belowPos))) break;
+
+      lastValid = climbPos.clone();
+
+      climbPos = climbPos.down(1);
+    }
+
+    lastValid.attributes = lastValid.attributes || {};
+    lastValid.attributes["name"] = this.name;
+    lastValid.attributes["ladder"] = true;
+    lastValid.attributes["descend"] = true;
+    lastValid.attributes["cost"] = this.COST_LADDER;
+    neighbors.push(
+      this.makeMovement(lastValid, this.COST_LADDER ?? this.COST_NORMAL + 1)
+    );
+  }
+}
+
+class MoveLadderEnterDescend extends Move {
+  generate(cardinalDirections, origin, neighbors) {
+    for (const dir of cardinalDirections) {
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const node = originVec.offset(dir.x, 0, dir.z);
+      this.addNeighbors(neighbors, node);
+    }
+  }
+
+  /**
+   *
+   * @param {DirectionalVec3[]} neighbors
+   * @param {DirectionalVec3} node
+   */
+  addNeighbors(neighbors, node) {
+    const below = node.down(1);
+
+    if (!this.isWalkable(node)) return;
+
+    if (!this.isClimbable(below)) return;
+
+    // console.log(this.getBlock(below));
+
+    const target = node.clone();
+
+    target.attributes["name"] = this.name;
+    target.attributes["ladder"] = true;
+    target.attributes["descend"] = true;
+    target.attributes["cost"] = this.COST_LADDER ?? this.COST_NORMAL + 1;
+    neighbors.push(
+      this.makeMovement(target, this.COST_LADDER ?? this.COST_NORMAL + 1)
+    );
+  }
+}
+
 registerMoves([
   new MoveLadderEnter(10),
   new MoveLadderExit(10),
   new MoveLadderClimb(10),
+  new MoveLadderDescend(10),
+  new MoveLadderEnterDescend(10),
 ]);

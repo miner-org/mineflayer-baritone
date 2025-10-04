@@ -33,6 +33,12 @@ class EasyMoveTestRunner {
       await this.runAllTests();
     } else if (args[0] === '--list') {
       this.listAvailableTests();
+    } else if (args[0] === '--list-moves') {
+      this.listAllMoves();
+    } else if (args[0] === '--auto-test') {
+      await this.runAutoTests();
+    } else if (args[0] === '--analyze') {
+      this.analyzeMoves(args[1]);
     } else if (args[0] === '--create') {
       await this.createCustomTest(args[1] || 'custom');
     } else if (args[0] === '--help') {
@@ -119,20 +125,26 @@ class EasyMoveTestRunner {
     console.log('===============================\n');
     
     console.log('Commands:');
-    console.log('  node test_moves.js                    Run all tests with visual output');
+    console.log('  node test_moves.js                    Run all predefined tests');
     console.log('  node test_moves.js [test_name]        Run a specific test scenario');
-    console.log('  node test_moves.js --list             List all available test scenarios');
+    console.log('  node test_moves.js --list             List available test scenarios');
+    console.log('  node test_moves.js --list-moves       List all registered moves with metadata');
+    console.log('  node test_moves.js --auto-test        Auto-generate and run tests for all moves');
+    console.log('  node test_moves.js --analyze [move]   Analyze a specific move\'s variables and requirements');
     console.log('  node test_moves.js --create [name]    Create a custom test interactively');
     console.log('  node test_moves.js --help             Show this help message\n');
     
     console.log('Examples:');
     console.log('  node test_moves.js basicForward       # Test basic forward movement');
-    console.log('  node test_moves.js moveForwardUpChain # Test the MoveForwardUp chain issue');
-    console.log('  node test_moves.js parkourGap         # Test parkour jumping\n');
+    console.log('  node test_moves.js --auto-test        # Test all registered moves automatically');
+    console.log('  node test_moves.js --analyze MoveForward  # Analyze MoveForward variables');
+    console.log('  node test_moves.js --list-moves       # See all available moves\n');
     
     console.log('Test Features:');
     console.log('  ✨ Visual ASCII representation of world and moves');
     console.log('  🎯 Validation of expected vs actual results');
+    console.log('  🤖 Auto-discovery of all registered moves');
+    console.log('  🔍 Variable access and move introspection');
     console.log('  ⏱️  Performance timing');
     console.log('  📊 Detailed move analysis (breaks, places, costs)');
     console.log('  🔍 Virtual blocks testing for pathfinding chains');
@@ -222,6 +234,124 @@ class EasyMoveTestRunner {
       console.error('❌ Error creating custom test:', error.message);
     } finally {
       rl.close();
+    }
+  }
+
+  /**
+   * List all registered moves with metadata
+   */
+  listAllMoves() {
+    console.log('🔍 All Registered Moves:\n');
+    
+    const allMoves = this.testRunner.getAllRegisteredMoves();
+    
+    // Group by category
+    const categories = {};
+    for (const { move, metadata } of allMoves) {
+      if (!categories[metadata.category]) {
+        categories[metadata.category] = [];
+      }
+      categories[metadata.category].push({ move, metadata });
+    }
+    
+    for (const [category, moves] of Object.entries(categories)) {
+      console.log(`💻 ${category.toUpperCase()} MOVES:`);
+      
+      for (const { move, metadata } of moves) {
+        console.log(`  🔄 ${move.name}`);
+        console.log(`     Description: ${metadata.description}`);
+        console.log(`     Priority: ${move.priority}`);
+        console.log(`     Tags: [${metadata.tags.join(', ')}]`);
+        console.log(`     Requirements: ${JSON.stringify(move.getConfigRequirements())}`);
+        console.log('');
+      }
+    }
+    
+    console.log(`Total: ${allMoves.length} moves registered`);
+  }
+
+  /**
+   * Run auto-generated tests for all moves
+   */
+  async runAutoTests() {
+    console.log('🤖 Running auto-generated tests for all registered moves...\n');
+    
+    try {
+      const results = await this.testRunner.runAutoTests({ visual: false });
+      
+      // Export results
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `auto-test-results-${timestamp}.json`;
+      
+      const exportData = {
+        timestamp: new Date().toISOString(),
+        type: 'auto-generated',
+        results: results
+      };
+      
+      require('fs').writeFileSync(filename, JSON.stringify(exportData, null, 2));
+      console.log(`\n📄 Auto-test results saved to: ${filename}`);
+      
+    } catch (error) {
+      console.error('❌ Failed to run auto-tests:', error.message);
+      process.exit(1);
+    }
+  }
+
+  /**
+   * Analyze move variables and requirements
+   */
+  analyzeMoves(moveName) {
+    if (!moveName) {
+      console.log('🔍 Available moves to analyze:');
+      const allMoves = this.testRunner.getAllRegisteredMoves();
+      allMoves.forEach(({ move }) => {
+        console.log(`  - ${move.name}`);
+      });
+      console.log('\nUsage: node test_moves.js --analyze [MoveName]');
+      return;
+    }
+    
+    try {
+      const analysis = this.testRunner.analyzeMoveVariables(moveName);
+      
+      console.log(`🔍 Analysis for: ${analysis.name}\n`);
+      
+      console.log('🏷️ Metadata:');
+      console.log(`  Category: ${analysis.metadata.category}`);
+      console.log(`  Description: ${analysis.metadata.description}`);
+      console.log(`  Tags: [${analysis.metadata.tags.join(', ')}]`);
+      console.log('');
+      
+      console.log('⚙️ Current State:');
+      console.log(`  Priority: ${analysis.state.priority}`);
+      console.log(`  Has Bot: ${analysis.state.hasBot}`);
+      console.log(`  Has Config: ${analysis.state.hasConfig}`);
+      console.log(`  Has Manager: ${analysis.state.hasManager}`);
+      console.log('');
+      
+      console.log('💰 Cost Constants:');
+      for (const [key, value] of Object.entries(analysis.costs)) {
+        console.log(`  ${key}: ${value}`);
+      }
+      console.log('');
+      
+      console.log('📋 Configuration Requirements:');
+      const reqs = Object.keys(analysis.requirements);
+      if (reqs.length > 0) {
+        reqs.forEach(req => console.log(`  - ${req}: required`));
+      } else {
+        console.log('  - No specific requirements detected');
+      }
+      console.log('');
+      
+      console.log('✅ Compatibility:');
+      for (const [config, canRun] of Object.entries(analysis.canRunWith)) {
+        console.log(`  ${config}: ${canRun ? '✅' : '❌'}`);
+      }
+      
+    } catch (error) {
+      console.error(`❌ Error analyzing move '${moveName}':`, error.message);
     }
   }
 }

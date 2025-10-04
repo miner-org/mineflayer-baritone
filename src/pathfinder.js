@@ -170,6 +170,7 @@ class Cell {
 async function Astar(
   start,
   endPos,
+  goal,
   bot,
   endFunc,
   config,
@@ -177,7 +178,8 @@ async function Astar(
   debug = false,
   searchController = null
 ) {
-  let end = endPos.clone();
+  const getEnd = () => goal.getPosition();
+
   let startPos = start.floored().offset(0.5, 0, 0.5);
 
   if (bot.blockAt(startPos).name === "farmland")
@@ -197,7 +199,7 @@ async function Astar(
 
   const startNode = new Cell(startPos);
   startNode.gCost = 0;
-  startNode.hCost = hCost1(startPos, end);
+  startNode.hCost = hCost1(startPos, getEnd());
   startNode.fCost = startNode.gCost + startNode.hCost;
   startNode.virtualBlocks = new Map([]);
 
@@ -277,7 +279,7 @@ async function Astar(
       // }
 
       if (debug) {
-        const distToGoal = currentNode.worldPos.distanceTo(end);
+        const distToGoal = currentNode.worldPos.distanceTo(endPos);
         const focusPhase = Math.min(1, Math.max(0, 1 - distToGoal / 15));
 
         // Log the key factors for the node being processed
@@ -308,7 +310,7 @@ async function Astar(
       closedSet.add(defaultHash(currentNode.worldPos));
 
       // Track best node for partial path returns
-      const h = hCost1(currentNode.worldPos, end);
+      const h = hCost1(currentNode.worldPos, getEnd());
       const fromStart = currentNode.worldPos.distanceTo(startPos);
       if (
         h < bestScore ||
@@ -413,7 +415,10 @@ async function Astar(
 
     neighborData.virtualBlocks = overlay;
 
-    const tempG = currentNode.gCost + neighborData.cost;
+    let tempG = currentNode.gCost + neighborData.cost;
+    applyHazardPenalty(neighborData, bot);
+    tempG = currentNode.gCost + neighborData.cost;
+
     const hash = defaultHash(neighborData);
     let neighbor = openSet.get(hash);
 
@@ -426,8 +431,8 @@ async function Astar(
       );
       neighbor.direction = neighborData.dir;
       neighbor.gCost = tempG;
-      neighbor.hCost = hCost1(neighborData, end);
-      neighbor.fCost = computeScore(neighbor, end, startPos);
+      neighbor.hCost = hCost1(neighborData, getEnd());
+      neighbor.fCost = computeScore(neighbor, getEnd(), startPos);
       neighbor.parent = currentNode;
       neighbor.moveName = neighborData.attributes.name;
       neighbor.attributes = neighborData.attributes;
@@ -438,14 +443,50 @@ async function Astar(
       processedAny = true;
     } else if (tempG < neighbor.gCost) {
       neighbor.gCost = tempG;
-      neighbor.hCost = hCost1(neighborData, end);
-      neighbor.fCost = computeScore(neighbor, end, startPos);
+      neighbor.hCost = hCost1(neighborData, getEnd());
+      neighbor.fCost = computeScore(neighbor, getEnd(), startPos);
       neighbor.parent = currentNode;
       neighbor.virtualBlocks = neighborData.virtualBlocks;
       openList.update(neighbor);
       processedAny = true;
     }
   }
+}
+
+function getProximityPenalty(pos, bot, blockName, maxRadius, maxPenalty) {
+  // Scan within radius and return the highest penalty based on distance
+  let highestPenalty = 0;
+  for (let dx = -maxRadius; dx <= maxRadius; dx++) {
+    for (let dy = -maxRadius; dy <= maxRadius; dy++) {
+      for (let dz = -maxRadius; dz <= maxRadius; dz++) {
+        const checkPos = pos.offset(dx, dy, dz);
+        const block = bot.blockAt(checkPos);
+        if (!block || block.name !== blockName) continue;
+
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const penalty = Math.max(0, maxPenalty * (1 - distance / maxRadius));
+        if (penalty > highestPenalty) highestPenalty = penalty;
+      }
+    }
+  }
+  return highestPenalty;
+}
+
+/**
+ *
+ * @param {DirectionalVec3} neighborData
+ * @param {import("mineflayer").Bot} bot
+ */
+function applyHazardPenalty(neighborData, bot) {
+  const pos = new Vec3(neighborData.x, neighborData.y, neighborData.z);
+
+  // Lava penalty: stronger when closer
+  const lavaPenalty = getProximityPenalty(pos, bot, "lava", 2, 8);
+  neighborData.cost += lavaPenalty;
+
+  // Cactus penalty: stronger when closer
+  const cactusPenalty = getProximityPenalty(pos, bot, "cactus", 2, 4);
+  neighborData.cost += cactusPenalty;
 }
 
 /**
@@ -608,14 +649,17 @@ function hCost1(node, goal) {
   const dy = Math.abs(goal.y - node.y);
   const dz = Math.abs(goal.z - node.z);
 
-  // sort distances so we can apply 3D diagonal weighting
   const [min, mid, max] = [dx, dy, dz].sort((a, b) => a - b);
 
-  const diag3Cost = Math.sqrt(3); // moving along x+y+z diagonal
-  const diag2Cost = Math.SQRT2; // moving along 2-axis diagonal
+  const diag3Cost = Math.sqrt(3);
+  const diag2Cost = Math.SQRT2;
 
-  // 3D diagonal heuristic formula
-  return diag3Cost * min + diag2Cost * (mid - min) + (max - mid);
+  let h = diag3Cost * min + diag2Cost * (mid - min) + (max - mid);
+
+  // tiny bias: prefer nodes that aren’t “directly under” the goal
+  // h += (dx + dz) * 0.05;
+
+  return h;
 }
 
 function averageDistance(node, goal) {

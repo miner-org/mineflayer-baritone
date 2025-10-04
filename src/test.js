@@ -4,7 +4,7 @@ const inject = require("./loader");
 const Vec3 = require("vec3").Vec3;
 const { argv } = require("process");
 // const { elytrafly } = require("mineflayer-elytrafly");
-const { GoalNear, GoalExact } = require("./goal");
+const { GoalNear, GoalExact, GoalAvoid } = require("./goal");
 const PathExecutor = require("./executor");
 const sussyVersions = ["1.21", "1.21.1", "1.21.2", "1.21.3", "1.21.4"];
 
@@ -361,6 +361,13 @@ bot.once("spawn", async () => {
         targetGoal: goal,
         bestNode: result.bestNode,
       });
+    }
+
+    if (command === "f!avoid") {
+      //i think this goal works by finding a postion that is away from the target
+
+      const goal = new GoalAvoid(bot.entity.position, 10, bot);
+      await bot.ashfinder.goto(goal);
     }
   });
 

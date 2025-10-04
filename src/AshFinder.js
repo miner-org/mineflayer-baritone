@@ -39,7 +39,7 @@ class AshFinderPlugin extends EventEmitter {
   async generatePath(goal, excludedPositions = []) {
     const endFunc = createEndFunc(goal);
     const bot = this.bot;
-    const position = goal.position.clone();
+    const position = goal.getPosition().clone();
 
     // ensure controller exists for this run
     this._searchController = this._searchController || {};
@@ -48,6 +48,7 @@ class AshFinderPlugin extends EventEmitter {
     const result = await astar(
       bot.entity.position.clone(),
       position,
+      goal,
       bot,
       endFunc,
       this.config,
@@ -238,7 +239,7 @@ class AshFinderPlugin extends EventEmitter {
 class AshFinderConfig {
   constructor() {
     // blocks to avoid breaking
-    this.blocksToAvoid = ["crafting_table", "chest", "furnace", "gravel"];
+    this.blocksToAvoid = ["crafting_table", "chest", "furnace"];
     this.blocksToStayAway = ["cactus", "cobweb", "lava", "gravel"];
     this.avoidDistance = 8;
     this.swimming = true;
