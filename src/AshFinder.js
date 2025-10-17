@@ -284,14 +284,14 @@ class AshFinderConfig {
     ];
     this.climbableBlocks = ["vine", "ladder", "scaffolding"];
     this.closeInteractables = true;
-    
+
     // Blocks that cannot be broken under any circumstances
     this.unbreakableBlocks = [
       "bedrock",
       "barrier",
       "command_block",
       "chain_command_block",
-      "repeating_command_block", 
+      "repeating_command_block",
       "structure_block",
       "jigsaw",
       "end_portal_frame",
@@ -301,10 +301,11 @@ class AshFinderConfig {
       "end_gateway",
       "structure_void",
       "moving_piston",
-      "piston_head"
+      "piston_head",
     ];
 
-    this.thinkTimeout = 15000;
+    this.thinkTimeout = 30000;
+    this.maxPartialPaths = 5;
     this.debugMoves = false;
   }
 
@@ -364,14 +365,14 @@ class AshFinderConfig {
     ];
     this.climbableBlocks = ["vine", "ladder", "scaffolding"];
     this.closeInteractables = true;
-    
+
     // Blocks that cannot be broken under any circumstances
     this.unbreakableBlocks = [
       "bedrock",
       "barrier",
       "command_block",
       "chain_command_block",
-      "repeating_command_block", 
+      "repeating_command_block",
       "structure_block",
       "jigsaw",
       "end_portal_frame",
@@ -381,7 +382,7 @@ class AshFinderConfig {
       "end_gateway",
       "structure_void",
       "moving_piston",
-      "piston_head"
+      "piston_head",
     ];
 
     this.thinkTimeout = 5000;

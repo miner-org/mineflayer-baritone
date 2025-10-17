@@ -18,7 +18,6 @@ class MoveForwardParkour extends Move {
    * @param {DirectionalVec3} originVec
    */
   addNeighbors(neighbors, originVec) {
-    // const minDistance = 1;
     const maxDistance = 3;
     let count = 0;
 
@@ -26,39 +25,49 @@ class MoveForwardParkour extends Move {
       const landingNode = originVec.forward(distance + 1);
       const standingNode = landingNode.down(1);
 
-      // ❌ Must land exactly same height
+      // Must land exactly same height
       if (landingNode.y !== originVec.y) continue;
       if (standingNode.y !== originVec.y - 1) continue;
 
-      // ❌ Broken or unsafe landing
+      // Broken or unsafe landing
       if (!this.isStandable(landingNode)) continue;
 
-      // ✅ Check gap clearance
+      // Check gap clearance
       const bodyClear = [];
       const feetGap = [];
 
       let last = originVec;
+      let hasActualGap = false; // NEW: ensure there's actually a gap
+
       for (let i = 1; i <= distance; i++) {
         const forward = last.forward(1);
 
-        // Parkour assumes flat until the final step up
         if (forward.y !== originVec.y) break;
 
-        bodyClear.push(forward.up(1)); // body space
-        feetGap.push(forward.down(1)); // must be air/water
+        bodyClear.push(forward.up(1));
+        feetGap.push(forward.down(1));
+
+        // NEW: Check if this is actually a gap (not just walkable)
+        const feetBlock = forward.down(1);
+        if (this.isAir(feetBlock) || this.isWater(feetBlock)) {
+          hasActualGap = true;
+        }
+
         last = forward;
       }
 
-      // console.log(`Feet gap for distance ${distance}:`, feetGap);
-
-      // ❌ Must be actual gap (air/water only)
+      // Must be actual gap (air/water only)
       if (!feetGap.every((node) => this.isAir(node) || this.isWater(node)))
         continue;
 
-      // ❌ Body clearance must be fully walkable
+      // Body clearance must be fully walkable
       if (!bodyClear.every((node) => this.isWalkable(node))) continue;
 
-      // ✅ Valid Parkour
+      // NEW: Only add parkour if there's actually a gap
+      // (prevents competing with simple walk-forward moves)
+      if (!hasActualGap && distance > 1) continue;
+
+      // Valid Parkour
       const parkourNode = landingNode.clone();
       parkourNode.attributes = {
         name: this.name,
@@ -66,7 +75,7 @@ class MoveForwardParkour extends Move {
         nJump: distance === 1,
         sJump: distance >= 2,
         dist: distance,
-        parkour: true, // mark as parkour
+        parkour: true,
       };
       neighbors.push(
         this.makeMovement(parkourNode, parkourNode.attributes.cost)
@@ -384,35 +393,41 @@ class MoveDiagonalParkour extends Move {
   }
 }
 
+// Change the priorities at the bottom from 50-60 to 15-25 (higher than basic, but still considered)
 registerMoves([
-  new MoveForwardParkour(50, {
-    category: 'parkour',
-    tags: ['horizontal', 'jumping', 'gap'],
-    description: 'Forward parkour jumping across gaps',
-    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false }
+  new MoveForwardParkour(15, {
+    // Was 50
+    category: "parkour",
+    tags: ["horizontal", "jumping", "gap"],
+    description: "Forward parkour jumping across gaps",
+    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
   }),
-  new MoveForwardParkourUp(55, {
-    category: 'parkour',
-    tags: ['vertical', 'up', 'jumping', 'gap'],
-    description: 'Forward parkour jumping up across gaps',
-    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false }
+  new MoveForwardParkourUp(18, {
+    // Was 55
+    category: "parkour",
+    tags: ["vertical", "up", "jumping", "gap"],
+    description: "Forward parkour jumping up across gaps",
+    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
   }),
-  new MoveForwardParkourDown(55, {
-    category: 'parkour',
-    tags: ['vertical', 'down', 'jumping', 'gap'],
-    description: 'Forward parkour jumping down across gaps',
-    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false }
+  new MoveForwardParkourDown(18, {
+    // Was 55
+    category: "parkour",
+    tags: ["vertical", "down", "jumping", "gap"],
+    description: "Forward parkour jumping down across gaps",
+    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
   }),
-  new MoveAngledParkour(60, {
-    category: 'parkour',
-    tags: ['diagonal', 'jumping', 'gap', 'angled'],
-    description: 'Angled parkour jumping at various angles',
-    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false }
+  new MoveAngledParkour(25, {
+    // Was 60
+    category: "parkour",
+    tags: ["diagonal", "jumping", "gap", "angled"],
+    description: "Angled parkour jumping at various angles",
+    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
   }),
-  new MoveDiagonalParkour(60, {
-    category: 'parkour',
-    tags: ['diagonal', 'jumping', 'gap'],
-    description: 'Diagonal parkour jumping across gaps',
-    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false }
+  new MoveDiagonalParkour(25, {
+    // Was 60
+    category: "parkour",
+    tags: ["diagonal", "jumping", "gap"],
+    description: "Diagonal parkour jumping across gaps",
+    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
   }),
 ]);

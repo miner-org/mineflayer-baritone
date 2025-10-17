@@ -16,7 +16,6 @@ const compare = (a, b) => {
   let aPriority = a.fCost + a.hCost * 0.4;
   let bPriority = b.fCost + b.hCost * 0.4;
 
-  // === MOVE TYPE BIASES ===
   const aCost = a.attributes?.cost ?? a.cost ?? 1;
   const bCost = b.attributes?.cost ?? b.cost ?? 1;
 
@@ -28,31 +27,31 @@ const compare = (a, b) => {
   const aIsParkour = !!a.attributes?.parkour;
   const bIsParkour = !!b.attributes?.parkour;
 
-  // Penalize breaking/placing more than their base cost,
-  // so detours are preferred if similar cost
+  // Penalize breaking/placing
   aPriority += aBreaks * 2.0 + aPlaces * 2.0;
   bPriority += bBreaks * 2.0 + bPlaces * 2.0;
 
-  // Parkour: only give a bonus if it actually shortcuts closer to goal
+  // NEW: Parkour bonus - if it makes progress AND is safe
   if (aIsParkour && a.parent && a.hCost < a.parent.hCost) {
-    aPriority -= 1.0;
+    const dist = a.attributes?.dist || 1;
+    // Bigger bonus for longer jumps that make good progress
+    aPriority -= Math.min(2.0, dist * 0.5);
   }
   if (bIsParkour && b.parent && b.hCost < b.parent.hCost) {
-    bPriority -= 1.0;
+    const dist = b.attributes?.dist || 1;
+    bPriority -= Math.min(2.0, dist * 0.5);
   }
 
   // Soft bias toward lower raw move cost
   aPriority += aCost * 0.05;
   bPriority += bCost * 0.05;
 
-  // === MAIN COMPARISON ===
   if (aPriority !== bPriority) return aPriority - bPriority;
 
   // Tie-breakers
-  if (a.hCost !== b.hCost) return a.hCost - b.hCost; // closer to goal
-  if (a.gCost !== b.gCost) return b.gCost - a.gCost; // deeper explored
+  if (a.hCost !== b.hCost) return a.hCost - b.hCost;
+  if (a.gCost !== b.gCost) return b.gCost - a.gCost;
 
-  // Dead-even → add a small random jitter (-0.1 to +0.1)
   return Math.random() * 0.2 - 0.1;
 };
 
@@ -502,144 +501,97 @@ function computeScore(node, goal, startPos) {
   const distToGoal = node.worldPos.distanceTo(goal);
   const distFromStart = node.worldPos.distanceTo(startPos);
 
-  // === ADAPTIVE EXPLORATION vs GOAL-SEEKING ===
-  // Focus phase: how close we are to the goal (0 = far, 1 = very close)
-  const focusPhase = Math.min(1, Math.max(0, 1 - distToGoal / 20));
+  // === DISTANCE-BASED STRATEGY ===
+  // For long distances (>50 blocks), heavily prioritize moving toward goal
+  // For medium distances (20-50), balance exploration and goal-seeking
+  // For short distances (<20), allow more exploration
+  const isLongDistance = distToGoal > 50;
+  const isMediumDistance = distToGoal > 20 && distToGoal <= 50;
 
-  // Exploration phase: how much we've explored from start (0 = just started, 1 = explored far)
-  const explorationPhase = Math.min(1, distFromStart / 15);
+  let goalWeight, explorationWeight;
 
-  // Dynamic weight: far from goal = more exploration, close to goal = more focus
-  const explorationWeight = (1 - focusPhase) * 0.6;
-  const goalWeight = 0.8 + focusPhase * 0.4;
+  if (isLongDistance) {
+    // Long distance: 90% goal focus, 10% exploration
+    goalWeight = 1.4;
+    explorationWeight = 0.1;
+  } else if (isMediumDistance) {
+    // Medium distance: balanced approach
+    const focusPhase = (50 - distToGoal) / 30; // 0 at 50 blocks, 1 at 20 blocks
+    goalWeight = 0.8 + focusPhase * 0.4;
+    explorationWeight = 0.3 * (1 - focusPhase);
+  } else {
+    // Short distance: allow more exploration to find optimal path
+    const focusPhase = Math.max(0, 1 - distToGoal / 20);
+    goalWeight = 0.8 + focusPhase * 0.4;
+    explorationWeight = (1 - focusPhase) * 0.6;
+  }
 
   // === SMART BLOCK-BREAKING HEURISTICS ===
   const breakCount = node.attributes?.break?.length || 0;
   let breakPenalty = 0;
 
   if (breakCount > 0) {
-    // Base penalty for breaking blocks
     let basePenalty = breakCount * 1.5;
 
-    // DISTANCE-BASED BREAKING PRIORITY:
-    // Far from goal: heavily penalize breaking (encourage finding alternate routes)
-    // Close to goal: allow breaking more readily (direct path to goal)
-    const breakDistanceModifier = Math.max(0.2, 1 - distToGoal / 25);
+    // For long distances, be MORE willing to break through obstacles
+    // rather than trying to go around (which adds huge distance)
+    const breakDistanceModifier = isLongDistance
+      ? 0.5 // Much lower penalty for breaking when far from goal
+      : Math.max(0.2, 1 - distToGoal / 25);
 
-    // EXPLORATION-BASED BREAKING:
-    // If we've explored a lot but haven't found a path, allow more breaking
-    const explorationPressure = Math.min(2.0, explorationPhase * 1.5);
-
-    // EFFICIENCY-BASED BREAKING:
-    // Only break if it leads to significant progress toward goal
     const progressPotential = node.parent
       ? Math.max(0, node.parent.worldPos.distanceTo(goal) - distToGoal)
       : 0;
     const efficiencyBonus =
       progressPotential > 1 ? Math.min(1.0, progressPotential * 0.5) : 0;
 
-    // CONTEXT-AWARE BREAKING:
-    // Breaking overhead blocks (head clearance) is cheaper than breaking through walls
     let contextModifier = 1.0;
     if (node.attributes.break) {
       for (const breakPos of node.attributes.break) {
         const breakY = breakPos.y || breakPos.worldPos?.y;
         const nodeY = node.worldPos.y;
-
-        // Breaking blocks above player position (head clearance) is less costly
         if (breakY > nodeY + 0.5) {
-          contextModifier *= 0.6; // Reduce penalty for overhead breaking
-        }
-        // Breaking blocks at feet level (path clearing) is more expensive
-        else if (Math.abs(breakY - nodeY) < 0.5) {
-          contextModifier *= 1.4; // Increase penalty for path breaking
+          contextModifier *= 0.6;
+        } else if (Math.abs(breakY - nodeY) < 0.5) {
+          contextModifier *= 1.4;
         }
       }
     }
 
-    // FINAL BREAK PENALTY COMPUTATION
     breakPenalty =
-      basePenalty *
-        contextModifier *
-        (2.0 - breakDistanceModifier) *
-        (2.0 - explorationPressure) -
+      basePenalty * contextModifier * (2.0 - breakDistanceModifier) -
       efficiencyBonus;
-
-    // Ensure minimum penalty to prevent breaking spam
     breakPenalty = Math.max(0.5 * breakCount, breakPenalty);
   }
 
-  // === EXPLORATION COMPONENTS ===
-  // Reward nodes that take us to unexplored areas
-  const explorationBonus = Math.sqrt(g) * explorationWeight;
-
-  // Add variety when far from goal to avoid getting stuck in local minima
-  const diversityBonus =
-    distToGoal > 8
-      ? (Math.sin(node.worldPos.x * 0.7) + Math.cos(node.worldPos.z * 0.7)) *
-        0.3
-      : 0;
-
-  // Slight randomness for exploration, but reduce as we get closer to goal
-  const randomness =
-    distToGoal > 4 ? (Math.random() - 0.5) * (0.5 * (1 - focusPhase)) : 0;
-
   // === GOAL-SEEKING COMPONENTS ===
-  // Direction alignment bonus - reward moving toward goal
+  const adaptiveHeuristic = h * goalWeight;
+
+  // Direction alignment - reward moving toward goal
   const toGoal = goal.minus(node.worldPos);
   const toGoalNorm = toGoal.normalize();
   const parentDir = node.parent
     ? node.worldPos.minus(node.parent.worldPos).normalize()
     : toGoalNorm;
   const dirAlignment = toGoalNorm.dot(parentDir);
-  const directionBonus = dirAlignment * focusPhase * 0.4;
+  const directionBonus = dirAlignment * goalWeight * 0.4;
 
-  // Height preference - slight bias toward goal's Y level
-  const yDiff = Math.abs(node.worldPos.y - goal.y);
-  const yPenalty = yDiff > 2 ? yDiff * 0.1 * focusPhase : 0;
+  // === EXPLORATION COMPONENTS (reduced for long distance) ===
+  const explorationBonus = Math.sqrt(g) * explorationWeight;
 
-  // === TUNNEL/CONFINED SPACE ADAPTATIONS ===
-  // Reduce heuristic weight when far from goal to allow more exploration
-  const adaptiveHeuristic = h * goalWeight;
+  // Reduce randomness for long distances - we want consistent paths
+  const randomness = isLongDistance
+    ? 0
+    : distToGoal > 4
+    ? (Math.random() - 0.5) * (0.5 * explorationWeight)
+    : 0;
 
-  // Progress reward - encourage nodes that make progress even if not optimal
-  const progressFromStart =
-    distFromStart > 1 ? Math.log(distFromStart) * 0.2 : 0;
-
-  // === PROMISING NODE BOOST ===
-  const promisingFactor = (() => {
-    // Lower h = closer to goal = more promising
-    const hNorm = 1 / (1 + h); // closer goal = higher factor
-
-    // Nodes with lower fCost relative to g = efficient
-    const efficiency = h > 0 ? g / (g + h) : 1; // 0..1 range
-
-    // Combine: closer + efficient gets boosted
-    return 1 - 0.3 * hNorm - 0.2 * efficiency;
-  })();
-
-  // === FINAL SCORE COMPUTATION ===
+  // === FINAL SCORE ===
   let score = g + adaptiveHeuristic;
-
-  // Apply exploration bonuses (subtract to make them attractive)
   score -= explorationBonus;
-  score -= diversityBonus;
-  score -= progressFromStart;
   score -= directionBonus;
-
-  // Apply penalties (add to make them less attractive)
-  score += yPenalty;
+  score += breakPenalty;
   score += randomness;
-  score += breakPenalty; // Smart breaking penalty
-
-  score *= promisingFactor;
-
-  // Debug logging for fine-tuning (uncomment if needed)
-  // if (breakCount > 0 && Math.random() < 0.01) { // Log 1% of breaking moves
-  //   console.log(`BREAK Score: ${score.toFixed(2)} | G: ${g.toFixed(1)} | H: ${adaptiveHeuristic.toFixed(1)} | ` +
-  //              `BreakPenalty: ${breakPenalty.toFixed(2)} | Breaks: ${breakCount} | ` +
-  //              `Focus: ${focusPhase.toFixed(2)} | Dist: ${distToGoal.toFixed(1)}`);
-  // }
 
   return score;
 }

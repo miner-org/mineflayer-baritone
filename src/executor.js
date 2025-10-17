@@ -59,6 +59,11 @@ class PathExecutor {
     this.stuckThreshold = 500; // ticks to consider stuck (~1 sec at 20 ticks/sec)
     this.stuckDistanceThreshold = 0.35; // how much movement counts as NOT stuck
 
+    this.visitedPositions = new Set(); // Track where we've been
+    this.lastProgressTime = Date.now(); // Track when we last made progress
+    this.progressCheckInterval = 2000; // Check progress every 2 seconds
+    this.noProgressTimeout = 30000; // Replan if no progress for 30 seconds
+
     this.params = {};
 
     this.bot.on("physicsTick", () => {
@@ -128,19 +133,41 @@ class PathExecutor {
 
     const pos = this.bot.entity.position;
 
-    // stuck detection: only skip stuck counting while performing actions (not movement)
+    // Track visited positions for long-distance travel
+    const posKey = `${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(
+      pos.z
+    )}`;
+    if (!this.visitedPositions.has(posKey)) {
+      this.visitedPositions.add(posKey);
+      this.lastProgressTime = Date.now(); // Made progress to new area
+    }
+
+    // Improved stuck detection - check for actual progress toward goal
+    const now = Date.now();
+    if (now - this.lastProgressTime > this.noProgressTimeout) {
+      console.warn("No progress toward goal for 30s, replanning...");
+      this.visitedPositions.clear(); // Clear history on replan
+      this.lastProgressTime = now;
+      this.replanPath();
+      return;
+    }
+
+    // Original stuck detection (but with action check)
     if (this.lastPosition) {
       const distMoved = pos.distanceTo(this.lastPosition);
       if (this._isActionBusy()) {
         this.lastPosition = pos.clone();
+        this.stuckTimer = 0; // Reset timer during actions
         return;
       }
 
       if (distMoved < this.stuckDistanceThreshold) {
         this.stuckTimer++;
         if (this.stuckTimer > this.stuckThreshold) {
-          console.warn("Bot stuck detected! Triggering replanner...");
+          console.warn("Bot physically stuck, replanning...");
           this.stuckTimer = 0;
+          this.visitedPositions.clear();
+          this.lastProgressTime = now;
           this.replanPath();
           return;
         }
@@ -203,7 +230,7 @@ class PathExecutor {
       this.currentIndex++;
       this.jumpState = null;
       this.bot.setControlState("sprint", false);
-      this.bot.clearControlStates();
+      this._clearAllControls();
 
       if (this.ashfinder.debug)
         console.log(
@@ -425,7 +452,7 @@ class PathExecutor {
     const bot = this.bot;
     const blockPlace = getBlockToPlace(bot);
 
-    this.bot.clearControlStates();
+    this._clearAllControls();
     await bot.waitForTicks(5);
 
     if (this.placingState) {
@@ -522,29 +549,66 @@ class PathExecutor {
   }
 
   async _handlePartialPathEnd(bestNode) {
-    // Simplified approach: just restart pathfinding from current position
-    // This is more reliable than complex dual-pathfinding reconnection logic
     const bot = this.bot;
-    const endFunc = createEndFunc(this.goal);
+    const currentPos = bot.entity.position.clone().floored();
 
     if (this.ashfinder.debug) {
       console.log(
-        "Partial path ended, restarting pathfinding from current position"
+        `Partial path ended at ${currentPos}, continuing to ${this.goal.getPosition()}`
       );
     }
 
+    // Pass visited positions to avoid revisiting same areas
+    const excludedPositions = Array.from(this.visitedPositions).map((key) => {
+      const [x, y, z] = key.split(",").map(Number);
+      return new Vec3(x, y, z);
+    });
+
+    const endFunc = createEndFunc(this.goal);
     const newPath = await Astar(
-      bot.entity.position.clone().floored(),
+      currentPos,
       this.goal.getPosition(),
       this.goal,
       bot,
       endFunc,
       this.ashfinder.config,
-      [],
+      excludedPositions, // Avoid areas we've already explored
       this.ashfinder.debug
     );
 
     if (newPath.status === "no path") {
+      // If no path avoiding visited areas, try again without exclusions
+      if (excludedPositions.length > 0) {
+        if (this.ashfinder.debug) {
+          console.log(
+            "No path found avoiding visited areas, trying without exclusions"
+          );
+        }
+
+        const retryPath = await Astar(
+          currentPos,
+          this.goal.getPosition(),
+          this.goal,
+          bot,
+          endFunc,
+          this.ashfinder.config,
+          [],
+          this.ashfinder.debug
+        );
+
+        if (retryPath.status === "no path") {
+          throw new Error(
+            "No path found to goal after partial path completion"
+          );
+        }
+
+        return this.setPath(retryPath.path, {
+          partial: retryPath.status === "partial",
+          targetGoal: this.goal,
+          bestNode: retryPath.bestNode,
+        });
+      }
+
       throw new Error("No path found to goal after partial path completion");
     }
 
@@ -553,6 +617,21 @@ class PathExecutor {
       targetGoal: this.goal,
       bestNode: newPath.bestNode,
     });
+  }
+
+  _clearAllControls() {
+    const states = [
+      "forward",
+      "back",
+      "left",
+      "right",
+      "jump",
+      "sprint",
+      "sneak",
+    ];
+    for (const state of states) {
+      this.bot.setControlState(state, false);
+    }
   }
 
   async _flyTo(node) {
@@ -901,6 +980,12 @@ class PathExecutor {
 
     // Look toward jump direction
     bot.lookAt(to.offset(0, 1.6, 0), true);
+
+    // NEW: Ensure we're moving forward cleanly
+    if (!this.jumpState) {
+      this._clearAllControls();
+    }
+
     bot.setControlState("forward", true);
 
     // Init jump state if needed
@@ -928,7 +1013,7 @@ class PathExecutor {
       this.jumpState.timer++;
       if (this.jumpState.timer > 2) {
         bot.setControlState("jump", false);
-        this.jumpState.jumped = false;
+        this.jumpState.jumped = false; // Reset so we can jump again if needed
       }
     }
   }
@@ -950,18 +1035,17 @@ class PathExecutor {
 
       if (!canMakeIt) {
         if (this.ashfinder.debug)
-          console.warn("Jump simulation failed. Fuck it lets ride");
-        //using gen's mineflayer
-        // if (!bot.physicsEngine) {
-        //   this.stop(); // or trigger replanner
-        //   return;
-        // }
+          console.warn("Jump simulation failed - attempting anyway");
       }
 
       if (this.ashfinder.debug)
         console.log("Attempting sprint jump to", node.worldPos);
 
       this.jumpState = { jumped: false, timer: 0 };
+
+      // NEW: Make sure we're not moving in wrong direction first
+      this._clearAllControls();
+
       bot.setControlState("sprint", true);
       bot.setControlState("forward", true);
     }
@@ -984,9 +1068,11 @@ class PathExecutor {
     if (this.jumpState.jumped) {
       this.jumpState.timer++;
       if (this.jumpState.timer > 5) {
-        // console.log(`-Stopping jump state-`);
         bot.setControlState("jump", false);
-        bot.setControlState("sprint", false);
+        // NEW: Don't stop sprint immediately, let momentum carry
+        if (this.jumpState.timer > 10) {
+          bot.setControlState("sprint", false);
+        }
       }
     }
   }
@@ -998,7 +1084,7 @@ class PathExecutor {
     let promises = [];
 
     const bot = this.bot;
-    this.bot.clearControlStates();
+    this._clearAllControls();
 
     // and array of directional vec3
     const breakNodes = node.attributes.break;
@@ -1213,11 +1299,13 @@ class PathExecutor {
   stop() {
     this.executing = false;
     this.placedNodes.clear();
-    this.bot.clearControlStates();
+    this._clearAllControls();
     this.jumpState = null;
     this.toweringState.active = false;
     this.swimmingState.active = false;
     this.ashfinder.stopped = true;
+    this.visitedPositions.clear(); // Clear on stop
+    this.lastProgressTime = Date.now();
 
     if (this.rejectCurrentPromise) {
       this.rejectCurrentPromise(new Error("Path execution was stopped"));
