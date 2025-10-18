@@ -55,7 +55,7 @@ bot.once("spawn", async () => {
 
       const goal = new GoalNear(endPos, 1);
 
-      await bot.ashfinder.goto(goal);
+      await bot.ashfinder.gotoSmart(goal);
     }
 
     if (command === "f!find") {
@@ -290,8 +290,7 @@ bot.once("spawn", async () => {
       // bot.creative.startFlying();
 
       const goal = new GoalNear(endPos, 1);
-
-      await bot.ashfinder.goto(goal);
+      await bot.ashfinder.gotoSmart(goal);
     }
 
     if (command === "f!disableOutput") {

@@ -149,15 +149,15 @@ class Move {
   constructor(priority = 50, metadata = {}) {
     this.name = this.constructor.name;
     this.priority = priority; // Lower number = higher priority
-    
+
     // Enhanced metadata for testing and introspection
     this.metadata = {
       name: this.name,
-      category: metadata.category || 'basic',
+      category: metadata.category || "basic",
       tags: metadata.tags || [],
       description: metadata.description || `${this.name} movement`,
       testConfig: metadata.testConfig || {},
-      ...metadata
+      ...metadata,
     };
 
     // Movement costs
@@ -166,13 +166,13 @@ class Move {
     this.COST_FALL = 1;
     this.COST_BREAK = 1.5;
     this.COST_PLACE = 1.5;
-    this.COST_SWIM = 2.2;
-    this.COST_SWIM_START = 2;
-    this.COST_SWIM_EXIT = 2;
+    this.COST_SWIM = 1.3;
+    this.COST_SWIM_START = 1.2;
+    this.COST_SWIM_EXIT = 1.5;
     this.COST_CLIMB = 1;
     this.COST_LADDER = 2;
     this.COST_PARKOUR = 3.5; // ian
-    this.COST_DIAGONAL = 1.41;
+    this.COST_DIAGONAL = Math.SQRT2;
   }
 
   generate(cardinalDirections, origin, neighbors) {
@@ -184,6 +184,7 @@ class Move {
   }
 
   setValues(bot, config, manager, node = null) {
+    this._blockCache = new Map(); // Reset cache for new move generation
     this.bot = bot;
     this.manager = manager;
     this.config = config;
@@ -214,14 +215,20 @@ class Move {
   getBlock(pos) {
     const key = pos.toString();
 
+    // Check cache first
+    if (!this._blockCache) this._blockCache = new Map();
+    if (this._blockCache.has(key)) return this._blockCache.get(key);
+
     // Virtual overlay
     if (this.node?.virtualBlocks?.has(key)) {
       const state = this.node.virtualBlocks.get(key);
       if (state === "air") return this.mcData.blocksByName["air"];
-      if (state === "placed") return this.mcData.blocksByName["stone"]; // disposable
+      if (state === "placed") return this.mcData.blocksByName["stone"];
     }
 
-    return this.bot.blockAt(pos);
+    const block = this.bot.blockAt(pos);
+    this._blockCache.set(key, block);
+    return block;
   }
 
   // === Core Node Checks ===
@@ -338,8 +345,16 @@ class Move {
 
   // === Liquids & Misc ===
 
+  // Add this to the Move class
+  isFlowingWater(node) {
+    const block = this.getBlock(node);
+    return block?.name === "water" || block?.name === "flowing_water";
+  }
+
+  // Update isWater to handle both
   isWater(node) {
-    return this.getBlock(node)?.name === "water";
+    const block = this.getBlock(node);
+    return block?.name === "water" || block?.name === "flowing_water";
   }
 
   isLava(node) {
@@ -394,7 +409,7 @@ class Move {
   getCostConstants() {
     const constants = {};
     for (const key in this) {
-      if (key.startsWith('COST_')) {
+      if (key.startsWith("COST_")) {
         constants[key] = this[key];
       }
     }
@@ -415,7 +430,7 @@ class Move {
       hasConfig: !!this.config,
       hasManager: !!this.manager,
       currentNode: this.node,
-      origin: this.origin
+      origin: this.origin,
     };
   }
 
@@ -426,14 +441,14 @@ class Move {
   getConfigRequirements() {
     const requirements = {};
     const methodString = this.generate.toString();
-    
+
     // Detect common config requirements from method body
-    if (methodString.includes('breakBlocks')) requirements.breakBlocks = true;
-    if (methodString.includes('placeBlocks')) requirements.placeBlocks = true;
-    if (methodString.includes('parkour')) requirements.parkour = true;
-    if (methodString.includes('swimming')) requirements.swimming = true;
-    if (methodString.includes('fly')) requirements.fly = true;
-    
+    if (methodString.includes("breakBlocks")) requirements.breakBlocks = true;
+    if (methodString.includes("placeBlocks")) requirements.placeBlocks = true;
+    if (methodString.includes("parkour")) requirements.parkour = true;
+    if (methodString.includes("swimming")) requirements.swimming = true;
+    if (methodString.includes("fly")) requirements.fly = true;
+
     return requirements;
   }
 
@@ -444,13 +459,13 @@ class Move {
    */
   canRunWithConfig(config) {
     const requirements = this.getConfigRequirements();
-    
+
     for (const [requirement, needed] of Object.entries(requirements)) {
       if (needed && !config[requirement]) {
         return false;
       }
     }
-    
+
     return true;
   }
 }
@@ -487,12 +502,12 @@ function bestHarvestTool(bot, block) {
  */
 function registerMoves(moves) {
   moveClasses.push(...moves);
-  
+
   // Enhanced registry with metadata
   for (const move of moves) {
     moveRegistry.set(move.name, {
       instance: move,
-      metadata: move.metadata
+      metadata: move.metadata,
     });
   }
 }
@@ -512,8 +527,8 @@ function getAllMoves() {
  */
 function getMovesByCategory(category) {
   return [...moveRegistry.values()]
-    .filter(entry => entry.metadata.category === category)
-    .map(entry => entry.instance);
+    .filter((entry) => entry.metadata.category === category)
+    .map((entry) => entry.instance);
 }
 
 /**
@@ -523,8 +538,8 @@ function getMovesByCategory(category) {
  */
 function getMovesByTag(tag) {
   return [...moveRegistry.values()]
-    .filter(entry => entry.metadata.tags.includes(tag))
-    .map(entry => entry.instance);
+    .filter((entry) => entry.metadata.tags.includes(tag))
+    .map((entry) => entry.instance);
 }
 
 /**
@@ -551,7 +566,7 @@ function getAllMoveNames() {
  * @returns {Array<Move>} Moves compatible with the configuration
  */
 function getCompatibleMoves(config) {
-  return [...moveClasses].filter(move => move.canRunWithConfig(config));
+  return [...moveClasses].filter((move) => move.canRunWithConfig(config));
 }
 
 function getNeighbors2(node, config, manager, bot) {
@@ -577,31 +592,38 @@ function getNeighbors2(node, config, manager, bot) {
         continue;
       }
 
-      // Grab move data
-      const existingMoveName = existing.attributes?.name ?? "Unknown";
-      const existingMove = moveClasses.find((m) => m.name === existingMoveName);
-      const existingPriority = existingMove?.priority ?? 999;
+      // Prioritize: Simple > Complex > Cost
+      const simpleMoves = new Set([
+        "MoveForward",
+        "MoveForwardUp",
+        "MoveForwardDown",
+      ]);
+      const isExistingSimple = simpleMoves.has(existing.attributes?.name);
+      const isNewSimple = simpleMoves.has(neighbor.attributes?.name);
 
-      const newPriority = move.priority;
-
-      // Extra: simple moves list
-      const simpleMoves = ["MoveForward", "MoveForwardUp", "MoveForwardDown"];
-      const isExistingSimple = simpleMoves.includes(existingMoveName);
-      const isNewSimple = simpleMoves.includes(move.name);
-
-      // --- Conflict resolution ---
       let replace = false;
 
-      // 1️⃣ Simple beats Parkour if same node
       if (isNewSimple && !isExistingSimple) {
-        replace = true;
-      } else if (!isNewSimple && isExistingSimple) {
-        replace = false;
+        replace = true; // Always prefer simple moves
+      } else if (isExistingSimple && !isNewSimple) {
+        replace = false; // Don't replace simple with complex
       } else {
-        // 2️⃣ Otherwise, prefer lower priority first
-        if (
-          newPriority < existingPriority ||
-          (newPriority === existingPriority && neighbor.cost < existing.cost)
+        // Both same complexity - use priority then cost
+        const existingMove = moveClasses.find(
+          (m) => m.name === existing.attributes?.name
+        );
+        const newMove = moveClasses.find(
+          (m) => m.name === neighbor.attributes?.name
+        );
+
+        const existingPriority = existingMove?.priority ?? 999;
+        const newPriority = move.priority;
+
+        if (newPriority < existingPriority) {
+          replace = true;
+        } else if (
+          newPriority === existingPriority &&
+          neighbor.cost < existing.cost
         ) {
           replace = true;
         }
@@ -618,11 +640,11 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-module.exports = { 
-  getNeighbors2, 
-  Move, 
-  registerMoves, 
-  DirectionalVec3, 
+module.exports = {
+  getNeighbors2,
+  Move,
+  registerMoves,
+  DirectionalVec3,
   clamp,
   // Enhanced move system exports
   getAllMoves,
@@ -631,7 +653,8 @@ module.exports = {
   getMoveMetadata,
   getAllMoveNames,
   getCompatibleMoves,
-  moveRegistry
+  moveRegistry,
+  moveClasses,
 };
 
 requireDir("./");

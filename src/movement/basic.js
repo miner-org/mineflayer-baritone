@@ -188,6 +188,8 @@ class MoveForwardUp extends Move {
 
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+
+      if (this.isWater(originVec)) return;
       const step = originVec.forward(1).up(1); // where feet land
       this.addNeighbors(neighbors, step, originVec);
     }

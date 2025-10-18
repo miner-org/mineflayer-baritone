@@ -8,6 +8,8 @@ class MoveForwardParkour extends Move {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       // console.log(originVec);
 
+      if (this.isWater(originVec) || this.isAir(originVec)) return;
+
       this.addNeighbors(neighbors, originVec);
     }
   }
@@ -92,6 +94,8 @@ class MoveForwardParkourUp extends Move {
 
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+
+      if (this.isWater(originVec) || this.isAir(originVec)) return;
       this.addNeighbors(neighbors, originVec);
     }
   }
@@ -155,6 +159,8 @@ class MoveForwardParkourDown extends Move {
 
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+
+      if (this.isWater(originVec) || this.isAir(originVec)) return;
       this.addNeighbors(neighbors, originVec);
     }
   }
@@ -240,6 +246,8 @@ class MoveAngledParkour extends Move {
             origin.z,
             dir
           );
+
+          if (this.isWater(originVec) || this.isAir(originVec)) return;
           this.addNeighbors(neighbors, originVec, fx, rz);
         }
       }
@@ -330,6 +338,8 @@ class MoveDiagonalParkour extends Move {
 
     for (const dir of diagonalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+
+      if (this.isWater(originVec) || this.isAir(originVec)) return;
       this.addNeighbors(neighbors, originVec);
     }
   }

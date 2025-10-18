@@ -2,30 +2,43 @@ const { Move, registerMoves, DirectionalVec3 } = require("./");
 
 class MoveSwimForward extends Move {
   generate(cardinalDirections, origin, neighbors) {
-    for (const dir of cardinalDirections) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+    if (!this.config.swimming) return;
 
-      const node = this.origin.offset(dir.x, 0, dir.z);
-      this.addNeighbors(neighbors, node);
+    for (const dir of cardinalDirections) {
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const node = originVec.offset(dir.x, 0, dir.z);
+      this.addNeighbors(neighbors, node, originVec);
     }
   }
 
-  addNeighbors(neighbors, node) {
+  addNeighbors(neighbors, node, originVec) {
     const below = node.down(1);
     const head = node.up(1);
 
-    if (
-      this.isWater(node) &&
-      (this.isAir(head) || this.isWater(head)) &&
-      this.isWater(below)
-    ) {
-      node.attributes["name"] = this.name;
-      node.attributes["swimming"] = true;
+    // console.log("Swim orgin vec", originVec.toString());
 
-      const cost = this.COST_SWIM ?? this.COST_NORMAL + 1;
-      node.attributes["cost"] = cost;
-      neighbors.push(this.makeMovement(node, cost));
-    }
+    // Must be in water to swim horizontally
+    if (!this.isWater(originVec)) return;
+
+    // console.log("We swim s");
+
+    // Target must be water or air (surface swimming)
+    const nodeIsSwimmable =
+      this.isWater(node) || (this.isAir(node) && this.isWater(below));
+    if (!nodeIsSwimmable) return;
+
+    // console.log("We swim fr");
+
+    // Head must be clear or water
+    if (!this.isAir(head) && !this.isWater(head)) return;
+
+    node.attributes = {
+      name: this.name,
+      swim: true,
+      cost: this.COST_SWIM ?? this.COST_NORMAL + 1.2,
+    };
+
+    neighbors.push(this.makeMovement(node, node.attributes.cost));
   }
 }
 
@@ -34,71 +47,102 @@ class MoveSwimStart extends Move {
     if (!this.config.swimming) return;
 
     for (const dir of cardinalDirections) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
-
-      const node = this.origin.offset(dir.x, 0, dir.z);
-      this.addStepOrDive(neighbors, node);
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const node = originVec.offset(dir.x, 0, dir.z);
+      this.addNeighbors(neighbors, node, originVec);
     }
   }
 
-  addStepOrDive(neighbors, node) {
-    const head = node.up(1);
-    const originBelow = this.origin.down(1);
+  addNeighbors(neighbors, node, originVec) {
+    const originBelow = originVec.down(1);
     const steppingFromSolid = this.isSolid(originBelow);
 
-    const isWater = (n) => this.isWater(n) || this.isFlowingWater?.(n);
+    // Can't start swimming if not on solid ground
+    if (!steppingFromSolid) return;
 
-    // ——————————————
-    // NORMAL STEP-INTO-WATER
-    // ——————————————
+    // Already in water? Use regular swim moves
+    if (this.isWater(originVec)) return;
+
+    const head = node.up(1);
     const nodeBelow = node.down(1);
-    const stepInValid =
-      steppingFromSolid &&
-      this.isWalkable(node) &&
-      isWater(nodeBelow) &&
-      this.isAir(head);
 
-    if (stepInValid) {
-      node.attributes["name"] = this.name;
-      node.attributes["swimming"] = true;
-      node.attributes["cost"] = this.COST_SWIM_START ?? this.COST_NORMAL + 2; // Cost to start swimming
-      neighbors.push(
-        this.makeMovement(node, this.COST_SWIM_START ?? this.COST_NORMAL + 2)
-      );
+    // ═══════════════════════════
+    // CASE 1: Step into shallow water (feet in water, head in air)
+    // ═══════════════════════════
+    if (this.isAir(node) && this.isWater(nodeBelow) && this.isAir(head)) {
+      const trueNode = nodeBelow;
+      trueNode.attributes = {
+        name: this.name + "_step",
+        swim: true,
+        cost: this.COST_SWIM_START ?? this.COST_NORMAL + 1.5,
+        enterTarget: node,
+      };
+      neighbors.push(this.makeMovement(trueNode, trueNode.attributes.cost));
+      // console.log("Swin step")
       return;
     }
 
-    // ——————————————
-    // DIVE-INTO-WATER
-    // ——————————————
+    // ═══════════════════════════
+    // CASE 2: Step into deep water (body submerged)
+    // ═══════════════════════════
+    if (this.isWater(node) && this.isWater(nodeBelow)) {
+      const trueNode = nodeBelow;
+      trueNode.attributes = {
+        name: this.name + "_deep",
+        swim: true,
+        enterTarget: node,
+        cost: this.COST_SWIM_START ?? this.COST_NORMAL + 1.5,
+      };
+      neighbors.push(this.makeMovement(trueNode, trueNode.attributes.cost));
+      return;
+    }
+
+    // ═══════════════════════════
+    // CASE 3: Dive into water from height
+    // ═══════════════════════════
+    const maxDive = Math.min(this.config.maxWaterDist ?? 10, 15);
     let diveDistance = 0;
-    const maxDive = this.config.maxWaterDist ?? 10;
     let below = node.down(1);
 
-    // Simulate falling until we hit water or maxDive
+    // Fall through air until we hit water
     while (diveDistance < maxDive && this.isAir(below)) {
       diveDistance++;
       below = below.down(1);
     }
 
-    // Need at least 2 water blocks to break the fall safely
-    const waterTarget = below;
-    const diveOk =
-      isWater(waterTarget) &&
-      (this.isAir(waterTarget.up(1)));
+    // Need to land in water with at least 2 blocks depth to be safe
+    if (diveDistance > 0 && this.isWater(below)) {
+      const waterDepth = this.getWaterDepth(below);
 
-    if (diveOk) {
-      const finalNode = waterTarget.clone();
-      finalNode.attributes["name"] = this.name;
-      finalNode.attributes["swimming"] = true;
-      finalNode.attributes["fallDistance"] = diveDistance;
+      // Require deeper water for higher dives
+      const requiredDepth = Math.min(3, Math.ceil(diveDistance / 3));
 
-      const cost =
-        this.COST_SWIM_START + diveDistance * (this.COST_FALL_PER_BLOCK ?? 1);
-      finalNode.attributes["cost"] = cost;
-
-      neighbors.push(this.makeMovement(finalNode, cost));
+      if (waterDepth >= requiredDepth) {
+        const targetNode = below.clone();
+        targetNode.attributes = {
+          name: this.name + "_dive",
+          swim: true,
+          fallDistance: diveDistance,
+          cost: this.COST_SWIM_START + diveDistance * 0.3,
+        };
+        neighbors.push(
+          this.makeMovement(targetNode, targetNode.attributes.cost)
+        );
+      }
     }
+  }
+
+  // Helper to check water depth
+  getWaterDepth(startPos) {
+    let depth = 0;
+    let pos = startPos.clone();
+
+    while (depth < 10 && this.isWater(pos)) {
+      depth++;
+      pos = pos.down(1);
+    }
+
+    return depth;
   }
 }
 
@@ -106,97 +150,154 @@ class MoveSwimExit extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.swimming) return;
 
-    for (const dir of cardinalDirections) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+    const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
+      x: 0,
+      z: 0,
+    });
 
-      const node = this.origin.offset(dir.x, 1, dir.z); // Going UP
-      this.addNeighbors(neighbors, node);
+    // Must be in water to exit
+    if (!this.isWater(originVec)) return;
+
+    for (const dir of cardinalDirections) {
+      // Try exiting at same level and one block up
+      const sameLevel = originVec.offset(dir.x, 0, dir.z);
+      const upOne = originVec.offset(dir.x, 1, dir.z);
+
+      this.addNeighbors(neighbors, sameLevel, originVec, false);
+      this.addNeighbors(neighbors, upOne, originVec, true);
     }
   }
 
-  addNeighbors(neighbors, node) {
-    if (!this.isWater(this.origin)) return;
+  addNeighbors(neighbors, node, originVec, isClimbingOut) {
+    const head = node.up(1);
+    const nodeBelow = node.down(1);
+    // console.log("===========");
+    // console.log(node);
+    // console.log(this.getBlock(node));
+    // console.log("===========");
+    // Target must be air (or allow stepping on lily pads/etc)
+    if (!this.isAir(node) && !this.getBlock(node)?.name.includes("lily")) return;
 
-    const head = node.up(1); // Make sure headroom is clear
+    // Must have solid ground to step onto
+    if (!this.isSolid(nodeBelow)) return;
 
-    const canStepOut = this.isStandable(node);
-    const headClear = this.isWalkable(head);
+    // Head must be clear
+    if (!this.isAir(head) && !this.isWater(head)) return;
 
-    if (canStepOut && headClear) {
-      node.attributes["name"] = this.name;
-      node.attributes["exitWater"] = true;
-      node.attributes["cost"] = this.COST_SWIM_EXIT ?? this.COST_NORMAL + 2; // Cost to exit water]
-      neighbors.push(
-        this.makeMovement(node, this.COST_SWIM_EXIT ?? this.COST_NORMAL + 3)
-      );
-    }
+    // Can't exit onto farmland or other special blocks
+    const belowBlock = this.getBlock(nodeBelow);
+    if (
+      belowBlock.name.includes("farmland") ||
+      belowBlock.name.includes("soul_sand")
+    )
+      return;
+
+    const cost = isClimbingOut
+      ? (this.COST_SWIM_EXIT ?? this.COST_NORMAL + 2.5) + this.COST_UP
+      : this.COST_SWIM_EXIT ?? this.COST_NORMAL + 2;
+
+    node.attributes = {
+      name: this.name,
+      exitWater: true,
+      climbOut: isClimbingOut,
+      cost,
+    };
+
+    neighbors.push(this.makeMovement(node, cost));
   }
 }
 
 class MoveSwimUp extends Move {
   generate(cardinalDirections, origin, neighbors) {
-    this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, {
+    if (!this.config.swimming) return;
+
+    const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
       x: 0,
       z: 0,
     });
 
-    const node = this.origin.up(1);
-    this.addNeighbors(neighbors, node);
+    // Must be in water to swim up
+    if (!this.isWater(originVec)) return;
+
+    // Try swimming up 1-2 blocks
+    for (let height = 1; height <= 2; height++) {
+      const node = originVec.up(height);
+      this.addNeighbors(neighbors, node, originVec, height);
+    }
   }
 
-  addNeighbors(neighbors, node) {
+  addNeighbors(neighbors, node, originVec, height) {
     const below = node.down(1);
     const head = node.up(1);
 
-    if (
-      this.isWater(node) &&
-      (this.isAir(head) || this.isWater(head)) &&
-      this.isWater(below)
-    ) {
-      node.attributes["name"] = this.name;
-      node.attributes["swimming"] = true;
-      node.attributes["up"] = true; // Indicate upward swim
+    // Target must be water or air at surface
+    const validTarget =
+      this.isWater(node) || (this.isAir(node) && this.isWater(below));
 
-      const cost = this.COST_SWIM_VERTICAL ?? this.COST_NORMAL + 1.5;
-      node.attributes["cost"] = cost;
-      neighbors.push(this.makeMovement(node, cost));
-    }
+    if (!validTarget) return;
+
+    // Head must be clear
+    if (!this.isAir(head) && !this.isWater(head)) return;
+
+    const cost = (this.COST_SWIM ?? this.COST_NORMAL + 1.2) * height;
+
+    node.attributes = {
+      name: this.name,
+      swim: true,
+      up: true,
+      height,
+      cost,
+    };
+
+    neighbors.push(this.makeMovement(node, cost));
   }
 }
 
 class MoveSwimDown extends Move {
   generate(cardinalDirections, origin, neighbors) {
-    this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, {
+    if (!this.config.swimming) return;
+
+    const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
       x: 0,
       z: 0,
     });
 
-    const node = this.origin.down(1);
-    this.addNeighbors(neighbors, node);
+    // Must be in water to swim down
+    if (!this.isWater(originVec)) return;
+
+    // Try swimming down 1-3 blocks
+    for (let depth = 1; depth <= 3; depth++) {
+      const node = originVec.down(depth);
+      this.addNeighbors(neighbors, node, originVec, depth);
+    }
   }
 
-  addNeighbors(neighbors, node) {
+  addNeighbors(neighbors, node, originVec, depth) {
+    // Must still be in water
+    if (!this.isWater(node)) return;
+
+    // Below must be water or we hit bottom
     const below = node.down(1);
-    const head = node.up(1);
+    if (!this.isWater(below) && !this.isSolid(below)) return;
 
-    if (
-      this.isWater(node) &&
-      (this.isAir(head) || this.isWater(head)) &&
-      this.isWater(below)
-    ) {
-      node.attributes["name"] = this.name;
-      node.attributes["swimming"] = true;
-      node.attributes["down"] = true; // Indicate downward swim
+    const cost = (this.COST_SWIM ?? this.COST_NORMAL + 1.2) * depth * 0.8; // Slightly cheaper to go down
 
-      const cost = this.COST_SWIM_VERTICAL ?? this.COST_NORMAL + 1.5;
-      node.attributes["cost"] = cost;
-      neighbors.push(this.makeMovement(node, cost));
-    }
+    node.attributes = {
+      name: this.name,
+      swim: true,
+      down: true,
+      depth,
+      cost,
+    };
+
+    neighbors.push(this.makeMovement(node, cost));
   }
 }
 
 class MoveSwimDiagonal extends Move {
   generate(cardinalDirections, origin, neighbors) {
+    if (!this.config.swimming) return;
+
     const diagonals = [
       { x: 1, z: 1 },
       { x: -1, z: 1 },
@@ -205,37 +306,67 @@ class MoveSwimDiagonal extends Move {
     ];
 
     for (const dir of diagonals) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
-      const node = this.origin.offset(dir.x, 0, dir.z);
-      this.addNeighbors(neighbors, node);
+      // Must be in water
+      if (!this.isWater(originVec)) continue;
+
+      const node = originVec.offset(dir.x, 0, dir.z);
+      this.addNeighbors(neighbors, node, originVec);
     }
   }
 
-  addNeighbors(neighbors, node) {
+  addNeighbors(neighbors, node, originVec) {
     const below = node.down(1);
     const head = node.up(1);
 
-    if (
-      this.isWater(node) &&
-      (this.isAir(head) || this.isWater(head)) &&
-      this.isWater(below)
-    ) {
-      node.attributes["name"] = this.name;
-      node.attributes["swimming"] = true;
+    // Target must be water or air at surface
+    const nodeIsSwimmable =
+      this.isWater(node) || (this.isAir(node) && this.isWater(below));
+    if (!nodeIsSwimmable) return;
 
-      const cost = this.COST_SWIM_DIAGONAL ?? this.COST_NORMAL + 2;
-      node.attributes["cost"] = cost;
-      neighbors.push(this.makeMovement(node, cost));
-    }
+    // Head clear or water
+    if (!this.isAir(head) && !this.isWater(head)) return;
+
+    node.attributes = {
+      name: this.name,
+      swim: true,
+      cost: this.COST_DIAGONAL * (this.COST_SWIM ?? 1.2),
+    };
+
+    neighbors.push(this.makeMovement(node, node.attributes.cost));
   }
 }
 
 registerMoves([
-  new MoveSwimForward(10),
-  new MoveSwimStart(10),
-  new MoveSwimExit(10),
-  new MoveSwimUp(10),
-  new MoveSwimDown(10),
-  new MoveSwimDiagonal(10),
+  new MoveSwimForward(8, {
+    category: "water",
+    tags: ["swimming", "horizontal"],
+    description: "Swim forward in water",
+  }),
+  new MoveSwimStart(8, {
+    category: "water",
+    tags: ["swimming", "entering"],
+    description: "Enter water from land",
+  }),
+  new MoveSwimExit(8, {
+    category: "water",
+    tags: ["swimming", "exiting"],
+    description: "Exit water to land",
+  }),
+  new MoveSwimUp(9, {
+    category: "water",
+    tags: ["swimming", "vertical"],
+    description: "Swim upward in water",
+  }),
+  new MoveSwimDown(9, {
+    category: "water",
+    tags: ["swimming", "vertical"],
+    description: "Swim downward in water",
+  }),
+  new MoveSwimDiagonal(10, {
+    category: "water",
+    tags: ["swimming", "diagonal"],
+    description: "Swim diagonally in water",
+  }),
 ]);

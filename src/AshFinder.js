@@ -5,6 +5,7 @@ const { createEndFunc } = require("./utils");
 
 const Vec3 = require("vec3");
 const { Cell } = require("./pathfinder");
+const { SmartWaypointPlanner, WaypointPlanner } = require("./waypoints");
 
 const astar = require("./pathfinder").Astar;
 
@@ -26,8 +27,10 @@ class AshFinderPlugin extends EventEmitter {
     this.debug = false;
 
     this.#pathExecutor = null;
+    this.waypointPlanner = null;
     this.bot.on("spawn", () => {
       this.#pathExecutor = new PathExecutor(this.bot, this);
+      this.waypointPlanner = new SmartWaypointPlanner(this.bot, this);
     });
   }
 
@@ -54,7 +57,7 @@ class AshFinderPlugin extends EventEmitter {
       this.config,
       excludedPositions,
       this.debug,
-      this._searchController // <-- pass controller
+      this._searchController
     );
 
     // once astar resolves, controller.active will be set to false by astar
@@ -106,6 +109,45 @@ class AshFinderPlugin extends EventEmitter {
   }
 
   /**
+   * Smart navigation that chooses between direct pathfinding and waypoints
+   * @param {Goal} goal - Target goal
+   * @param {Object} options - Navigation options
+   * @param {number} options.waypointThreshold - Distance to trigger waypoints (default: 75)
+   * @param {boolean} options.forceWaypoints - Always use waypoints
+   * @param {boolean} options.forceAdaptive - Use smart waypoint system with failure handling
+   */
+  async gotoSmart(goal, options = {}) {
+    const {
+      waypointThreshold = 75,
+      forceWaypoints = false,
+      forceAdaptive = true,
+    } = options;
+
+    const start = this.bot.entity.position.clone();
+    const goalPos = goal.getPosition();
+    const distance = start.distanceTo(goalPos);
+
+    // Decide strategy based on distance
+    const shouldUseWaypoints = forceWaypoints || distance > waypointThreshold;
+
+    if (shouldUseWaypoints) {
+      console.log(`[AshFinder] Long distance: ${distance.toFixed(1)} blocks`);
+
+      if (forceAdaptive) {
+        // Use smart system with partial path handling
+        return await this.waypointPlanner.navigateWithSmartWaypoints(goal);
+      } else {
+        // Use basic waypoint system
+        return await this.waypointPlanner.navigateWithWaypoints(goal);
+      }
+    } else {
+      // Direct pathfinding for short distances
+      console.log(`[AshFinder] Direct path: ${distance.toFixed(1)} blocks`);
+      return await this.goto(goal);
+    }
+  }
+
+  /**
    *
    * @param {Goal} goal
    * @param {Vec3[]} excludedPositions
@@ -148,6 +190,39 @@ class AshFinderPlugin extends EventEmitter {
         "Already going to a goal, please wait until the current path is completed.";
       console.log(error);
       throw new Error(error);
+    }
+  }
+
+  /**
+   * Navigate to goal using waypoint system for long distances
+   * @param {Goal} goal - Target goal
+   * @param {number} waypointThreshold - Distance threshold to use waypoints (default: 75)
+   * @returns {Promise<{status: string}>}
+   */
+  async gotoWithWaypoints(goal, waypointThreshold = 75) {
+    const bot = this.bot;
+    const start = bot.entity.position.clone();
+    const goalPos = goal.getPosition();
+    const distance = start.distanceTo(goalPos);
+
+    // Use waypoints for long distances
+    if (distance > waypointThreshold) {
+      console.log(
+        `Long distance detected (${distance.toFixed(
+          1
+        )} blocks), using waypoint system`
+      );
+
+      const planner = new WaypointPlanner(bot, this);
+      return await planner.navigateWithWaypoints(goal);
+    } else {
+      // Use regular pathfinding for short distances
+      console.log(
+        `Short distance (${distance.toFixed(
+          1
+        )} blocks), using direct pathfinding`
+      );
+      return await this.goto(goal);
     }
   }
 
@@ -196,16 +271,16 @@ class AshFinderPlugin extends EventEmitter {
   // apply a virtual state and prune if search running
   applyVirtualToSearch(pos, state) {
     const key = this.posKey(pos);
-    // store globally so future searches start with it
     this._globalVirtual = this._globalVirtual || new Map();
     this._globalVirtual.set(key, state);
 
-    // apply to running search (if active)
     if (this._searchController && this._searchController.active) {
-      // apply to all cells
       this._searchController.applyVirtual(key, state);
-      // prune invalid nodes
-      this._searchController.prune();
+
+      // ADD THIS: Actually prune invalid nodes
+      const { pruneOpenSet } = require("./utils");
+      const { moveClasses } = require("./movement");
+      pruneOpenSet(this._searchController, this.bot, this.config);
     }
   }
 

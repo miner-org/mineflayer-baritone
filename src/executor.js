@@ -54,6 +54,9 @@ class PathExecutor {
 
     this.previousNode = null;
 
+    this.currentWaypoint = null;
+    this.waypointTolerance = 3; // How close to get to intermediate waypoints
+
     this.lastPosition = null; // Vec3 of last check
     this.stuckTimer = 0; // ticks stuck count
     this.stuckThreshold = 500; // ticks to consider stuck (~1 sec at 20 ticks/sec)
@@ -80,17 +83,18 @@ class PathExecutor {
    * @param {Cell} options.bestNode - The best node found if path is partial
    * @param {Goal} options.finalGoal - The ultimate goal we're trying to reach (for partial paths)
    */
-  setPath(
-    path,
-    {
+  setPath(path, options = {}) {
+    const {
       partial = false,
       targetGoal = null,
       bestNode = null,
       finalGoal = null,
-    } = {}
-  ) {
+      isWaypoint = false,
+      waypointIndex = null,
+    } = options;
+
     // Only create a new promise if one doesn't exist (i.e., not replanning)
-    if (!this.currentPromise) {
+    if (!this.currentPromise || !isWaypoint) {
       this.currentPromise = new Promise((resolve, reject) => {
         this.resolveCurrentPromise = resolve;
         this.rejectCurrentPromise = reject;
@@ -98,6 +102,8 @@ class PathExecutor {
     }
 
     this.finalGoal = finalGoal || targetGoal;
+    this.currentWaypoint = isWaypoint ? targetGoal : null;
+    this.waypointIndex = waypointIndex;
 
     this.path = path;
     this.currentIndex = 0;
@@ -107,8 +113,12 @@ class PathExecutor {
     this.partial = partial;
     this.goal = targetGoal;
 
-    if (this.ashfinder.debug)
-      console.log(partial ? "Executing partial path" : "Executing full path");
+    if (this.ashfinder.debug) {
+      const wpInfo = isWaypoint ? ` (waypoint ${waypointIndex})` : "";
+      console.log(
+        `${partial ? "Executing partial" : "Executing full"} path${wpInfo}`
+      );
+    }
 
     if (bestNode) {
       this.params.bestNode = bestNode;
@@ -139,7 +149,13 @@ class PathExecutor {
     )}`;
     if (!this.visitedPositions.has(posKey)) {
       this.visitedPositions.add(posKey);
-      this.lastProgressTime = Date.now(); // Made progress to new area
+      this.lastProgressTime = Date.now();
+
+      // Prevent memory leak on very long paths
+      if (this.visitedPositions.size > 10000) {
+        const oldest = Array.from(this.visitedPositions).slice(0, 5000);
+        oldest.forEach((key) => this.visitedPositions.delete(key));
+      }
     }
 
     // Improved stuck detection - check for actual progress toward goal
@@ -247,7 +263,6 @@ class PathExecutor {
   replanPath() {
     if (this.ashfinder.debug) console.log("Replanning path...");
 
-    // Store the original promise handlers before resetting
     const originalResolve = this.resolveCurrentPromise;
     const originalReject = this.rejectCurrentPromise;
 
@@ -256,14 +271,24 @@ class PathExecutor {
     this.executing = false;
     this.resetStates();
 
-    // Find new path and chain it to the original promise
-    this.findPathToGoal()
+    // Determine target: current waypoint or final goal
+    const targetGoal = this.currentWaypoint || this.finalGoal;
+
+    if (!targetGoal) {
+      console.error("No target goal available for replanning!");
+      if (originalReject) {
+        originalReject(new Error("No target goal for replanning"));
+      }
+      this.stop();
+      this.ashfinder.stop();
+      return;
+    }
+
+    this.findPathToGoal(targetGoal)
       .then(() => {
-        // Path found and set successfully - execution will continue via tick()
-        // Don't resolve here, let _onGoalReached() handle it
+        // Path found - execution continues via tick()
       })
       .catch((err) => {
-        // Path not found - reject the original promise
         if (originalReject) {
           originalReject(err);
         }
@@ -271,7 +296,6 @@ class PathExecutor {
         this.ashfinder.stop();
       });
 
-    // Restore the original handlers so _onGoalReached can use them
     this.resolveCurrentPromise = originalResolve;
     this.rejectCurrentPromise = originalReject;
   }
@@ -294,17 +318,19 @@ class PathExecutor {
    *
    * @returns {Promise<void>}
    * */
-  async findPathToGoal() {
-    if (!this.finalGoal) {
-      console.warn("No final goal set for pathfinding!");
+  async findPathToGoal(targetGoal = null) {
+    const goal = targetGoal || this.finalGoal;
+
+    if (!goal) {
+      console.warn("No goal set for pathfinding!");
       return;
     }
 
-    const endFunc = createEndFunc(this.finalGoal);
+    const endFunc = createEndFunc(goal);
     const newPath = await Astar(
       this.bot.entity.position.clone().floored(),
-      this.finalGoal.getPosition(),
-      this.finalGoal,
+      goal.getPosition(),
+      goal,
       this.bot,
       endFunc,
       this.ashfinder.config,
@@ -313,7 +339,6 @@ class PathExecutor {
     );
 
     if (newPath.status === "no path") {
-      // console.warn("No path found to the goal!");
       if (this.rejectCurrentPromise) {
         this.rejectCurrentPromise(new Error("No path found"));
         this.rejectCurrentPromise = null;
@@ -325,8 +350,10 @@ class PathExecutor {
 
     return this.setPath(newPath.path, {
       partial: newPath.status === "partial",
-      targetGoal: this.finalGoal,
+      targetGoal: goal,
       bestNode: newPath.bestNode,
+      isWaypoint: !!this.currentWaypoint,
+      waypointIndex: this.waypointIndex,
     });
   }
 
@@ -520,6 +547,33 @@ class PathExecutor {
   }
 
   _onGoalReached() {
+    // If this was a waypoint, don't stop - the waypoint planner will continue
+    if (this.currentWaypoint) {
+      if (this.ashfinder.debug) {
+        console.log(
+          `Reached waypoint ${this.waypointIndex}, ready for next segment`
+        );
+      }
+
+      this.ashfinder.emit("waypoint-reached", {
+        waypoint: this.currentWaypoint,
+        index: this.waypointIndex,
+      });
+
+      if (this.resolveCurrentPromise) {
+        this.resolveCurrentPromise();
+        this.resolveCurrentPromise = null;
+        this.rejectCurrentPromise = null;
+        this.currentPromise = null;
+      }
+
+      // Don't call stop() - waypoint planner will handle next segment
+      this.executing = false;
+      this.visitedPositions.clear();
+      return;
+    }
+
+    // Regular goal reached
     if (this.partial) {
       if (this.ashfinder.debug) console.warn("Reached end of partial path.");
       this.ashfinder.emit("goal-reach-partial", this.goal);
@@ -897,65 +951,114 @@ class PathExecutor {
   }
 
   /**
-   * Swims to the specified node, adjusting controls based on attributes.
-   * Handles vertical movement in water using jump/sneak controls.
-   * @param {Cell} node - The node to swim to, with attributes for vertical
+   * Swims to the specified node with proper vertical control
+   * @param {Cell} node - The node to swim to
    */
   _swimTo(node) {
     const bot = this.bot;
-    const target = node.worldPos;
+    const target = node.attributes.enterTarget
+      ? node.attributes.enterTarget
+      : node.worldPos;
     const pos = bot.entity.position;
-
-    bot.lookAt(target.offset(0.5, 1.6, 0.5), true);
-    bot.setControlState("forward", true);
-
-    this.swimmingState = {
-      active: true,
-      sinking: false,
-      floating: false,
-    };
 
     const attr = node.attributes;
     const yDiff = target.y - pos.y;
 
-    // Determine vertical movement based on target height and attributes
-    if (attr.up || yDiff > 0.5) {
-      // Need to go up - use jump in water
-      bot.setControlState("jump", true);
-      bot.setControlState("sneak", false);
-      this.swimmingState.floating = true;
+    // Initialize swimming state
+    if (!this.swimmingState.active) {
+      this.swimmingState = {
+        active: true,
+        sinking: false,
+        floating: false,
+      };
+    }
 
-      if (this.ashfinder.debug) console.log("Swimming up/exiting water");
-    } else if (attr.down || yDiff < -0.5) {
-      // Need to go down
-      bot.setControlState("jump", false);
+    // ═══════════════════════════
+    // HORIZONTAL MOVEMENT
+    // ═══════════════════════════
+    const horizontalDist = Math.sqrt(
+      Math.pow(target.x - pos.x, 2) + Math.pow(target.z - pos.z, 2)
+    );
+
+    if (horizontalDist > 0.3) {
+      bot.lookAt(target.offset(0, 0, 0), true);
+      bot.setControlState("forward", true);
+    } else {
+      bot.setControlState("forward", false);
+    }
+
+    // ═══════════════════════════
+    // VERTICAL MOVEMENT
+    // ═══════════════════════════
+
+    // Clear previous vertical controls
+    bot.setControlState("jump", false);
+    bot.setControlState("sneak", false);
+
+    // Determine if we need to go up or down
+    const targetIsAbove = yDiff > 0.3;
+    const targetIsBelow = yDiff < -0.3;
+
+    // Check if we're at the surface (head in air, body in water)
+    const headBlock = bot.blockAt(pos.offset(0, 1, 0));
+    const bodyBlock = bot.blockAt(pos);
+    const atSurface = headBlock?.name === "air" && bodyBlock?.name === "water";
+
+    if (attr.up || targetIsAbove) {
+      // SWIMMING UP
+      bot.setControlState("jump", true);
+      this.swimmingState.floating = true;
+      this.swimmingState.sinking = false;
+
+      if (this.ashfinder.debug) console.log("Swimming up");
+    } else if (attr.down || targetIsBelow) {
+      // SWIMMING DOWN
       bot.setControlState("sneak", true);
       this.swimmingState.sinking = true;
+      this.swimmingState.floating = false;
 
       if (this.ashfinder.debug) console.log("Swimming down");
     } else {
-      // Horizontal movement or slight vertical
-      const isExitingWater = this._isWaterExitMove(node);
-
-      if (isExitingWater) {
-        // Extra jump power to exit water
-        bot.setControlState("jump", true);
+      // HORIZONTAL - maintain current depth or surface
+      if (atSurface) {
+        // Stay at surface
+        bot.setControlState("jump", false);
         bot.setControlState("sneak", false);
-        if (this.ashfinder.debug) console.log("Extra jump for water exit");
       } else {
-        // Normal horizontal swimming
-        bot.setControlState("jump", true);
-        bot.setControlState("sneak", false);
+        // Maintain depth with slight upward pressure to avoid sinking
+        const velocityY = bot.entity.velocity.y;
+
+        if (velocityY < -0.05) {
+          // Sinking - counteract
+          bot.setControlState("jump", true);
+        } else if (velocityY > 0.05) {
+          // Rising - counteract
+          bot.setControlState("sneak", true);
+        } else {
+          // Stable
+          bot.setControlState("jump", false);
+          bot.setControlState("sneak", false);
+        }
       }
+
+      if (this.ashfinder.debug) console.log("Swimming horizontally");
     }
 
-    // For purely vertical moves, reduce horizontal movement
-    if (
-      node.parent &&
-      Math.abs(target.x - node.parent.worldPos.x) < 0.1 &&
-      Math.abs(target.z - node.parent.worldPos.z) < 0.1
-    ) {
-      bot.setControlState("forward", false);
+    // ═══════════════════════════
+    // EXITING WATER
+    // ═══════════════════════════
+    if (attr.exitWater) {
+      // Climbing out requires extra jump power
+      if (attr.climbOut) {
+        bot.setControlState("jump", true);
+        bot.setControlState("forward", true);
+        if (this.ashfinder.debug) console.log("Climbing out of water");
+      } else {
+        // Just stepping out
+        bot.setControlState("forward", true);
+        bot.setControlState("jump", false);
+        if (this.ashfinder.debug) console.log("Stepping out of water");
+      }
     }
   }
 
@@ -1143,6 +1246,28 @@ class PathExecutor {
     const block = this.bot.blockAt(node.worldPos);
     const blockName = block?.name ?? "";
 
+    // ═══ SPECIAL HANDLING FOR WATER ═══
+    if (node.attributes?.swim || blockName === "water") {
+      const dx = Math.abs(pos.x - target.x);
+      const dy = Math.abs(pos.y - target.y);
+      const dz = Math.abs(pos.z - target.z);
+
+      // More lenient thresholds for swimming
+      const horizontalClose = dx < 0.5 && dz < 0.5;
+      const verticalClose = dy < 0.6;
+
+      if (this.ashfinder.debug) {
+        console.log(
+          `Swimming check - dx: ${dx.toFixed(2)}, dy: ${dy.toFixed(
+            2
+          )}, dz: ${dz.toFixed(2)}`
+        );
+      }
+
+      return horizontalClose && verticalClose;
+    }
+
+    // ═══ REGULAR BLOCK HANDLING ═══
     let yOffset = 0;
     if (blockName.includes("farmland")) yOffset = 0.9375;
     else if (blockName.includes("fence") || blockName.includes("wall"))
@@ -1163,14 +1288,10 @@ class PathExecutor {
       console.log(
         `dx: ${dx.toFixed(4)}, dy: ${dy.toFixed(4)}, dz: ${dz.toFixed(4)}`
       );
-      console.log(
-        `onGround: ${this.bot.entity.onGround}, ignoreGround: ${ignoreGround}`
-      );
     }
 
     const isCloseEnough = dx < 0.35 && dy <= 0.55 && dz < 0.35;
 
-    // Special handling for water - don't require being on ground
     const isInWater = this._isInWater();
     const isOnGround = this.bot.entity.onGround || ignoreGround || isInWater;
 
