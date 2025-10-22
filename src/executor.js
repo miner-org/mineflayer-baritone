@@ -59,7 +59,7 @@ class PathExecutor {
 
     this.lastPosition = null; // Vec3 of last check
     this.stuckTimer = 0; // ticks stuck count
-    this.stuckThreshold = 500; // ticks to consider stuck (~1 sec at 20 ticks/sec)
+    this.stuckThreshold = 800; // ticks to consider stuck (~1 sec at 20 ticks/sec)
     this.stuckDistanceThreshold = 0.35; // how much movement counts as NOT stuck
 
     this.visitedPositions = new Set(); // Track where we've been
@@ -162,22 +162,35 @@ class PathExecutor {
     const now = Date.now();
     if (now - this.lastProgressTime > this.noProgressTimeout) {
       console.warn("No progress toward goal for 30s, replanning...");
-      this.visitedPositions.clear(); // Clear history on replan
+      this.visitedPositions.clear();
       this.lastProgressTime = now;
       this.replanPath();
       return;
     }
 
-    // Original stuck detection (but with action check)
+    // Enhanced stuck detection with better action awareness
     if (this.lastPosition) {
       const distMoved = pos.distanceTo(this.lastPosition);
-      if (this._isActionBusy()) {
+
+      // Check if bot is doing valid actions that prevent movement
+      if (this._isActionBusy() || this._isValidNonMovement()) {
         this.lastPosition = pos.clone();
-        this.stuckTimer = 0; // Reset timer during actions
+        this.stuckTimer = 0;
         return;
       }
 
-      if (distMoved < this.stuckDistanceThreshold) {
+      // More lenient threshold for vertical movement
+      const verticalMovement = Math.abs(pos.y - this.lastPosition.y);
+      const horizontalMovement = Math.sqrt(
+        Math.pow(pos.x - this.lastPosition.x, 2) +
+          Math.pow(pos.z - this.lastPosition.z, 2)
+      );
+
+      const isMoving =
+        verticalMovement > 0.05 ||
+        horizontalMovement > this.stuckDistanceThreshold;
+
+      if (!isMoving) {
         this.stuckTimer++;
         if (this.stuckTimer > this.stuckThreshold) {
           console.warn("Bot physically stuck, replanning...");
@@ -258,6 +271,24 @@ class PathExecutor {
     this.currentPromise = this._executeMove(node, nextNode);
     await this.currentPromise;
     this.currentPromise = null;
+  }
+
+  /**
+   * Checks if the bot is in a valid non-movement state (not stuck)
+   */
+  _isValidNonMovement() {
+    const node = this.path[this.currentIndex];
+    if (!node) return false;
+
+    // Bot is allowed to be stationary during these states
+    return (
+      this.jumpState?.jumped || // Mid-jump
+      this.climbingState || // Climbing ladder
+      this.swimmingState?.active || // Swimming (can have slow movement)
+      node.attributes?.interact || // Interacting with blocks
+      node.attributes?.ladder || // On ladder
+      !this.bot.entity.onGround // In air (jumping/falling)
+    );
   }
 
   replanPath() {

@@ -295,6 +295,15 @@ async function Astar(
 
       closedSet.add(defaultHash(currentNode.worldPos));
 
+      const distToGoal = currentNode.worldPos.distanceTo(getEnd());
+      const distFromStart = currentNode.worldPos.distanceTo(startPos);
+      const straightLine = startPos.distanceTo(getEnd());
+
+      // If we're exploring way beyond what makes sense, skip
+      if (distToGoal > straightLine * 2 && distFromStart > straightLine * 1.5) {
+        continue; // Skip this node, move to next in openList
+      }
+
       // Track best node for partial path returns
       const h = hCost1(currentNode.worldPos, getEnd());
       const fromStart = currentNode.worldPos.distanceTo(startPos);
@@ -379,16 +388,38 @@ async function Astar(
   });
 
   function processNeighbor(currentNode, neighborData) {
-    // Always clone parent's overlay for safety
-    const overlay = new Map(currentNode.virtualBlocks || []);
+    const hash = defaultHash(neighborData);
 
-    // Apply this neighbor's planned changes
-    for (const b of neighborData.attributes.break || []) {
-      overlay.set(b.toString(), "air");
+    let tempG = currentNode.gCost + neighborData.cost;
+    let overlay = currentNode.virtualBlocks;
+
+    let neighbor = openSet.get(hash);
+
+    // ✅ Early exit BEFORE expensive operations
+    if (neighbor && tempG >= neighbor.gCost) {
+      return;
     }
-    for (const p of neighborData.attributes.place || []) {
-      overlay.set(p.toString(), "placed");
+
+    // ✅ Only calculate hazards for nodes we'll actually use
+    applyHazardPenalty(neighborData, bot);
+    tempG = currentNode.gCost + neighborData.cost;
+
+    // Only clone if we need to modify
+    if (
+      neighborData.attributes.break?.length ||
+      neighborData.attributes.place?.length
+    ) {
+      overlay = new Map(overlay || []);
+
+      for (const b of neighborData.attributes.break || []) {
+        overlay.set(b.toString(), "air");
+      }
+      for (const p of neighborData.attributes.place || []) {
+        overlay.set(p.toString(), "placed");
+      }
     }
+
+    neighborData.virtualBlocks = overlay;
 
     if (neighborData.attributes && neighborData.attributes.name) {
       const feet = new Vec3(neighborData.x, neighborData.y, neighborData.z);
@@ -400,13 +431,6 @@ async function Astar(
     }
 
     neighborData.virtualBlocks = overlay;
-
-    let tempG = currentNode.gCost + neighborData.cost;
-    applyHazardPenalty(neighborData, bot);
-    tempG = currentNode.gCost + neighborData.cost;
-
-    const hash = defaultHash(neighborData);
-    let neighbor = openSet.get(hash);
 
     if (!neighbor) {
       neighbor = new Cell();
@@ -466,13 +490,26 @@ function getProximityPenalty(pos, bot, blockName, maxRadius, maxPenalty) {
 function applyHazardPenalty(neighborData, bot) {
   const pos = new Vec3(neighborData.x, neighborData.y, neighborData.z);
 
-  // Lava penalty: stronger when closer
-  const lavaPenalty = getProximityPenalty(pos, bot, "lava", 2, 8);
-  neighborData.cost += lavaPenalty;
+  // Quick check: only scan for hazards if we have reason to believe they're nearby
+  // This saves a ton of computation
+  const feetBlock = bot.blockAt(pos);
+  const belowBlock = bot.blockAt(pos.offset(0, -1, 0));
 
-  // Cactus penalty: stronger when closer
-  const cactusPenalty = getProximityPenalty(pos, bot, "cactus", 2, 4);
-  neighborData.cost += cactusPenalty;
+  // Only do expensive radius search if we're near suspicious blocks
+  if (
+    feetBlock?.name === "lava" ||
+    belowBlock?.name === "lava" ||
+    feetBlock?.material === "lava" ||
+    belowBlock?.material === "lava"
+  ) {
+    const lavaPenalty = getProximityPenalty(pos, bot, "lava", 2, 8);
+    neighborData.cost += lavaPenalty;
+  }
+
+  if (feetBlock?.name === "cactus" || belowBlock?.name === "cactus") {
+    const cactusPenalty = getProximityPenalty(pos, bot, "cactus", 2, 4);
+    neighborData.cost += cactusPenalty;
+  }
 }
 
 /**
@@ -516,8 +553,11 @@ function hCost1(node, goal) {
 
   let h = diag3Cost * min + diag2Cost * (mid - min) + (max - mid);
 
-  // tiny bias: prefer nodes that aren’t “directly under” the goal
-  // h += (dx + dz) * 0.05;
+  // Stronger heuristic weight for short distances
+  const totalDist = dx + dy + dz;
+  if (totalDist < 20) {
+    h *= 1.15; // Make heuristic more aggressive for nearby goals
+  }
 
   return h;
 }
