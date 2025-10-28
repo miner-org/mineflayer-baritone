@@ -22,7 +22,10 @@ class MovePlaceUp extends Move {
 
     if (!this.isSolid(originVec.down(1))) return;
 
-    const canPlace = this.config.placeBlocks && this.hasScaffoldingBlocks();
+    const canPlace =
+      this.config.placeBlocks &&
+      this.hasScaffoldingBlocks() &&
+      this.canAffordPlacement(1);
 
     if (!canPlace) return;
 

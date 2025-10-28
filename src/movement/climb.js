@@ -20,6 +20,7 @@ class MoveLadderEnter extends Move {
     if (isFromSolid && isLadder && headClear) {
       node.attributes["name"] = this.name;
       node.attributes["ladder"] = true;
+      node.attributes["enter"] = true;
       // console.log("Adding ladder enter movement", node);
       node.attributes["cost"] = this.COST_LADDER ?? this.COST_NORMAL + 1;
       neighbors.push(
@@ -74,43 +75,52 @@ class MoveLadderExit extends Move {
 class MoveLadderClimb extends Move {
   generate(cardinalDirections, origin, neighbors) {
     // For each cardinal direction, check if ladder climb is possible at origin
-    for (const dir of cardinalDirections) {
-      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
-      const node = originVec.offset(dir.x, 0, dir.z);
+    // for (const dir of cardinalDirections) {
+    const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
+      x: 0,
+      z: 0,
+    });
 
-      // We only consider climbing if the bot is currently on a ladder block or next to one
-      if (!this.isClimbable(node)) continue;
+    const node = originVec.clone();
+    const nodeBelow = node.down(1);
 
-      // From the origin, climb upwards along the ladder stack
-      let climbPos = node.clone();
+    // if (!this.isClimbable(nodeBelow)) return;
 
-      let lastValid = climbPos.clone(); // Start with origin
+    // We only consider climbing if the bot is currently on a ladder block or next to one
+    if (!this.isClimbable(node)) return;
 
-      while (true) {
-        if (!this.isClimbable(climbPos)) break;
-        const headPos = climbPos.up(1);
-        if (!(this.isAir(headPos) || this.isClimbable(headPos))) break;
+    // console.log("Seeyuh");
 
-        lastValid = climbPos.clone();
+    // From the origin, climb upwards along the ladder stack
+    let climbPos = node.clone();
 
-        climbPos = climbPos.up(1);
-      }
+    let lastValid = climbPos.clone(); // Start with origin
 
-      lastValid.attributes = lastValid.attributes || {};
-      lastValid.attributes["name"] = this.name;
-      lastValid.attributes["ladder"] = true;
-      lastValid.attributes["cost"] = this.COST_LADDER;
-      neighbors.push(
-        this.makeMovement(lastValid, this.COST_LADDER ?? this.COST_NORMAL + 1)
-      );
+    while (true) {
+      if (!this.isClimbable(climbPos)) break;
+      const headPos = climbPos.up(1);
+      if (!(this.isAir(headPos) || this.isClimbable(headPos))) break;
+
+      lastValid = climbPos.clone();
+
+      climbPos = climbPos.up(1);
     }
+
+    lastValid.attributes = lastValid.attributes || {};
+    lastValid.attributes["name"] = this.name;
+    lastValid.attributes["ladder"] = true;
+    lastValid.attributes["cost"] = this.COST_LADDER;
+    neighbors.push(
+      this.makeMovement(lastValid, this.COST_LADDER ?? this.COST_NORMAL + 1)
+    );
   }
+  // }
 }
 
 class MoveLadderDescend extends Move {
   generate(cardinalDirections, origin, neighbors) {
     const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
-      x: 1,
+      x: 0,
       z: 0,
     });
 
@@ -164,16 +174,14 @@ class MoveLadderEnterDescend extends Move {
     const below = node.down(1);
 
     if (!this.isWalkable(node)) return;
-
     if (!this.isClimbable(below)) return;
-
-    // console.log(this.getBlock(below));
 
     const target = node.clone();
 
     target.attributes["name"] = this.name;
     target.attributes["ladder"] = true;
     target.attributes["descend"] = true;
+    target.attributes["enterTarget"] = node.clone(); 
     target.attributes["cost"] = this.COST_LADDER ?? this.COST_NORMAL + 1;
     neighbors.push(
       this.makeMovement(target, this.COST_LADDER ?? this.COST_NORMAL + 1)
@@ -184,7 +192,7 @@ class MoveLadderEnterDescend extends Move {
 registerMoves([
   new MoveLadderEnter(10),
   new MoveLadderExit(10),
-  new MoveLadderClimb(10),
-  new MoveLadderDescend(10),
+  new MoveLadderClimb(15),
+  new MoveLadderDescend(15),
   new MoveLadderEnterDescend(10),
 ]);

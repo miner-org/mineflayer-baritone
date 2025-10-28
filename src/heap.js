@@ -238,9 +238,18 @@ class BinaryHeapOpenSet {
 
   update(val) {
     const current = this.indexMap.get(val);
-    if (current === undefined || this.heap[current] !== val) return; // Value not in heap or map is stale
-    this.bubbleUp(current);
-    this.bubbleDown(current);
+    if (current === undefined || this.heap[current] !== val) return;
+
+    // Only one direction will actually move the nodeea
+    const parent = current >>> 1;
+    if (
+      current > 1 &&
+      this.compare(this.heap[current], this.heap[parent]) < 0
+    ) {
+      this.bubbleUp(current);
+    } else {
+      this.bubbleDown(current);
+    }
   }
 
   pop() {
@@ -261,7 +270,10 @@ class BinaryHeapOpenSet {
 
   remove(val) {
     const index = this.indexMap.get(val);
-    if (index === undefined) return;
+    if (index === undefined) {
+      console.log("HEAP: somehow this is undefind lol fajbfiajn");
+      return;
+    }
 
     const last = this.heap.pop();
     if (index < this.heap.length) {

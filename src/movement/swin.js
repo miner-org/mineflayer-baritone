@@ -97,10 +97,12 @@ class MoveSwimStart extends Move {
       return;
     }
 
+    // console.log("here")
+
     // ═══════════════════════════
     // CASE 3: Dive into water from height
     // ═══════════════════════════
-    const maxDive = Math.min(this.config.maxWaterDist ?? 10, 15);
+    const maxDive = Math.max(this.config.maxWaterDist ?? 10, 15);
     let diveDistance = 0;
     let below = node.down(1);
 
@@ -110,25 +112,24 @@ class MoveSwimStart extends Move {
       below = below.down(1);
     }
 
+    // console.log(this.getBlock(below))
+    // console.log(this.config.maxWaterDist)
+    // console.log(diveDistance)
+
+    // console.log("not air")
+
     // Need to land in water with at least 2 blocks depth to be safe
     if (diveDistance > 0 && this.isWater(below)) {
-      const waterDepth = this.getWaterDepth(below);
-
-      // Require deeper water for higher dives
-      const requiredDepth = Math.min(3, Math.ceil(diveDistance / 3));
-
-      if (waterDepth >= requiredDepth) {
-        const targetNode = below.clone();
-        targetNode.attributes = {
-          name: this.name + "_dive",
-          swim: true,
-          fallDistance: diveDistance,
-          cost: this.COST_SWIM_START + diveDistance * 0.3,
-        };
-        neighbors.push(
-          this.makeMovement(targetNode, targetNode.attributes.cost)
-        );
-      }
+      this.log("Can dive at: ", below.toString());
+      const targetNode = below.clone();
+      targetNode.attributes = {
+        name: this.name + "_dive",
+        swim: true,
+        dive: true,
+        fallDistance: diveDistance,
+        cost: this.COST_SWIM_START + diveDistance * 0.3,
+      };
+      neighbors.push(this.makeMovement(targetNode, targetNode.attributes.cost));
     }
   }
 
@@ -176,7 +177,8 @@ class MoveSwimExit extends Move {
     // console.log(this.getBlock(node));
     // console.log("===========");
     // Target must be air (or allow stepping on lily pads/etc)
-    if (!this.isAir(node) && !this.getBlock(node)?.name.includes("lily")) return;
+    if (!this.isAir(node) && !this.getBlock(node)?.name.includes("lily"))
+      return;
 
     // Must have solid ground to step onto
     if (!this.isSolid(nodeBelow)) return;

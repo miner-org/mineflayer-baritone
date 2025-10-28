@@ -32,7 +32,7 @@ class PathExecutor {
     this.jumpState = null;
     this.toweringState = { active: false, phase: 0 };
     this.swimmingState = { active: false, sinking: false, floating: false };
-    this.climbingState = false;
+    this.climbingState = false; // Can be false or { phase: 'positioning'|'climbing'|'descending', target: Vec3 }
     this.interactingState = false;
 
     this.placedNodes = new Set();
@@ -143,67 +143,14 @@ class PathExecutor {
 
     const pos = this.bot.entity.position;
 
-    // Track visited positions for long-distance travel
-    const posKey = `${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(
-      pos.z
-    )}`;
-    if (!this.visitedPositions.has(posKey)) {
-      this.visitedPositions.add(posKey);
-      this.lastProgressTime = Date.now();
-
-      // Prevent memory leak on very long paths
-      if (this.visitedPositions.size > 10000) {
-        const oldest = Array.from(this.visitedPositions).slice(0, 5000);
-        oldest.forEach((key) => this.visitedPositions.delete(key));
-      }
-    }
-
-    // Improved stuck detection - check for actual progress toward goal
-    const now = Date.now();
-    if (now - this.lastProgressTime > this.noProgressTimeout) {
-      console.warn("No progress toward goal for 30s, replanning...");
-      this.visitedPositions.clear();
-      this.lastProgressTime = now;
-      this.replanPath();
+    // Check for actual progress toward goal
+    if (this._checkStuckConditions(pos)) {
+      console.warn("Bot is stuck, replanning...");
+      this._handleStuckState();
       return;
     }
 
-    // Enhanced stuck detection with better action awareness
-    if (this.lastPosition) {
-      const distMoved = pos.distanceTo(this.lastPosition);
-
-      // Check if bot is doing valid actions that prevent movement
-      if (this._isActionBusy() || this._isValidNonMovement()) {
-        this.lastPosition = pos.clone();
-        this.stuckTimer = 0;
-        return;
-      }
-
-      // More lenient threshold for vertical movement
-      const verticalMovement = Math.abs(pos.y - this.lastPosition.y);
-      const horizontalMovement = Math.sqrt(
-        Math.pow(pos.x - this.lastPosition.x, 2) +
-          Math.pow(pos.z - this.lastPosition.z, 2)
-      );
-
-      const isMoving =
-        verticalMovement > 0.05 ||
-        horizontalMovement > this.stuckDistanceThreshold;
-
-      if (!isMoving) {
-        this.stuckTimer++;
-        if (this.stuckTimer > this.stuckThreshold) {
-          console.warn("Bot physically stuck, replanning...");
-          this.stuckTimer = 0;
-          this.visitedPositions.clear();
-          this.lastProgressTime = now;
-          this.replanPath();
-          return;
-        }
-      } else {
-        this.stuckTimer = 0;
-      }
-    }
+    // Update last position for next check
     this.lastPosition = pos.clone();
 
     // path complete check
@@ -222,16 +169,17 @@ class PathExecutor {
       this.jumpState?.jumped ||
         this.toweringState.active ||
         this.swimmingState?.active ||
-        !!this.climbingState
+        this.climbingState
     );
 
     if (reached) {
       // stop climbing controls if this was a ladder node
       if (node.attributes.ladder) {
+        // console.log("Dih")
         this.bot.setControlState("forward", false);
         this.bot.setControlState("jump", false);
         this.bot.setControlState("sneak", false);
-        this.climbingState = false;
+        this.climbingState = false; // Reset entire state
         this.climbingTarget = null;
       }
 
@@ -274,21 +222,159 @@ class PathExecutor {
   }
 
   /**
-   * Checks if the bot is in a valid non-movement state (not stuck)
+   * Comprehensive stuck detection system
+   * @param {Vec3} currentPos - Current bot position
+   * @returns {boolean} - True if bot is stuck
    */
-  _isValidNonMovement() {
+  _checkStuckConditions(currentPos) {
+    const now = Date.now();
+
+    // Track visited positions for loop detection
+    const posKey = `${Math.floor(currentPos.x)},${Math.floor(
+      currentPos.y
+    )},${Math.floor(currentPos.z)}`;
+    if (!this.visitedPositions.has(posKey)) {
+      this.visitedPositions.add(posKey);
+      this.lastProgressTime = now;
+
+      // Prevent memory leak on very long paths
+      if (this.visitedPositions.size > 10000) {
+        const oldest = Array.from(this.visitedPositions).slice(0, 5000);
+        oldest.forEach((key) => this.visitedPositions.delete(key));
+      }
+    }
+
+    // Check 1: No new positions visited for too long
+    if (now - this.lastProgressTime > this.noProgressTimeout) {
+      return true;
+    }
+
+    // Check 2: Physical movement detection
+    if (this.lastPosition && !this._isValidStationary()) {
+      const movement = this._calculateMovement(currentPos, this.lastPosition);
+
+      if (!movement.isMoving) {
+        this.stuckTimer++;
+
+        // Progressive timeout based on context
+        const threshold = this._getStuckThreshold();
+
+        if (this.stuckTimer > threshold) {
+          return true;
+        }
+      } else {
+        this.stuckTimer = 0;
+      }
+    }
+
+    // Check 3: Repetitive position cycling (going back and forth)
+    if (this._detectPositionCycle()) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Calculate movement metrics between two positions
+   * @param {Vec3} current - Current position
+   * @param {Vec3} previous - Previous position
+   * @returns {Object} Movement data
+   */
+  _calculateMovement(current, previous) {
+    const verticalMovement = Math.abs(current.y - previous.y);
+    const horizontalMovement = Math.sqrt(
+      Math.pow(current.x - previous.x, 2) + Math.pow(current.z - previous.z, 2)
+    );
+
+    const totalMovement = Math.sqrt(
+      horizontalMovement * horizontalMovement +
+        verticalMovement * verticalMovement
+    );
+
+    return {
+      vertical: verticalMovement,
+      horizontal: horizontalMovement,
+      total: totalMovement,
+      isMoving:
+        verticalMovement > 0.05 ||
+        horizontalMovement > this.stuckDistanceThreshold,
+    };
+  }
+
+  /**
+   * Check if bot is legitimately stationary (not stuck)
+   * @returns {boolean}
+   */
+  _isValidStationary() {
+    // Bot is busy with actions that prevent movement
+    if (this._isActionBusy()) return true;
+
     const node = this.path[this.currentIndex];
     if (!node) return false;
 
-    // Bot is allowed to be stationary during these states
+    // Legitimate stationary states
     return (
-      this.jumpState?.jumped || // Mid-jump
-      this.climbingState || // Climbing ladder
-      this.swimmingState?.active || // Swimming (can have slow movement)
-      node.attributes?.interact || // Interacting with blocks
-      node.attributes?.ladder || // On ladder
-      !this.bot.entity.onGround // In air (jumping/falling)
+      this.swimmingState?.active ||
+      node.attributes?.interact ||
+      node.attributes?.ladder ||
+      !this.bot.entity.onGround // In air
     );
+  }
+
+  /**
+   * Get adaptive stuck threshold based on current action
+   * @returns {number} Ticks before considering stuck
+   */
+  _getStuckThreshold() {
+    const node = this.path[this.currentIndex];
+
+    // Higher thresholds for complex actions
+    if (node?.attributes?.ascend) return 1200; // Towering needs more time
+    if (node?.attributes?.swim) return 1000; // Swimming can be slow
+    if (node?.attributes?.parkour) return 600; // Parkour needs precision
+    if (this.swimmingState?.active) return 1000;
+
+    return this.stuckThreshold; // Default 800 ticks
+  }
+
+  /**
+   * Detect if bot is cycling between same positions
+   * @returns {boolean}
+   */
+  _detectPositionCycle() {
+    if (this.visitedPositions.size < 10) return false;
+
+    const recentPositions = Array.from(this.visitedPositions).slice(-20);
+    const uniqueRecent = new Set(recentPositions);
+
+    // If we're revisiting the same ~3 positions repeatedly
+    if (uniqueRecent.size <= 3 && recentPositions.length >= 15) {
+      if (this.ashfinder.debug) {
+        console.log("Detected position cycling pattern");
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Handle stuck state and initiate recovery
+   */
+  _handleStuckState() {
+    this.stuckTimer = 0;
+    this.visitedPositions.clear();
+    this.lastProgressTime = Date.now();
+
+    // Optional: Try small random movement to escape local traps
+    if (this.bot.entity.onGround) {
+      const randomDir = Math.random() < 0.5 ? "left" : "right";
+      this.bot.setControlState(randomDir, true);
+      setTimeout(() => this.bot.setControlState(randomDir, false), 200);
+    }
+
+    this.replanPath();
   }
 
   replanPath() {
@@ -339,10 +425,11 @@ class PathExecutor {
     this.toweringState = { active: false, phase: 0 };
     this.swimmingState = { active: false, sinking: false, floating: false };
     this.climbingState = false;
+    this.climbingTarget = null;
     this.interactingState = false;
     this.jumpState = null;
-    this.lastPosition = null; // Vec3 of last check
-    this.stuckTimer = 0; // ticks stuck count
+    this.lastPosition = null;
+    this.stuckTimer = 0;
   }
 
   /**
@@ -394,6 +481,7 @@ class PathExecutor {
    * @param {Cell} nextNode
    */
   async _executeMove(node, nextNode) {
+    // console.log("F")
     if (this._isActionBusy()) return;
 
     if (this.ashfinder.debug) {
@@ -413,7 +501,7 @@ class PathExecutor {
       );
 
     // Handle water-related moves first
-    if (this._isInWater() || attributes.swim) {
+    if (this._isInWater() || (attributes.swim && !attributes.dive)) {
       if (this.ashfinder.debug) console.log("Executing water-based movement");
       this._swimTo(node);
       return;
@@ -440,11 +528,10 @@ class PathExecutor {
 
       this._simpleJump(node);
     } else if (attributes.ladder) {
-      if (!this.climbingState) {
-        if (attributes.descend) {
-          this._startClimbDown(node);
-        } else this._startClimb(node);
-      }
+      if (attributes.descend) {
+        this._startClimbDown(node);
+      } else this._startClimb(node);
+
       return;
     } else if (
       attributes.interact &&
@@ -477,7 +564,15 @@ class PathExecutor {
         attributes.place?.length > 0 &&
         !this.placedNodes.has(node.worldPos.toString())
       ) {
-        await this._placeBlock(node);
+        // Check if this is a bridging scenario (placing over void/gap)
+        const isBridging = this._isBridgingMove(node);
+
+        if (isBridging) {
+          await this._safeBridge(node);
+        } else {
+          await this._placeBlock(node);
+        }
+
         this.placedNodes.add(node.worldPos.toString());
       }
 
@@ -494,6 +589,20 @@ class PathExecutor {
   }
 
   _isActionBusy() {
+    // Don't block if we're positioning for any ladder movement
+    if (this.climbingState && typeof this.climbingState === "object") {
+      if (this.climbingState.phase === "positioning") {
+        return false; // Allow _executeMove to keep running
+      }
+      // During actual climbing/descending, we're busy
+      return false;
+    }
+
+    // Legacy boolean check (if not using phased climbing)
+    if (this.climbingState === true) {
+      return true;
+    }
+
     return (
       this.placingState ||
       this.breakingState ||
@@ -551,6 +660,146 @@ class PathExecutor {
     }
 
     this.placingState = false;
+  }
+
+  /**
+   * Check if this move requires bridging over a gap
+   * @param {Cell} node
+   * @returns {boolean}
+   */
+  _isBridgingMove(node) {
+    if (!node.attributes.place?.length) return false;
+
+    // Check if we're placing blocks over empty space (void/gap)
+    for (const placePos of node.attributes.place) {
+      const blockBelow = this.bot.blockAt(placePos.offset(0, -1, 0));
+
+      // If placing over air/void = bridging
+      if (!blockBelow || blockBelow.boundingBox === "empty") {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Safely bridge across a gap like Baritone
+   * @param {Cell} node
+   */
+  async _safeBridge(node) {
+    const bot = this.bot;
+    const blockPlace = getBlockToPlace(bot);
+
+    if (!blockPlace) {
+      console.warn("No blocks to place for bridging!");
+      return;
+    }
+
+    this._clearAllControls();
+    await bot.waitForTicks(3);
+
+    if (this.placingState) return;
+
+    this.placingState = true;
+
+    try {
+      await equipBlockIfNeeded(bot, blockPlace);
+
+      for (const placePos of node.attributes.place) {
+        const targetPos = new Vec3(placePos.x, placePos.y, placePos.z);
+        const block = bot.blockAt(targetPos);
+
+        if (!block || block.boundingBox !== "empty") continue;
+
+        // --- BARITONE-STYLE BRIDGING ---
+
+        // 1. Position at edge safely
+        await this._positionAtEdge(
+          targetPos,
+          node.attributes.dir || placePos.dir
+        );
+
+        // 2. Sneak to prevent falling
+        bot.setControlState("sneak", true);
+        await bot.waitForTicks(2);
+
+        // 3. Look down at placement position
+        await bot.lookAt(targetPos.offset(0.5, 0, 0.5), true);
+        await bot.waitForTicks(1);
+
+        // 4. Place block
+        try {
+          await placeBlock(bot, bot.heldItem?.name, targetPos.floored());
+
+          if (this.ashfinder.debug) {
+            console.log(`Bridged block at ${targetPos}`);
+          }
+
+          await bot.waitForTicks(2);
+        } catch (error) {
+          console.error(`Error bridging at ${targetPos}:`, error);
+        }
+
+        // 5. Walk onto the placed block carefully
+        bot.setControlState("forward", true);
+        await bot.waitForTicks(3);
+        bot.setControlState("forward", false);
+      }
+
+      // Release sneak after bridging
+      bot.setControlState("sneak", false);
+    } finally {
+      this.placingState = false;
+      bot.setControlState("sneak", false);
+    }
+  }
+
+  /**
+   * Position the bot at the edge for safe bridging
+   * @param {Vec3} targetBlock - Where we want to place
+   * @param {Object} direction - Direction vector
+   */
+  async _positionAtEdge(targetBlock, direction) {
+    const bot = this.bot;
+    const pos = bot.entity.position;
+
+    // Calculate edge position (move toward target until at edge)
+    const dir = direction
+      ? new Vec3(direction.x, 0, direction.z).normalize()
+      : targetBlock.minus(pos).normalize();
+
+    // Move to edge of current block
+    const edgeThreshold = 0.3; // Distance from edge to start placing
+
+    while (true) {
+      const currentPos = bot.entity.position;
+      const distToTarget = currentPos.distanceTo(targetBlock);
+
+      // Check if we're at appropriate distance
+      if (distToTarget < 1.2 && distToTarget > 0.8) {
+        break; // Good position
+      }
+
+      // Check if we're about to fall
+      const blockAhead = bot.blockAt(
+        currentPos.offset(dir.x * 0.5, -1, dir.z * 0.5).floored()
+      );
+
+      if (!blockAhead || blockAhead.boundingBox === "empty") {
+        // At edge, stop
+        break;
+      }
+
+      // Move forward slightly
+      bot.lookAt(targetBlock.offset(0.5, 0, 0.5), true);
+      bot.setControlState("forward", true);
+      await bot.waitForTicks(1);
+      bot.setControlState("forward", false);
+      await bot.waitForTicks(1);
+    }
+
+    bot.setControlState("forward", false);
   }
 
   _isInWater() {
@@ -769,33 +1018,70 @@ class PathExecutor {
     const bot = this.bot;
     const target = node.worldPos;
 
-    // face ladder
-    bot.lookAt(target.offset(0, 1, 0), true);
+    // Initialize climbing state with phases
+    if (!this.climbingState) {
+      this.climbingState = { phase: "positioning", target: target.clone() };
+    }
 
-    // mark climbing state (movement, not action busy)
-    this.climbingState = true;
-    this.climbingTarget = target.clone(); // for optional timeout/diagnostics
+    const pos = bot.entity.position;
+    const dx = Math.abs(pos.x - target.x);
+    const dz = Math.abs(pos.z - target.z);
 
-    // press controls to stick to the ladder and climb
-    bot.setControlState("forward", true);
-    bot.setControlState("jump", true);
+    // Phase 1: Position in front of ladder
+    if (this.climbingState.phase === "positioning") {
+      if (dx > 0.25 || dz > 0.25) {
+        bot.lookAt(target.offset(0, 1, 0), true);
+        bot.setControlState("forward", true);
+        if (this.ashfinder.debug) console.log("Positioning for ladder climb");
+        return;
+      }
 
-    // note: we do NOT await here. tick() will watch for reaching the node and stop the controls.
+      // Positioned! Move to climbing phase
+      bot.setControlState("forward", false);
+      this.climbingState.phase = "climbing";
+      if (this.ashfinder.debug) console.log("Positioned, starting climb");
+    }
+
+    // Phase 2: Actually climb
+    if (this.climbingState.phase === "climbing") {
+      bot.setControlState("forward", true);
+      // bot.setControlState("jump", true);
+    }
   }
 
   _startClimbDown(node) {
     const bot = this.bot;
-    const target = node.worldPos;
+    const target = node.attributes.enterTarget || node.worldPos;
 
-    this.climbingState = true;
-    this.climbingTarget = target.clone();
+    // Initialize climbing state with phases
+    if (!this.climbingState) {
+      this.climbingState = { phase: "positioning", target: target.clone() };
+    }
 
-    bot.setControlState("forward", false);
-    bot.setControlState("forward", true);
-    bot.setControlState("forward", false);
-    bot.setControlState("jump", false);
+    const pos = bot.entity.position;
+    const dx = Math.abs(pos.x - target.x);
+    const dz = Math.abs(pos.z - target.z);
 
-    bot.lookAt(target.offset(0, 1, 0), true);
+    // Phase 1: Position to center
+    if (this.climbingState.phase === "positioning") {
+      if (dx > 0.25 || dz > 0.25) {
+        bot.lookAt(target, true);
+        bot.setControlState("forward", true);
+        if (this.ashfinder.debug) console.log("Positioning for ladder descent");
+        return;
+      }
+
+      // Centered! Move to descent phase
+      bot.setControlState("forward", false);
+      this.climbingState.phase = "descending";
+      if (this.ashfinder.debug) console.log("Positioned, starting descent");
+    }
+
+    // Phase 2: Actually descend
+    if (this.climbingState.phase === "descending") {
+      bot.lookAt(target.offset(0, -1, 0), true);
+      // bot.setControlState("sneak", true);
+    }
   }
 
   /**
@@ -943,7 +1229,7 @@ class PathExecutor {
     const bot = this.bot;
 
     if (this.toweringState.active) return;
-    bot.clearControlStates();
+    this._clearAllControls();
     this.toweringState.active = true;
 
     try {
@@ -1059,7 +1345,7 @@ class PathExecutor {
         // Maintain depth with slight upward pressure to avoid sinking
         const velocityY = bot.entity.velocity.y;
 
-        if (velocityY < -0.05) {
+        if (velocityY < -0.01) {
           // Sinking - counteract
           bot.setControlState("jump", true);
         } else if (velocityY > 0.05) {
@@ -1115,7 +1401,7 @@ class PathExecutor {
     // Look toward jump direction
     bot.lookAt(to.offset(0, 1.6, 0), true);
 
-    // NEW: Ensure we're moving forward cleanly
+    // Ensure we're moving forward cleanly
     if (!this.jumpState) {
       this._clearAllControls();
     }
@@ -1123,7 +1409,8 @@ class PathExecutor {
     bot.setControlState("forward", true);
 
     // Init jump state if needed
-    if (!this.jumpState) this.jumpState = { jumped: false, timer: 0 };
+    if (!this.jumpState)
+      this.jumpState = { jumped: false, timer: 0, isAutoJump: false };
 
     const dx = to.x - from.x;
     const dz = to.z - from.z;
@@ -1131,23 +1418,45 @@ class PathExecutor {
 
     // Trigger jump once when reaching edge
     if (!this.jumpState.jumped) {
-      if (
-        this._shouldJumpNow(from.floored(), to.floored(), bot, true) ||
-        this._shouldAutoJump(to, bot) ||
-        (horizontalDist > 0.9 && horizontalDist < 1.4)
-      ) {
+      const shouldJumpNow = this._shouldJumpNow(
+        from.floored(),
+        to.floored(),
+        bot,
+        true
+      );
+      const shouldAutoJump = this._shouldAutoJump(to, bot);
+      const isGapJump = horizontalDist > 0.9 && horizontalDist < 1.4;
+
+      if (shouldJumpNow || shouldAutoJump || isGapJump) {
         this.jumpState.jumped = true;
         this.jumpState.timer = 0;
+        this.jumpState.isAutoJump = shouldAutoJump; // Track if this is an auto-jump
         bot.setControlState("jump", true);
+
+        if (this.ashfinder.debug) {
+          console.log(`Simple jump triggered (autoJump: ${shouldAutoJump})`);
+        }
       }
     }
 
     // Handle jump timing & reset
     if (this.jumpState.jumped) {
       this.jumpState.timer++;
-      if (this.jumpState.timer > 2) {
+
+      // Use longer timer for auto-jumps (climbing up blocks)
+      const maxTimer = this.jumpState.isAutoJump ? 8 : 2;
+
+      if (this.jumpState.timer > maxTimer) {
         bot.setControlState("jump", false);
-        this.jumpState.jumped = false; // Reset so we can jump again if needed
+
+        // Only reset if we're on ground or falling (prevents premature reset mid-air)
+        if (bot.entity.onGround || bot.entity.velocity.y < -0.1) {
+          this.jumpState = null;
+
+          if (this.ashfinder.debug) {
+            console.log("Jump state reset - on ground or falling");
+          }
+        }
       }
     }
   }
@@ -1276,6 +1585,25 @@ class PathExecutor {
 
     const block = this.bot.blockAt(node.worldPos);
     const blockName = block?.name ?? "";
+
+    // Special handling for ladder descent entry
+    if (node.attributes?.descend && node.attributes?.ladder) {
+      // console.log("Ladder Check");
+      const centerTarget = node.attributes.enterTarget || target;
+      const dx = Math.abs(pos.x - centerTarget.x);
+      const dy = Math.abs(pos.y - centerTarget.y);
+      const dz = Math.abs(pos.z - centerTarget.z);
+
+      // console.log("Ladder DIST:", dx, dy, dz);
+
+      // More lenient for initial descent positioning
+      if (node.attributes.name === "MoveLadderEnterDescend") {
+        return dx < 0.2 && dy < 0.55 && dz < 0.2;
+      }
+
+      // Tighter tolerance once actively descending
+      return dx < 0.45 && dy < 0.55 && dz < 0.45;
+    }
 
     // ═══ SPECIAL HANDLING FOR WATER ═══
     if (node.attributes?.swim || blockName === "water") {

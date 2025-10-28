@@ -28,8 +28,8 @@ bot.once("spawn", async () => {
   // bot.ashfinder.enableBreaking();
   pathExecutor = new PathExecutor(bot);
 
-  // bot.ashfinder.enableBreaking();
-  // bot.ashfinder.enablePlacing();
+  bot.ashfinder.enableBreaking();
+  bot.ashfinder.enablePlacing();
   bot.ashfinder.config.debugMoves = true;
 
   bot.on("chat", async (username, message) => {
@@ -53,7 +53,7 @@ bot.once("spawn", async () => {
 
       // bot.creative.startFlying();
 
-      const goal = new GoalNear(endPos, 1);
+      const goal = new GoalExact(endPos, 1);
 
       await bot.ashfinder.gotoSmart(goal);
     }
@@ -289,7 +289,7 @@ bot.once("spawn", async () => {
 
       // bot.creative.startFlying();
 
-      const goal = new GoalNear(endPos, 1);
+      const goal = new GoalExact(endPos, 1);
       await bot.ashfinder.gotoSmart(goal);
     }
 

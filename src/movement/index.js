@@ -111,6 +111,10 @@ class DirectionalVec3 extends Vec3 {
     return `(${this.x}, ${this.y}, ${this.z}) dir: (${this.dir.x}, ${this.dir.z})`;
   }
 
+  toStringNoDir() {
+    return `${this.x}, ${this.y}, ${this.z}`;
+  }
+
   detailsString() {
     return `(${this.x}, ${this.y}, ${this.z}) dir: (${this.dir.x}, ${this.dir.z}) cost: ${this.cost}`;
   }
@@ -166,16 +170,16 @@ class Move {
     this.COST_FALL = 1;
     this.COST_BREAK = 1.5;
     this.COST_PLACE = 1.5;
-    this.COST_SWIM = 1.3;
-    this.COST_SWIM_START = 1.2;
-    this.COST_SWIM_EXIT = 1.5;
+    this.COST_SWIM = 1;
+    this.COST_SWIM_START = 1.1;
+    this.COST_SWIM_EXIT = 1.1;
     this.COST_CLIMB = 1;
     this.COST_LADDER = 2;
     this.COST_PARKOUR = 3.5; // ian
     this.COST_DIAGONAL = Math.SQRT2;
   }
 
-  generate(cardinalDirections, origin, neighbors) {
+  generate(cardinalDirections, origin, neighbors, end = null) {
     // To be implemented in subclasses
   }
 
@@ -212,37 +216,81 @@ class Move {
       );
   }
 
+  canAffordPlacement(placementCount = 1) {
+    if (!this.node) return true; // No tracking yet, allow it
+
+    const totalUsed = (this.node.scaffoldingUsed || 0) + placementCount;
+    const available = this.scaffoldingLeft();
+
+    return totalUsed <= available;
+  }
+
   getBlock(pos) {
-    const key = pos.toString();
-
-    // Check cache first
-    if (!this._blockCache) this._blockCache = new Map();
-    if (this._blockCache.has(key)) return this._blockCache.get(key);
-
-    // Virtual overlay
-    if (this.node?.virtualBlocks?.has(key)) {
-      const state = this.node.virtualBlocks.get(key);
+    // Check virtual blocks first - use node's overlay if available
+    const virtuals = this.node?.virtualBlocks || this.virtualBlocks;
+    // console.log(pos);
+    if (virtuals && virtuals.has(pos.toStringNoDir())) {
+      const state = virtuals.get(pos.toStringNoDir());
       if (state === "air") return this.mcData.blocksByName["air"];
       if (state === "placed") return this.mcData.blocksByName["stone"];
     }
 
-    const block = this.bot.blockAt(pos);
-    this._blockCache.set(key, block);
-    return block;
+    return this.bot.blockAt(pos);
   }
 
-  // === Core Node Checks ===
-
-  isAir(node) {
-    const block = this.getBlock(node);
-    if (!block) return false;
-    return block.boundingBox === "empty" && block.name !== "water";
+  isAir(pos) {
+    const block = this.getBlock(pos);
+    return (
+      !block ||
+      block.name === "air" ||
+      (block.boundingBox === "empty" &&
+        block.name.includes("cobweb") &&
+        !block.name.includes("water"))
+    );
   }
 
-  isSolid(node) {
-    const block = this.getBlock(node);
+  isSolid(pos) {
+    const block = this.getBlock(pos);
+    return !!block && block.boundingBox === "block";
+  }
+
+  isCarpetLike(pos) {
+    const block = this.getBlock(pos);
     if (!block) return false;
-    return block.boundingBox === "block" && !block.name.includes("torch");
+
+    return block.name.includes("carpet") || block.name === "snow";
+  }
+
+  /**
+   * Returns true if the block at pos is air or is scheduled to be broken.
+   * Automatically considers virtual overlay from the node.
+   */
+  isFree(node, pos) {
+    const willBeAir =
+      this.isAir(pos) ||
+      (node.attributes?.break || []).some((b) => b.equals(pos));
+    return willBeAir;
+  }
+
+  /**
+   * Run a function with a temporary overlay applied.
+   * overlayMap is optional; defaults to node's own overlay + this.virtualBlocks
+   */
+  withOverlay(node, fn) {
+    const oldVirtuals = this.virtualBlocks;
+    const overlay = new Map(oldVirtuals || []);
+
+    if (node.attributes) {
+      for (const b of node.attributes.break || [])
+        overlay.set(b.toStringNoDir(), "air");
+      for (const p of node.attributes.place || [])
+        overlay.set(p.toStringNoDir(), "placed");
+    }
+
+    this.virtualBlocks = overlay;
+    const result = fn();
+    this.virtualBlocks = oldVirtuals;
+    return result;
   }
 
   isWalkable(node) {
@@ -262,7 +310,12 @@ class Move {
     const below = node.down(1);
 
     // Overlay wins over world
-    if (this.node?.virtualBlocks?.get(below.toString()) === "air") return false;
+    // only treat it as air if it *wasn't* intentionally scaffolded
+    // if (
+    //   this.node?.virtualBlocks?.get(below.toString()) === "air" &&
+    //   !this.node?.virtualBlocks?.has(node.toString()) // only if not landing
+    // )
+    //   return false;
 
     const blockBelow = this.getBlock(below);
     if (!blockBelow || blockBelow.name === "air") return false;
@@ -273,7 +326,8 @@ class Move {
       this.isFullBlock(below) &&
       this.isWalkable(node) &&
       !this.isLava(node) &&
-      !this.isClimbable(below)
+      !this.isClimbable(below) &&
+      !this.isCarpetLike(below)
     );
   }
 
@@ -300,9 +354,6 @@ class Move {
 
     // areaMarked check should still use NodeManager
     if (this.manager.isAreaMarkedNode(node)) return false;
-
-    // virtual overlay check: air blocks cannot be broken again
-    if (this.node?.virtualBlocks?.get(node.toString()) === "air") return false;
 
     // Check if block is absolutely unbreakable (bedrock, barriers, etc.)
     if (this.config.unbreakableBlocks?.includes(block.name)) return false;
@@ -569,21 +620,43 @@ function getCompatibleMoves(config) {
   return [...moveClasses].filter((move) => move.canRunWithConfig(config));
 }
 
-function getNeighbors2(node, config, manager, bot) {
+function getNeighbors2(node, config, manager, bot, end) {
   const neighborMap = new Map();
-
-  // Sort moves by priority first (lower = preferred)
   const sortedMoves = [...moveClasses].sort((a, b) => a.priority - b.priority);
 
   for (const move of sortedMoves) {
     move.setValues(bot, config, manager, node);
-    const origin = node.worldPos;
 
-    /** @type {DirectionalVec3[]} */
+    move.virtualBlocks = new Map(node.virtualBlocks || []);
+
+    const origin = node.worldPos;
     const generatedNeighbors = [];
-    move.generate(cardinalDirections, origin, generatedNeighbors);
+    move.generate(cardinalDirections, origin, generatedNeighbors, end);
 
     for (const neighbor of generatedNeighbors) {
+      const hasBreaks = neighbor.attributes?.break?.length > 0;
+      const hasPlaces = neighbor.attributes?.place?.length > 0;
+
+      if (hasBreaks || hasPlaces) {
+        // Clone parent's overlay and apply changes
+        neighbor.virtualBlocks = new Map(node.virtualBlocks || []);
+
+        if (hasBreaks) {
+          for (const b of neighbor.attributes.break) {
+            neighbor.virtualBlocks.set(b.toStringNoDir(), "air");
+          }
+        }
+
+        if (hasPlaces) {
+          for (const p of neighbor.attributes.place) {
+            neighbor.virtualBlocks.set(p.toStringNoDir(), "placed");
+          }
+        }
+      } else {
+        // Just reference parent's overlay if no changes
+        neighbor.virtualBlocks = node.virtualBlocks;
+      }
+
       const key = `${neighbor.x},${neighbor.y},${neighbor.z}`;
       const existing = neighborMap.get(key);
 
@@ -592,7 +665,7 @@ function getNeighbors2(node, config, manager, bot) {
         continue;
       }
 
-      // Prioritize: Simple > Complex > Cost
+      // Priority logic (keeping your existing logic)
       const simpleMoves = new Set([
         "MoveForward",
         "MoveForwardUp",
@@ -604,11 +677,10 @@ function getNeighbors2(node, config, manager, bot) {
       let replace = false;
 
       if (isNewSimple && !isExistingSimple) {
-        replace = true; // Always prefer simple moves
+        replace = true;
       } else if (isExistingSimple && !isNewSimple) {
-        replace = false; // Don't replace simple with complex
+        replace = false;
       } else {
-        // Both same complexity - use priority then cost
         const existingMove = moveClasses.find(
           (m) => m.name === existing.attributes?.name
         );

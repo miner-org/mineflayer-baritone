@@ -22,7 +22,6 @@ class MoveBreakParkour1 extends Move {
     if (!this.isAir(airNode)) return;
 
     let standingNode = this.down(1, landingNode);
-    if (manager.isNodeBroken(standingNode)) return;
 
     if (
       this.isWalkable(spaceNode1) &&

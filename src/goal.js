@@ -63,7 +63,7 @@ class GoalExact extends Goal {
   isReached(otherPosition) {
     if (!otherPosition) return false;
     const floored = otherPosition.floored();
-    const position = this.getPosition().offset(0.5, 0, 0.5);
+    const position = this.getPosition();
 
     return (
       position.x === floored.x &&

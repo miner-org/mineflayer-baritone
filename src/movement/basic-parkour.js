@@ -8,7 +8,9 @@ class MoveForwardParkour extends Move {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       // console.log(originVec);
 
-      if (this.isWater(originVec) || this.isAir(originVec)) return;
+      if (this.isWater(originVec)) return;
+
+      // console.log("d")
 
       this.addNeighbors(neighbors, originVec);
     }
@@ -39,7 +41,6 @@ class MoveForwardParkour extends Move {
       const feetGap = [];
 
       let last = originVec;
-      let hasActualGap = false; // NEW: ensure there's actually a gap
 
       for (let i = 1; i <= distance; i++) {
         const forward = last.forward(1);
@@ -48,12 +49,6 @@ class MoveForwardParkour extends Move {
 
         bodyClear.push(forward.up(1));
         feetGap.push(forward.down(1));
-
-        // NEW: Check if this is actually a gap (not just walkable)
-        const feetBlock = forward.down(1);
-        if (this.isAir(feetBlock) || this.isWater(feetBlock)) {
-          hasActualGap = true;
-        }
 
         last = forward;
       }
@@ -65,9 +60,7 @@ class MoveForwardParkour extends Move {
       // Body clearance must be fully walkable
       if (!bodyClear.every((node) => this.isWalkable(node))) continue;
 
-      // NEW: Only add parkour if there's actually a gap
-      // (prevents competing with simple walk-forward moves)
-      if (!hasActualGap && distance > 1) continue;
+      // console.log("Parkour")
 
       // Valid Parkour
       const parkourNode = landingNode.clone();
@@ -95,7 +88,7 @@ class MoveForwardParkourUp extends Move {
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
-      if (this.isWater(originVec) || this.isAir(originVec)) return;
+      if (this.isWater(originVec)) return;
       this.addNeighbors(neighbors, originVec);
     }
   }
@@ -160,14 +153,14 @@ class MoveForwardParkourDown extends Move {
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
-      if (this.isWater(originVec) || this.isAir(originVec)) return;
+      if (this.isWater(originVec)) return;
       this.addNeighbors(neighbors, originVec);
     }
   }
 
   addNeighbors(neighbors, originVec) {
     const minDistance = 1;
-    const maxDistance = 2; // small parkour forward
+    const maxDistance = 3; // small parkour forward
 
     for (let distance = minDistance; distance <= maxDistance; distance++) {
       const landingNode = originVec.forward(distance).down(1); // step down 1
@@ -247,7 +240,7 @@ class MoveAngledParkour extends Move {
             dir
           );
 
-          if (this.isWater(originVec) || this.isAir(originVec)) return;
+          if (this.isWater(originVec)) return;
           this.addNeighbors(neighbors, originVec, fx, rz);
         }
       }
@@ -339,7 +332,7 @@ class MoveDiagonalParkour extends Move {
     for (const dir of diagonalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
-      if (this.isWater(originVec) || this.isAir(originVec)) return;
+      if (this.isWater(originVec)) return;
       this.addNeighbors(neighbors, originVec);
     }
   }
@@ -426,18 +419,18 @@ registerMoves([
     description: "Forward parkour jumping down across gaps",
     testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
   }),
-  new MoveAngledParkour(25, {
-    // Was 60
-    category: "parkour",
-    tags: ["diagonal", "jumping", "gap", "angled"],
-    description: "Angled parkour jumping at various angles",
-    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
-  }),
-  new MoveDiagonalParkour(25, {
-    // Was 60
-    category: "parkour",
-    tags: ["diagonal", "jumping", "gap"],
-    description: "Diagonal parkour jumping across gaps",
-    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
-  }),
+  // new MoveAngledParkour(25, {
+  //   // Was 60
+  //   category: "parkour",
+  //   tags: ["diagonal", "jumping", "gap", "angled"],
+  //   description: "Angled parkour jumping at various angles",
+  //   testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
+  // }),
+  // new MoveDiagonalParkour(25, {
+  //   // Was 60
+  //   category: "parkour",
+  //   tags: ["diagonal", "jumping", "gap"],
+  //   description: "Diagonal parkour jumping across gaps",
+  //   testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
+  // }),
 ]);

@@ -1,15 +1,15 @@
 const { Move, registerMoves, DirectionalVec3, clamp } = require("./");
 
 class MoveForward extends Move {
-  generate(cardinalDirections, origin, neighbors) {
+  generate(cardinalDirections, origin, neighbors, end) {
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       const node = originVec.forward(1);
-      this.addNeighbors(neighbors, node, originVec);
+      this.addNeighbors(neighbors, node, originVec, end);
     }
   }
 
-  addNeighbors(neighbors, node, originVec) {
+  addNeighbors(neighbors, node, originVec, end) {
     const below = node.down(1);
     const head = node.up(1);
     const canPlace = this.config.placeBlocks && this.hasScaffoldingBlocks();
@@ -21,23 +21,42 @@ class MoveForward extends Move {
     if (targetFloorY !== originFloorY) return;
 
     const isSolidBelow = this.isSolid(below);
-    const isWalkableBelow = isSolidBelow && !this.manager.isNodeBroken(below);
-
     const interactable = this.isInteractable(node);
+    const isFeetAir = this.isAir(node);
+    const isHeadAir = this.isAir(head);
+    const isHeadCrouchPassable = this.isCrouchPassable(this.getBlock(head));
 
+    if (
+      isSolidBelow &&
+      (isFeetAir || this.isCrouchPassable(this.getBlock(node))) &&
+      (isHeadAir || isHeadCrouchPassable) &&
+      !interactable
+    ) {
+      node.attributes = {
+        name: this.name,
+        break: [],
+        place: [],
+        crouch: isHeadCrouchPassable,
+        cost:
+          this.COST_NORMAL +
+          (isHeadCrouchPassable ? this.COST_CROUCH || 0.5 : 0),
+        interact: false,
+      };
+
+      neighbors.push(this.makeMovement(node, node.attributes.cost));
+      return; // 🚀 early exit
+    }
+
+    // --- continue with normal checks if not standable ---
     const canScaffold =
       !isSolidBelow &&
       this.isAir(node) &&
       canPlace &&
       this.canPlaceBlock(below) &&
-      !this.manager.isAreaMarkedNode(below);
-
-    const canStand = isWalkableBelow || canScaffold;
+      !this.manager.isAreaMarkedNode(below) &&
+      this.canAffordPlacement(1);
+    const canStand = isSolidBelow || canScaffold;
     if (!canStand && !interactable) return;
-
-    if (interactable) {
-      this.log("Node is interactable");
-    }
 
     node.attributes = { name: this.name, break: [], place: [] };
 
@@ -47,11 +66,7 @@ class MoveForward extends Move {
 
     // --- FEET check ---
     if (!this.isAir(node) && !interactable) {
-      if (
-        canBreak &&
-        this.isBreakable(node) &&
-        !this.manager.isNodeBroken(node)
-      ) {
+      if (canBreak && this.isBreakable(node)) {
         node.attributes.break.push(node.clone());
       } else {
         return;
@@ -60,31 +75,19 @@ class MoveForward extends Move {
 
     // --- HEAD check ---
     if (!this.isAir(head) && !interactable) {
-      // ✅ allow crouch under slab/trapdoor instead of breaking
       if (this.isCrouchPassable(this.getBlock(head))) {
         node.attributes.crouch = true;
-        // do NOT push to break[]
       } else {
-        // fallback to break-or-deny
-        if (
-          !canBreak ||
-          !this.isBreakable(head) ||
-          this.manager.isNodeBroken(head)
-        ) {
-          return;
-        }
+        if (!canBreak || !this.isBreakable(head)) return;
         const breakingFeet = node.attributes.break.length > 0;
         const feetIsAir = this.isAir(node);
-
         if (!breakingFeet && !feetIsAir) return;
         node.attributes.break.push(head.clone());
       }
     }
 
-    // --- support sanity ---
     if (node.attributes.break.some((b) => b.equals(node))) {
-      const supportBelowSolid =
-        this.isSolid(below) && !this.manager.isNodeBroken(below);
+      const supportBelowSolid = this.isSolid(below);
       const willPlaceBelow = node.attributes.place.length > 0;
       if (!supportBelowSolid && !willPlaceBelow) return;
     } else {
@@ -98,12 +101,12 @@ class MoveForward extends Move {
       }
     }
 
-    // cost
+    const breakCost = (node.attributes.break.length || 0) * this.COST_BREAK;
     const totalCost =
       this.COST_NORMAL +
-      (node.attributes.break.length || 0) * this.COST_BREAK +
+      breakCost +
       (node.attributes.place.length || 0) * this.COST_PLACE +
-      (node.attributes.crouch ? this.COST_CROUCH || 0.5 : 0); // crouch penalty if you want
+      (node.attributes.crouch ? this.COST_CROUCH || 0.5 : 0);
 
     node.attributes.cost = totalCost;
     node.attributes.interact = interactable;
@@ -184,12 +187,12 @@ class MoveDiagonal extends Move {
 
 class MoveForwardUp extends Move {
   generate(cardinalDirections, origin, neighbors) {
-    if (this.isClimbable(origin)) return; // don't try to jump up if on ladder
-
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
       if (this.isWater(originVec)) return;
+      if (this.isClimbable(originVec)) return; // don't try to jump up if on ladder
+
       const step = originVec.forward(1).up(1); // where feet land
       this.addNeighbors(neighbors, step, originVec);
     }
@@ -202,8 +205,8 @@ class MoveForwardUp extends Move {
    * @param {DirectionalVec3} originVec - the original position (for dir reference)
    */
   addNeighbors(neighbors, node, originVec) {
-    const below = node.down(1); // landing support
-    const head = node.up(1); // where your head will be after landing
+    const below = node.down(1);
+    const head = node.up(1);
     const above = originVec.up(2);
 
     const canPlace = this.config.placeBlocks && this.hasScaffoldingBlocks();
@@ -211,12 +214,24 @@ class MoveForwardUp extends Move {
 
     node.attributes = { name: this.name, break: [], place: [], nJump: true };
 
-    // scaffold if needed
-    if (!this.isSolid(below) && canPlace && this.canPlaceBlock(below)) {
+    // === EARLY EXIT if already standable ===
+    if (this.isStandable(node) && this.isAir(above)) {
+      const cost = this.COST_UP; // just normal jump cost, no extras
+      node.attributes.cost = cost;
+      neighbors.push(this.makeMovement(node, cost));
+      return;
+    }
+
+    // === Otherwise continue with placement/break logic ===
+    if (
+      !this.isSolid(below) &&
+      canPlace &&
+      this.canPlaceBlock(below) &&
+      this.canAffordPlacement(1)
+    ) {
       node.attributes.place.push(below.clone());
     }
 
-    // mark breakables
     if (canBreak) {
       for (const testNode of [node, head, above]) {
         if (this.isSolid(testNode) && this.isBreakable(testNode)) {
@@ -225,14 +240,19 @@ class MoveForwardUp extends Move {
       }
     }
 
-    // landing must be standable (either solid below or scaffolded)
-    if (!this.isStandable(node)) return;
+    // filter out invalids
+    if (canBreak && node.attributes.break.length === 0) return;
+    // if (canPlace && node.attributes.place.length === 0) return;
+    if (!canBreak && !this.isStandable(node)) return;
+    if (
+      canBreak &&
+      node.attributes.break.length === 0 &&
+      !this.isStandable(node)
+    )
+      return;
+    if (canBreak && node.attributes.break.length > 0 && !this.isSolid(below))
+      return;
 
-    // head + space above must be air OR breakable
-    if (!this.isAir(head) && !(canBreak && this.isBreakable(head))) return;
-    if (!this.isAir(above) && !(canBreak && this.isBreakable(above))) return;
-
-    // cost calc
     const cost =
       this.COST_UP +
       node.attributes.break.length * this.COST_BREAK +

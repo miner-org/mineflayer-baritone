@@ -16,25 +16,25 @@ const compare = (a, b) => {
   let bPriority = b.fCost;
 
   // slight tie-breaker toward goal progress
-  aPriority += a.hCost * 0.001;
-  bPriority += b.hCost * 0.001;
+  // aPriority += a.hCost * 0.001;
+  // bPriority += b.hCost * 0.001;
 
-  // small penalties (keep them tiny so they don’t overpower distance)
-  const aBreaks = a.attributes?.break?.length || 0;
-  const bBreaks = b.attributes?.break?.length || 0;
-  const aPlaces = a.attributes?.place?.length || 0;
-  const bPlaces = b.attributes?.place?.length || 0;
+  // // small penalties (keep them tiny so they don’t overpower distance)
+  // const aBreaks = a.attributes?.break?.length || 0;
+  // const bBreaks = b.attributes?.break?.length || 0;
+  // const aPlaces = a.attributes?.place?.length || 0;
+  // const bPlaces = b.attributes?.place?.length || 0;
 
-  aPriority += aBreaks * 0.5 + aPlaces * 0.5;
-  bPriority += bBreaks * 0.5 + bPlaces * 0.5;
+  // aPriority += aBreaks * 0.5 + aPlaces * 0.5;
+  // bPriority += bBreaks * 0.5 + bPlaces * 0.5;
 
-  // optional: small parkour bonus if it moves closer
-  const aIsParkour =
-    !!a.attributes?.parkour && a.parent && a.hCost < a.parent.hCost;
-  const bIsParkour =
-    !!b.attributes?.parkour && b.parent && b.hCost < b.parent.hCost;
-  if (aIsParkour) aPriority -= 0.2;
-  if (bIsParkour) bPriority -= 0.2;
+  // // optional: small parkour bonus if it moves closer
+  // const aIsParkour =
+  //   !!a.attributes?.parkour && a.parent && a.hCost < a.parent.hCost;
+  // const bIsParkour =
+  //   !!b.attributes?.parkour && b.parent && b.hCost < b.parent.hCost;
+  // if (aIsParkour) aPriority -= 0.2;
+  // if (bIsParkour) bPriority -= 0.2;
 
   if (aPriority !== bPriority) return aPriority - bPriority;
 
@@ -51,7 +51,6 @@ function posHash(node) {
 
 /**
  * Generates a unique number-based hash for a DirectionalVec3.
- * Safe for use as Map/Set keys in A*.
  * @param {DirectionalVec3} node
  * @returns {string} Hash key (as string)
  */
@@ -185,9 +184,10 @@ async function Astar(
 
   const startNode = new Cell(startPos);
   startNode.gCost = 0;
-  startNode.hCost = hCost1(startPos, getEnd());
+  startNode.hCost = chebyshev(startPos, getEnd());
   startNode.fCost = startNode.gCost + startNode.hCost;
-  startNode.virtualBlocks = new Map([]);
+  startNode.virtualBlocks = new Map();
+  startNode.scaffoldingUsed = 0;
 
   openList.push(startNode);
   openSet.set(defaultHash(startPos), startNode);
@@ -225,6 +225,7 @@ async function Astar(
   return new Promise(async (resolve) => {
     let startTime = performance.now();
     let lastSleep = performance.now();
+    const straightLineDistance = startPos.distanceTo(endPos);
 
     while (!openList.isEmpty()) {
       processedAny = false;
@@ -235,47 +236,22 @@ async function Astar(
         lastSleep = performance.now();
       }
 
-      let currentNode;
-      do {
-        currentNode = openList.pop();
-      } while (
-        currentNode &&
+      const currentNode = openList.pop();
+      if (!currentNode) break;
+
+      // Check if this node has been pruned - skip it immediately
+      if (
         searchController?.prunedHashes.has(defaultHash(currentNode.worldPos))
-      );
+      ) {
+        continue;
+      }
 
       if (!currentNode) break; // heap empty after pruning skips
-
-      // MARK broken and placed nodes ASAP before neighbor gen
-      // if (currentNode.attributes.break?.length) {
-      //   nodemanager.markNodes(currentNode.attributes.break, "broken");
-      //   if (debug)
-      //     console.log(
-      //       "Marked broken nodes:",
-      //       currentNode.attributes.break.map((n) => n.toString())
-      //     );
-      // }
-
-      // if (currentNode.attributes.place?.length) {
-      //   nodemanager.markNodes(currentNode.attributes.place, "placed");
-      //   if (debug)
-      //     console.log(
-      //       "Marked placed nodes:",
-      //       currentNode.attributes.place.map((n) => n.toString())
-      //     );
-      // }
 
       if (debug) {
         const distToGoal = currentNode.worldPos.distanceTo(endPos);
         const focusPhase = Math.min(1, Math.max(0, 1 - distToGoal / 15));
 
-        // Log the key factors for the node being processed
-        // console.log(
-        //   `Node: ${currentNode.worldPos.toString()} | ` +
-        //     `Dist: ${distToGoal.toFixed(1)} | ` +
-        //     `Focus: ${focusPhase.toFixed(2)}`
-        // );
-
-        // Optional: show exploration vs focus with colored particles
         const color =
           focusPhase < 0.5
             ? "0.0,0.6,1.0" // blue = exploring
@@ -288,22 +264,28 @@ async function Astar(
       }
 
       // Now neighbors get generated with fresh nodemanager state
-      let neighbors = getNeighbors2(currentNode, config, nodemanager, bot);
+      let neighbors = getNeighbors2(
+        currentNode,
+        config,
+        nodemanager,
+        bot,
+        getEnd()
+      );
 
       openSet.delete(defaultHash(currentNode.worldPos));
-      openList.remove(currentNode);
 
       closedSet.add(defaultHash(currentNode.worldPos));
 
       const distToGoal = currentNode.worldPos.distanceTo(getEnd());
       const distFromStart = currentNode.worldPos.distanceTo(startPos);
-      const straightLine = startPos.distanceTo(getEnd());
 
       // If we're exploring way beyond what makes sense, skip
-      if (distToGoal > straightLine * 2 && distFromStart > straightLine * 1.5) {
+      if (
+        distToGoal > straightLineDistance * 2 &&
+        distFromStart > straightLineDistance * 1.5
+      ) {
         continue; // Skip this node, move to next in openList
       }
-
       // Track best node for partial path returns
       const h = hCost1(currentNode.worldPos, getEnd());
       const fromStart = currentNode.worldPos.distanceTo(startPos);
@@ -390,47 +372,25 @@ async function Astar(
   function processNeighbor(currentNode, neighborData) {
     const hash = defaultHash(neighborData);
 
-    let tempG = currentNode.gCost + neighborData.cost;
-    let overlay = currentNode.virtualBlocks;
+    const placesInMove = neighborData.attributes?.place?.length || 0;
+    const totalScaffoldingUsed = currentNode.scaffoldingUsed + placesInMove;
+
+    // tempG = total cost from moves (includes break/place/etc.)
+    let neighborCost = neighborData.cost;
+
+    if (neighborData.attributes.parkour) {
+      const distToGoal = neighborData.distanceTo(getEnd());
+
+      if (distToGoal <= 10) {
+        neighborCost *= 0.8;
+      }
+    }
+
+    const tempG = currentNode.gCost + neighborCost;
 
     let neighbor = openSet.get(hash);
 
-    // ✅ Early exit BEFORE expensive operations
-    if (neighbor && tempG >= neighbor.gCost) {
-      return;
-    }
-
-    // ✅ Only calculate hazards for nodes we'll actually use
-    applyHazardPenalty(neighborData, bot);
-    tempG = currentNode.gCost + neighborData.cost;
-
-    // Only clone if we need to modify
-    if (
-      neighborData.attributes.break?.length ||
-      neighborData.attributes.place?.length
-    ) {
-      overlay = new Map(overlay || []);
-
-      for (const b of neighborData.attributes.break || []) {
-        overlay.set(b.toString(), "air");
-      }
-      for (const p of neighborData.attributes.place || []) {
-        overlay.set(p.toString(), "placed");
-      }
-    }
-
-    neighborData.virtualBlocks = overlay;
-
-    if (neighborData.attributes && neighborData.attributes.name) {
-      const feet = new Vec3(neighborData.x, neighborData.y, neighborData.z);
-      const below = feet.offset(0, -1, 0);
-      if (overlay.get(below.toString()) === "air") {
-        // force it to stay "air" instead of real block
-        overlay.set(below.toString(), "air");
-      }
-    }
-
-    neighborData.virtualBlocks = overlay;
+    if (neighbor && tempG >= neighbor.gCost) return;
 
     if (!neighbor) {
       neighbor = new Cell();
@@ -441,22 +401,24 @@ async function Astar(
       );
       neighbor.direction = neighborData.dir;
       neighbor.gCost = tempG;
-      neighbor.hCost = hCost1(neighborData, getEnd());
-      neighbor.fCost = computeScore(neighbor, getEnd(), startPos);
+      neighbor.hCost = chebyshev(neighborData, getEnd());
+      neighbor.fCost = computeScore(neighbor, getEnd(), startPos); // uses fCost, but break cost already in gCost
       neighbor.parent = currentNode;
       neighbor.moveName = neighborData.attributes.name;
       neighbor.attributes = neighborData.attributes;
-      neighbor.virtualBlocks = neighborData.virtualBlocks;
+      neighbor.virtualBlocks = neighborData.virtualBlocks; // pre-computed overlay
+      neighbor.scaffoldingUsed = totalScaffoldingUsed;
 
       openSet.set(hash, neighbor);
       openList.push(neighbor);
       processedAny = true;
     } else if (tempG < neighbor.gCost) {
       neighbor.gCost = tempG;
-      neighbor.hCost = hCost1(neighborData, getEnd());
+      neighbor.hCost = chebyshev(neighborData, getEnd());
       neighbor.fCost = computeScore(neighbor, getEnd(), startPos);
       neighbor.parent = currentNode;
       neighbor.virtualBlocks = neighborData.virtualBlocks;
+      neighbor.scaffoldingUsed = totalScaffoldingUsed;
       openList.update(neighbor);
       processedAny = true;
     }
@@ -519,26 +481,55 @@ function applyHazardPenalty(neighborData, bot) {
  * @param {Vec3} startPos
  * @returns
  */
-function computeScore(node, goal) {
+function computeScore(node, goal, startPos) {
   const g = node.gCost;
-  const h = hCost1(node.worldPos, goal);
+  const h = chebyshev(node.worldPos, goal);
 
-  // Add small directional bias (toward goal)
-  const toGoal = goal.minus(node.worldPos).normalize();
-  const parentDir = node.parent
-    ? node.worldPos.minus(node.parent.worldPos).normalize()
-    : toGoal;
-  const alignment = toGoal.dot(parentDir);
+  let f = g + h;
 
-  // Mild directional bonus
-  const dirBonus = 1 - alignment * 0.1;
+  // lil vertical bias toward goal Y-level
+  const yDiff = Math.abs(node.worldPos.y - goal.y);
+  const yBonus = Math.max(0, 3 - yDiff) * 0.2;
+  f -= yBonus;
 
-  // Block break penalty (keep it simple)
-  const breakCount = node.attributes?.break?.length || 0;
-  const breakPenalty = breakCount * 1.5;
+  // handle parkour moves with distance scaling
+  if (node.attributes?.parkour) {
+    const jumpDist = node.attributes.distance;
 
-  // Final score
-  return g + h * dirBonus + breakPenalty;
+    // optional: add realistic "jump cost" shaping
+    // small jumps slightly cheaper, big jumps penalized
+    // tweak constants based on your jump physics feel
+    const jumpPenalty = (jumpDist - 1) * 0.4;
+    const jumpReward = Math.max(0, 3 - jumpDist) * 0.1;
+
+    // modify both g and h for flavor
+    f += jumpPenalty;
+    f -= jumpReward;
+
+    // if you want longer jumps to *feel* more efficient per block:
+    // f -= jumpDist * 0.1; // <- makes long jumps slightly preferred
+  }
+
+  return f;
+}
+
+function chebyshev(a, b) {
+  const dx = Math.abs(b.x - a.x);
+  const dy = Math.abs(b.y - a.y);
+  const dz = Math.abs(b.z - a.z);
+
+  // sort differences to easily pick min/mid/max
+  const [dmin, dmid, dmax] = [dx, dy, dz].sort((x, y) => x - y);
+
+  const cost1 = 1; // straight move
+  const cost2 = Math.SQRT2; // 2-axis diagonal
+  const cost3 = Math.sqrt(3); // 3-axis diagonal
+
+  return (
+    cost3 * dmin + // moves that go diagonally in x,y,z
+    cost2 * (dmid - dmin) + // moves that go diagonally in 2 axes
+    cost1 * (dmax - dmid) // moves that go straight
+  );
 }
 
 function hCost1(node, goal) {
@@ -556,7 +547,7 @@ function hCost1(node, goal) {
   // Stronger heuristic weight for short distances
   const totalDist = dx + dy + dz;
   if (totalDist < 20) {
-    h *= 1.15; // Make heuristic more aggressive for nearby goals
+    h *= 0.85; // Make heuristic more aggressive for nearby goals
   }
 
   return h;

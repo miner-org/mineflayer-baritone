@@ -27,7 +27,7 @@ class MoveForwardDownBreak extends Move {
     if (this.isStandable(node)) return;
 
     // we must land on solid ground (and that ground must not be scheduled as broken)
-    if (!this.isSolid(belowNode) || this.manager.isNodeBroken(belowNode))
+    if (!this.isSolid(belowNode))
       return;
 
     // initialize
@@ -38,7 +38,7 @@ class MoveForwardDownBreak extends Move {
     // --- BODY (feet) ---
     if (!this.isAir(bodyNode)) {
       // if body is non-air and not breakable -> fail
-      if (!this.isBreakable(bodyNode) || this.manager.isNodeBroken(bodyNode)) {
+      if (!this.isBreakable(bodyNode) ) {
         if (this.config.debugMoves)
           console.debug(
             `[${this.name}] body unbreakable: ${bodyNode.toString()}`
@@ -50,7 +50,7 @@ class MoveForwardDownBreak extends Move {
 
     // --- HEAD ---
     if (!this.isAir(headNode)) {
-      if (!this.isBreakable(headNode) || this.manager.isNodeBroken(headNode)) {
+      if (!this.isBreakable(headNode) ) {
         if (this.config.debugMoves)
           console.debug(
             `[${this.name}] head unbreakable: ${headNode.toString()}`
@@ -62,7 +62,7 @@ class MoveForwardDownBreak extends Move {
 
     // --- ABOVE HEAD clearance ---
     if (!this.isAir(topNode)) {
-      if (!this.isBreakable(topNode) || this.manager.isNodeBroken(topNode)) {
+      if (!this.isBreakable(topNode)) {
         if (this.config.debugMoves)
           console.debug(
             `[${this.name}] top unbreakable: ${topNode.toString()}`
@@ -114,7 +114,7 @@ class MoveBreakDown extends Move {
     const footBlock = this.origin.down(1);
 
     // 🔹 Must start on something safe to break down
-    if (!this.isSolid(footBlock) || this.manager.isNodeBroken(footBlock))
+    if (!this.isSolid(footBlock))
       return;
     if (!this.isWalkable(this.origin)) return; // Can't start break if cramped
 
@@ -123,8 +123,6 @@ class MoveBreakDown extends Move {
     let fallDepth = 0;
 
     for (let i = 0; i < 3; i++) {
-      if (this.manager.isNodeBroken(current)) return;
-
       if (this.isBreakable(current, this.config)) {
         breakChain.push(current.clone());
       } else if (this.isAir(current)) {
