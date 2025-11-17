@@ -40,7 +40,7 @@ const bot = mineflayer.createBot({ username: "PathfinderBot" });
 bot.loadPlugin(pathfinder);
 
 bot.once("spawn", async () => {
-  await bot.waitForChunks();
+  await bot.waitForChunksToLoad();
 
   // Simple navigation
   const goal = new goals.GoalExact(new Vec3(100, 65, 100));
