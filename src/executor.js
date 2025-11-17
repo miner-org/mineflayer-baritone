@@ -34,6 +34,7 @@ class PathExecutor {
     this.swimmingState = { active: false, sinking: false, floating: false };
     this.climbingState = false; // Can be false or { phase: 'positioning'|'climbing'|'descending', target: Vec3 }
     this.interactingState = false;
+    this.elytraFlyingState = { active: false, gliding: false };
 
     this.placedNodes = new Set();
 
@@ -53,6 +54,10 @@ class PathExecutor {
     this.finalGoal = null;
 
     this.previousNode = null;
+    this.previousGravity = bot.physics.gravity;
+
+    this.isFlying = false;
+    this.flyingInterval = null;
 
     this.currentWaypoint = null;
     this.waypointTolerance = 3; // How close to get to intermediate waypoints
@@ -182,6 +187,8 @@ class PathExecutor {
         this.climbingState = false; // Reset entire state
         this.climbingTarget = null;
       }
+
+      if (!this.bot.physicsEnabled) this.bot.physicsEnabled = true;
 
       // ---- SAVE PREVIOUS NODE BEFORE ADVANCING ----
       this.previousNode = node;
@@ -424,6 +431,7 @@ class PathExecutor {
     this.digging = false;
     this.toweringState = { active: false, phase: 0 };
     this.swimmingState = { active: false, sinking: false, floating: false };
+    this.elytraFlyingState = { active: false, gliding: false };
     this.climbingState = false;
     this.climbingTarget = null;
     this.interactingState = false;
@@ -559,6 +567,11 @@ class PathExecutor {
         await this.jumpAndPlaceBlock(node);
         // this.placedNodes.add(node.worldPos.toString());
       }
+    } else if (attributes.isFlying) {
+      //verticla movements123
+      //gay men
+      if (!this.isFlying) await this._startPacketFly();
+      await this._flyTo(node);
     } else {
       if (
         attributes.place?.length > 0 &&
@@ -583,6 +596,9 @@ class PathExecutor {
       if (attributes.crouch) {
         this.bot.setControlState("sneak", true);
       }
+
+      // this.bot.physics.gravity = this.previousGravity;
+      if (this.isFlying) this._stopPacketFly();
 
       this._walkTo(node.worldPos);
     }
@@ -827,6 +843,36 @@ class PathExecutor {
   }
 
   _onGoalReached() {
+    // Check if we're following an entity
+    if (this.ashfinder.following?.active) {
+      const entity = this.ashfinder.following.entity;
+      const distance = this.ashfinder.following.distance;
+
+      if (!entity.isValid) {
+        this.ashfinder.stopFollowing();
+        return;
+      }
+
+      const currentDist = this.bot.entity.position.distanceTo(entity.position);
+
+      // If entity is still far, keep following
+      if (currentDist > distance) {
+        if (this.ashfinder.debug) {
+          console.log(
+            `Entity moved, continuing follow (dist: ${currentDist.toFixed(1)})`
+          );
+        }
+
+        const { GoalNear } = require("./goal");
+        const goal = new GoalNear(entity.position, distance);
+
+        this.findPathToGoal(goal).catch(() => {
+          this.ashfinder.stopFollowing();
+        });
+        return;
+      }
+    }
+
     // If this was a waypoint, don't stop - the waypoint planner will continue
     if (this.currentWaypoint) {
       if (this.ashfinder.debug) {
@@ -968,47 +1014,94 @@ class PathExecutor {
     }
   }
 
+  /**
+   *
+   * @param {Cell} node
+   */
   async _flyTo(node) {
     const bot = this.bot;
-    const target = node.worldPos.offset(0.5, 0.5, 0.5); // center-ish
+    const target = node.worldPos.clone();
 
-    while (!this._hasReachedNode(node, true)) {
-      const pos = bot.entity.position;
-      const dir = target.minus(pos);
+    if (!this.isFlying) return;
 
-      // --- Normalize horizontal movement ---
-      const horizontalDir = new Vec3(dir.x, 0, dir.z);
-      if (horizontalDir.norm() > 0.05) {
-        horizontalDir.normalize();
-        bot.setControlState("forward", true);
-        bot.entity.yaw = Math.atan2(-horizontalDir.x, -horizontalDir.z);
-      } else {
-        bot.setControlState("forward", false);
-      }
+    const pos = bot.entity.position;
+    const dir = target.minus(pos);
 
-      // --- Vertical control (gravity on) ---
-      const yDist = dir.y;
-      if (yDist > 0.25) {
-        bot.setControlState("jump", true);
-        bot.setControlState("sneak", false);
-      } else if (yDist < -0.25) {
-        bot.setControlState("jump", false);
-        bot.setControlState("sneak", true);
-      } else {
-        bot.setControlState("jump", false);
-        bot.setControlState("sneak", false);
-      }
+    // Calculate velocity based on look direction
+    const speed = 1.5;
+    const yaw = bot.entity.yaw;
+    const pitch = bot.entity.pitch;
 
-      // --- Close enough? stop controls ---
-      if (dir.norm() < 0.2) {
-        bot.clearControlStates();
-        break;
-      }
+    const vx = -Math.sin(yaw) * Math.cos(pitch) * speed;
+    const vy = -Math.sin(pitch) * speed;
+    const vz = Math.cos(yaw) * Math.cos(pitch) * speed;
 
-      await bot.waitForTicks(1);
+    // Look towards target
+    await bot.lookAt(target.offset(0.5, 0.5, 0.5), true);
+
+    // Send position packets to move
+    bot._client.write("position_look", {
+      x: pos.x + vx * 0.05,
+      y: pos.y + vy * 0.05,
+      z: pos.z + vz * 0.05,
+      yaw: bot.entity.yaw,
+      pitch: bot.entity.pitch,
+      onGround: false,
+    });
+
+    bot.setControlState("forward", true);
+  }
+
+  async _startPacketFly() {
+    if (this.isFlying) return;
+
+    this.isFlying = true;
+
+    let elytra = null;
+
+    const elytraArmor =
+      this.bot.inventory.slots[this.bot.getEquipmentDestSlot("torso")];
+
+    if (!elytraArmor || !elytraArmor.name.includes("elytra")) {
+      const elytraInv = this.bot.inventory
+        .items()
+        .find((i) => i.name.includes("elytra"));
+
+      if (!elytraInv) throw new Error("No elytra found!");
+
+      elytra = elytraInv;
+      await this.bot.equip(elytra, "torso");
+    } else {
+      elytra = elytraArmor;
     }
 
-    bot.clearControlStates();
+    // Start elytra gliding
+    this.bot.setControlState("jump", true);
+    this.bot._client.write("entity_action", {
+      entityId: this.bot.entity.id,
+      actionId: 8, // Start fall flying
+      jumpBoost: 0,
+    });
+
+    this.elytraFlyingState.active = true;
+    this.elytraFlyingState.gliding = true;
+  }
+
+  async _stopPacketFly() {
+    if (!this.isFlying) return;
+
+    this.isFlying = false;
+
+    // Stop fall flying
+    await this.bot.elytraFly();
+
+    this.elytraFlyingState.active = false;
+    this.elytraFlyingState.gliding = false;
+
+    if (this.flyingInterval) {
+      clearInterval(this.flyingInterval);
+      this.flyingInterval = null;
+    }
   }
 
   /**
@@ -1583,6 +1676,12 @@ class PathExecutor {
     const pos = this.bot.entity.position;
     const target = node.worldPos.clone();
 
+    if (this.ashfinder.debug) {
+      console.log("Bot Pos");
+      console.log(pos.toString());
+      console.log("===");
+    }
+
     const block = this.bot.blockAt(node.worldPos);
     const blockName = block?.name ?? "";
 
@@ -1652,7 +1751,11 @@ class PathExecutor {
     const isCloseEnough = dx < 0.35 && dy <= 0.55 && dz < 0.35;
 
     const isInWater = this._isInWater();
-    const isOnGround = this.bot.entity.onGround || ignoreGround || isInWater;
+    const isOnGround =
+      this.bot.entity.onGround ||
+      ignoreGround ||
+      isInWater ||
+      node.attributes.isFlying;
 
     return isCloseEnough && isOnGround;
   }

@@ -187,6 +187,7 @@ class MoveDiagonal extends Move {
 
 class MoveForwardUp extends Move {
   generate(cardinalDirections, origin, neighbors) {
+    if (this.config.fly) return;
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
@@ -276,6 +277,7 @@ class MoveForwardUp extends Move {
 
 class MoveForwardDown extends Move {
   generate(cardinalDirections, origin, neighbors) {
+    if (this.config.fly) return;
     for (const dir of cardinalDirections) {
       // build a fresh directional origin per dir to avoid type confusion
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);

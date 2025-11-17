@@ -3,6 +3,7 @@ const { Move, registerMoves, DirectionalVec3 } = require("./");
 class MoveSwimForward extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.swimming) return;
+    if (this.config.fly) return;
 
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
@@ -45,7 +46,7 @@ class MoveSwimForward extends Move {
 class MoveSwimStart extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.swimming) return;
-
+    if (this.config.fly) return;
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       const node = originVec.offset(dir.x, 0, dir.z);
@@ -150,7 +151,7 @@ class MoveSwimStart extends Move {
 class MoveSwimExit extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.swimming) return;
-
+    if (this.config.fly) return;
     const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
       x: 0,
       z: 0,
@@ -212,7 +213,7 @@ class MoveSwimExit extends Move {
 class MoveSwimUp extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.swimming) return;
-
+    if (this.config.fly) return;
     const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
       x: 0,
       z: 0,
@@ -258,7 +259,7 @@ class MoveSwimUp extends Move {
 class MoveSwimDown extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.swimming) return;
-
+    if (this.config.fly) return;
     const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
       x: 0,
       z: 0,
@@ -299,7 +300,7 @@ class MoveSwimDown extends Move {
 class MoveSwimDiagonal extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.swimming) return;
-
+    if (this.config.fly) return;
     const diagonals = [
       { x: 1, z: 1 },
       { x: -1, z: 1 },

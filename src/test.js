@@ -28,8 +28,9 @@ bot.once("spawn", async () => {
   // bot.ashfinder.enableBreaking();
   pathExecutor = new PathExecutor(bot);
 
-  bot.ashfinder.enableBreaking();
-  bot.ashfinder.enablePlacing();
+  // bot.ashfinder.enableBreaking();
+  // bot.ashfinder.enablePlacing();
+  bot.ashfinder.enableFlight();
   bot.ashfinder.config.debugMoves = true;
 
   bot.on("chat", async (username, message) => {

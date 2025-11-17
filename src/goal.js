@@ -56,6 +56,24 @@ class GoalNear extends Goal {
   }
 }
 
+class GoalFollowEntity extends Goal {
+  constructor(entity, distance = 2) {
+    super(entity.position);
+    this.entity = entity;
+    this.distance = distance;
+  }
+
+  getPosition() {
+    return this.entity.position.floored().offset(0.5, 0, 0.5);
+  }
+
+  isReached(otherPosition) {
+    if (!otherPosition || !this.entity) return false;
+    const dist = otherPosition.distanceTo(this.entity.position);
+    return dist <= this.distance;
+  }
+}
+
 class GoalExact extends Goal {
   /***
    * @param {Vec3} otherPosition
@@ -322,4 +340,5 @@ module.exports = {
   GoalXZ,
   GoalXZNear,
   GoalLookAtBlock,
+  GoalFollowEntity
 };

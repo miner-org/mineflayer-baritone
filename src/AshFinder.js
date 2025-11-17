@@ -1,9 +1,9 @@
 const EventEmitter = require("events");
 const PathExecutor = require("./executor");
-const { Goal } = require("./goal");
+const { Goal, GoalFollowEntity } = require("./goal");
 const { createEndFunc } = require("./utils");
 
-const Vec3 = require("vec3");
+const { Vec3 } = require("vec3");
 const { Cell } = require("./pathfinder");
 const { SmartWaypointPlanner, WaypointPlanner } = require("./waypoints");
 
@@ -37,9 +37,9 @@ class AshFinderPlugin extends EventEmitter {
   /**
    * Generate a path to the specified goal.
    * @param {Goal} goal Goal to reach
-   * @param {Vec3[]} excludedPositions Positions to exclude from the pathfinding
+   * @param {{excludedPositions: Vec3[]}} options Positions to exclude from the pathfinding
    */
-  async generatePath(goal, excludedPositions = []) {
+  async generatePath(goal, options = { excludedPositions: [] }) {
     const endFunc = createEndFunc(goal);
     const bot = this.bot;
     const position = goal.getPosition().clone();
@@ -55,7 +55,7 @@ class AshFinderPlugin extends EventEmitter {
       bot,
       endFunc,
       this.config,
-      excludedPositions,
+      options,
       this.debug,
       this._searchController
     );
@@ -81,6 +81,14 @@ class AshFinderPlugin extends EventEmitter {
     this.config.placeBlocks = true;
   }
 
+  disableFlight() {
+    this.config.fly = false;
+  }
+
+  enableFlight() {
+    this.config.fly = true;
+  }
+
   /**
    *
    * @param {Vec3[]} positions
@@ -104,6 +112,7 @@ class AshFinderPlugin extends EventEmitter {
   stop() {
     this.path = [];
     this.stopped = true;
+    this.following = false;
     this.bot.clearControlStates();
     this.emit("stopped");
   }
@@ -150,13 +159,26 @@ class AshFinderPlugin extends EventEmitter {
   /**
    *
    * @param {Goal} goal
-   * @param {Vec3[]} excludedPositions
+   * @param {{excludedPositions?: Vec3[]}} options
    */
-  async goto(goal, excludedPositions = []) {
+  async goto(goal, options = { excludedPositions: [] }) {
     if (this.stopped) {
       this.stopped = false;
 
-      const result = await this.generatePath(goal, excludedPositions);
+      if (this.config.fly) {
+        const elytraArmor =
+          this.bot.inventory.slots[this.bot.getEquipmentDestSlot("torso")];
+
+        if (!elytraArmor) {
+          const elytraInv = this.bot.inventory
+            .items()
+            .find((i) => i.name.includes("elytra"));
+
+          if (!elytraInv) throw new Error("No elytra found!");
+        }
+      }
+
+      const result = await this.generatePath(goal, options);
       const { path, status } = result;
 
       if (this.debug) {
@@ -191,6 +213,116 @@ class AshFinderPlugin extends EventEmitter {
       console.log(error);
       throw new Error(error);
     }
+  }
+
+  // /**
+  //  *
+  //  * @param {Goal} goal
+  //  * @param {{excludedPositions?: Vec3[]}} options
+  //  */
+  // async flyTo(goal, options) {
+  //   if (this.stopped) {
+  //     options.fly = true;
+  //     this.stopped = false;
+
+  //     const result = await this.generatePath(goal, options);
+  //     const { path, status } = result;
+
+  //     if (this.debug) {
+  //       console.log(path.map((node) => node.attributes.name));
+  //       console.log(status);
+  //     }
+
+  //     // Set the path and get the execution promise
+  //     const executionPromise = this.#pathExecutor.setPath(path, {
+  //       partial: status === "partial",
+  //       targetGoal: goal,
+  //       bestNode: result.bestNode,
+  //     });
+
+  //     this.emit("pathStarted", {
+  //       path,
+  //       status,
+  //       goal,
+  //     });
+
+  //     // Wait for the path to complete
+  //     try {
+  //       await executionPromise;
+  //       return { status: "success" };
+  //     } catch (err) {
+  //       if (this.debug) console.error("Path execution failed:", err);
+  //       return { status: "failed", error: err };
+  //     }
+  //   } else {
+  //     const error =
+  //       "Already going to a goal, please wait until the current path is completed.";
+  //     console.log(error);
+  //     throw new Error(error);
+  //   }
+  // }
+
+  /**
+   * Continuously follow an entity
+   * @param {Entity} entity - Entity to follow
+   * @param {Object} options
+   * @param {number} options.distance - Distance to maintain
+   * @param {number} options.updateInterval - How often to check position (ms)
+   */
+  async followEntity(entity, options = {}) {
+    const { distance = 2, updateInterval = 500 } = options;
+
+    this.following = {
+      entity,
+      distance,
+      active: true,
+      lastTargetPos: entity.position.clone(),
+    };
+
+    const followLoop = async () => {
+      if (!this.following.active || !entity.isValid) {
+        this.following = null;
+        return;
+      }
+
+      const botPos = this.bot.entity.position;
+      const entityPos = entity.position;
+      const currentDist = botPos.distanceTo(entityPos);
+
+      // Check if entity moved significantly
+      const movedDist = entityPos.distanceTo(this.following.lastTargetPos);
+
+      if (movedDist > 3 || currentDist > distance + 3) {
+        this.following.lastTargetPos = entityPos.clone();
+
+        // Use GoalNear for following
+        const { GoalNear } = require("./goal");
+        const goal = new GoalNear(entityPos, distance);
+
+        try {
+          // Don't await - let it run, we'll replan as needed
+          this.goto(goal).catch(() => {});
+        } catch (err) {
+          // Already pathfinding, that's fine
+        }
+      }
+
+      // Schedule next check
+      setTimeout(followLoop, updateInterval);
+    };
+
+    followLoop();
+  }
+
+  /**
+   * Stop following entity
+   */
+  stopFollowing() {
+    if (this.following) {
+      this.following.active = false;
+      this.following = null;
+    }
+    this.stop();
   }
 
   /**

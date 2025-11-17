@@ -3,6 +3,7 @@ const { Move, registerMoves, DirectionalVec3 } = require("./");
 class MoveForwardParkour extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.parkour) return;
+    if (this.config.fly) return;
 
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
@@ -84,6 +85,7 @@ class MoveForwardParkour extends Move {
 class MoveForwardParkourUp extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.parkour) return;
+    if (this.config.fly) return;
 
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
@@ -149,6 +151,7 @@ class MoveForwardParkourUp extends Move {
 class MoveForwardParkourDown extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.parkour) return;
+    if (this.config.fly) return;
 
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
@@ -214,7 +217,7 @@ class MoveForwardParkourDown extends Move {
 class MoveAngledParkour extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.parkour) return;
-
+    if (this.config.fly) return;
     const diagonalDirections = [
       { x: 1, z: 1 },
       { x: 1, z: -1 },
@@ -321,7 +324,7 @@ class MoveAngledParkour extends Move {
 class MoveDiagonalParkour extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.parkour) return;
-
+    if (this.config.fly) return;
     const diagonalDirections = [
       { x: 1, z: 1 },
       { x: 1, z: -1 },

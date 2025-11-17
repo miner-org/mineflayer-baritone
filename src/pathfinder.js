@@ -159,7 +159,7 @@ async function Astar(
   bot,
   endFunc,
   config,
-  excludedPositions = [],
+  options = {},
   debug = false,
   searchController = null
 ) {
@@ -170,9 +170,9 @@ async function Astar(
   if (bot.blockAt(startPos).name === "farmland")
     startPos = startPos.offset(0, 1, 0);
 
-  excludedPositions = excludedPositions.map((pos) =>
-    pos.floored().offset(0.5, 0, 0.5)
-  );
+  // console.log(options)
+
+  let excludedPositions = options.excludedPositions.map((pos) => pos.floored().offset(0.5, 0, 0.5));
 
   const openList = new BinaryHeapOpenSet(compare);
   const openSet = new Map();

@@ -67,4 +67,4 @@ class MoveFlyDown extends Move {
   }
 }
 
-// registerMoves([new MoveFlyForward(50), new MoveFlyUp(50), new MoveFlyDown(50)]);
+registerMoves([new MoveFlyForward(50), new MoveFlyUp(50), new MoveFlyDown(50)]);

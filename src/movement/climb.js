@@ -2,6 +2,7 @@ const { Move, registerMoves, DirectionalVec3 } = require("./");
 
 class MoveLadderEnter extends Move {
   generate(cardinalDirections, origin, neighbors) {
+    if (this.config.fly) return;
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       const node = originVec.offset(dir.x, 0, dir.z);
@@ -32,6 +33,7 @@ class MoveLadderEnter extends Move {
 
 class MoveLadderExit extends Move {
   generate(cardinalDirections, origin, neighbors) {
+    if (this.config.fly) return;
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       if (!this.isClimbable(originVec)) continue;
@@ -74,6 +76,7 @@ class MoveLadderExit extends Move {
 
 class MoveLadderClimb extends Move {
   generate(cardinalDirections, origin, neighbors) {
+    if (this.config.fly) return;
     // For each cardinal direction, check if ladder climb is possible at origin
     // for (const dir of cardinalDirections) {
     const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
@@ -119,6 +122,7 @@ class MoveLadderClimb extends Move {
 
 class MoveLadderDescend extends Move {
   generate(cardinalDirections, origin, neighbors) {
+    if (this.config.fly) return;
     const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
       x: 0,
       z: 0,
@@ -158,6 +162,7 @@ class MoveLadderDescend extends Move {
 
 class MoveLadderEnterDescend extends Move {
   generate(cardinalDirections, origin, neighbors) {
+    if (this.config.fly) return;
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       const node = originVec.offset(dir.x, 0, dir.z);
@@ -181,7 +186,7 @@ class MoveLadderEnterDescend extends Move {
     target.attributes["name"] = this.name;
     target.attributes["ladder"] = true;
     target.attributes["descend"] = true;
-    target.attributes["enterTarget"] = node.clone(); 
+    target.attributes["enterTarget"] = node.clone();
     target.attributes["cost"] = this.COST_LADDER ?? this.COST_NORMAL + 1;
     neighbors.push(
       this.makeMovement(target, this.COST_LADDER ?? this.COST_NORMAL + 1)
