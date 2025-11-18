@@ -34,7 +34,7 @@ class PathExecutor {
     this.swimmingState = { active: false, sinking: false, floating: false };
     this.climbingState = false; // Can be false or { phase: 'positioning'|'climbing'|'descending', target: Vec3 }
     this.interactingState = false;
-    this.elytraFlyingState = { active: false, gliding: false };
+    this.elytraFlyingState = { active: false, gliding: false, liftoff: false };
 
     this.placedNodes = new Set();
 
@@ -221,6 +221,12 @@ class PathExecutor {
           `Reached node: ${node.attributes.name} at ${node.worldPos}`
         );
       return;
+    }
+
+    if (this.ashfinder.debug) {
+      if (this.bot.entity.elytraFlying) {
+        console.log("We are flying");
+      }
     }
 
     this.currentPromise = this._executeMove(node, nextNode);
@@ -1015,76 +1021,290 @@ class PathExecutor {
   }
 
   /**
-   *
+   * Hover at a specific position using velocity adjustments
+   * @param {Vec3} target - Target position to hover at
+   * @param {Object} options - Hover configuration
+   */
+  _hoverAt(target, options = {}) {
+    const bot = this.bot;
+    const pos = bot.entity.position;
+    const vel = bot.entity.velocity;
+
+    const {
+      stiffness = 0.3, // How aggressively to correct position (0-1)
+      damping = 0.7, // Velocity damping to prevent oscillation (0-1)
+      maxCorrection = 0.5, // Max velocity correction per tick
+      tolerance = 0.1, // Distance at which hovering is "good enough"
+    } = options;
+
+    // Calculate position error
+    const dx = target.x - pos.x;
+    const dy = target.y - pos.y;
+    const dz = target.z - pos.z;
+    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    if (dist < tolerance) {
+      // We're close enough - just kill velocity to stay put
+      bot.entity.velocity.set(
+        vel.x * damping,
+        vel.y * damping,
+        vel.z * damping
+      );
+      return true; // Hovering successfully
+    }
+
+    // Calculate desired velocity to reach target (proportional control)
+    const desiredVelX = dx * stiffness;
+    const desiredVelY = dy * stiffness;
+    const desiredVelZ = dz * stiffness;
+
+    // Calculate velocity correction needed
+    const correctionX = desiredVelX - vel.x;
+    const correctionY = desiredVelY - vel.y;
+    const correctionZ = desiredVelZ - vel.z;
+
+    // Clamp corrections to prevent overshooting
+    const clamp = (val, max) => Math.max(-max, Math.min(max, val));
+    const limitedCorrectionX = clamp(correctionX, maxCorrection);
+    const limitedCorrectionY = clamp(correctionY, maxCorrection);
+    const limitedCorrectionZ = clamp(correctionZ, maxCorrection);
+
+    // Apply velocity correction with damping
+    bot.entity.velocity.set(
+      vel.x + limitedCorrectionX,
+      vel.y + limitedCorrectionY,
+      vel.z + limitedCorrectionZ
+    );
+
+    // Counter gravity for Y-axis stability
+    const gravityCompensation = 0.08; // Roughly matches Minecraft gravity
+    bot.entity.velocity.y += gravityCompensation;
+
+    return false; // Still moving to hover position
+  }
+
+  /**
+   * Fly to a node using elytra with direct velocity control
    * @param {Cell} node
    */
   async _flyTo(node) {
     const bot = this.bot;
     const target = node.worldPos.clone();
+    const pos = bot.entity.position;
 
     if (!this.isFlying) return;
 
-    const pos = bot.entity.position;
-    const dir = target.minus(pos);
+    if (!this.elytraFlyingState.active) return;
 
-    // Calculate velocity based on look direction
-    const speed = 1.5;
-    const yaw = bot.entity.yaw;
-    const pitch = bot.entity.pitch;
+    const direction = node.attributes.flyDirection ?? "forward";
+    const vel = bot.entity.velocity;
 
-    const vx = -Math.sin(yaw) * Math.cos(pitch) * speed;
-    const vy = -Math.sin(pitch) * speed;
-    const vz = Math.cos(yaw) * Math.cos(pitch) * speed;
-
-    // Look towards target
-    await bot.lookAt(target.offset(0.5, 0.5, 0.5), true);
-
-    // Send position packets to move
-    bot._client.write("position_look", {
-      x: pos.x + vx * 0.05,
-      y: pos.y + vy * 0.05,
-      z: pos.z + vz * 0.05,
-      yaw: bot.entity.yaw,
-      pitch: bot.entity.pitch,
-      onGround: false,
+    // HOVER MODE - velocity-based position hold
+    const isStable = this._hoverAt(target, {
+      stiffness: 0.4,
+      damping: 0.65,
+      maxCorrection: 0.6,
+      tolerance: 0.15,
     });
 
-    bot.setControlState("forward", true);
+    if (isStable && this.ashfinder.debug) {
+      console.log("Stable hover achieved");
+    }
+
+    // // Calculate direction to target
+    // const dx = target.x - pos.x;
+    // const dy = target.y - pos.y;
+    // const dz = target.z - pos.z;
+    // const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+    // const totalDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    // // Normalize direction
+    // const dirX = dx / Math.max(totalDist, 0.01);
+    // const dirY = dy / Math.max(totalDist, 0.01);
+    // const dirZ = dz / Math.max(totalDist, 0.01);
+
+    // // Elytra physics constants
+    // const baseSpeed = 0.6; // Base horizontal gliding speed
+    // const maxSpeed = 1.5; // Max safe speed
+    // const liftForce = 0.12; // Upward force when climbing
+    // const gravityCounter = 0.04; // Counter gravity during horizontal flight
+
+    // if (direction === "up" || dy > 1) {
+    //   // CLIMBING - need strong upward velocity
+    //   const targetVelX = dirX * baseSpeed * 0.8;
+    //   const targetVelY = Math.max(0.3, dirY * 0.5 + liftForce);
+    //   const targetVelZ = dirZ * baseSpeed * 0.8;
+
+    //   bot.entity.velocity.set(
+    //     vel.x * 0.7 + targetVelX * 0.3, // Smooth transition
+    //     targetVelY,
+    //     vel.z * 0.7 + targetVelZ * 0.3
+    //   );
+    // } else if (direction === "down" || dy < -1) {
+    //   // DESCENDING - let gravity help, control speed
+    //   const currentSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+
+    //   if (currentSpeed > maxSpeed) {
+    //     // Air brake
+    //     bot.entity.velocity.set(vel.x * 0.9, vel.y, vel.z * 0.9);
+    //   } else {
+    //     // Maintain downward trajectory
+    //     const targetVelX = dirX * baseSpeed * 1.2;
+    //     const targetVelZ = dirZ * baseSpeed * 1.2;
+
+    //     bot.entity.velocity.set(
+    //       vel.x * 0.8 + targetVelX * 0.2,
+    //       Math.min(vel.y, -0.2), // Ensure descending
+    //       vel.z * 0.8 + targetVelZ * 0.2
+    //     );
+    //   }
+    // } else {
+    //   // HORIZONTAL FLIGHT - maintain altitude and speed
+    //   const targetVelX = dirX * baseSpeed;
+    //   const targetVelZ = dirZ * baseSpeed;
+
+    //   // Counter gravity to maintain altitude
+    //   const altitudeCorrection = dy > 0.5 ? gravityCounter : -gravityCounter;
+
+    //   bot.entity.velocity.set(
+    //     vel.x * 0.85 + targetVelX * 0.15,
+    //     vel.y + altitudeCorrection,
+    //     vel.z * 0.85 + targetVelZ * 0.15
+    //   );
+
+    //   // Speed maintenance
+    //   const currentSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+    //   if (currentSpeed < 0.3) {
+    //     // Boost to prevent stall
+    //     const boostFactor = 0.3 / Math.max(currentSpeed, 0.1);
+    //     bot.entity.velocity.set(
+    //       vel.x * boostFactor,
+    //       vel.y - 0.05, // Slight dive to gain speed
+    //       vel.z * boostFactor
+    //     );
+    //   }
+    // }
+
+    // // Look at target (visual only, doesn't affect flight)
+    // await bot.lookAt(target, false);
   }
 
   async _startPacketFly() {
     if (this.isFlying) return;
-
     this.isFlying = true;
 
+    const bot = this.bot;
     let elytra = null;
 
-    const elytraArmor =
-      this.bot.inventory.slots[this.bot.getEquipmentDestSlot("torso")];
+    // Equip elytra
+    const elytraArmor = bot.inventory.slots[bot.getEquipmentDestSlot("torso")];
 
     if (!elytraArmor || !elytraArmor.name.includes("elytra")) {
-      const elytraInv = this.bot.inventory
+      const elytraInv = bot.inventory
         .items()
         .find((i) => i.name.includes("elytra"));
 
       if (!elytraInv) throw new Error("No elytra found!");
 
       elytra = elytraInv;
-      await this.bot.equip(elytra, "torso");
+      await bot.equip(elytra, "torso");
     } else {
       elytra = elytraArmor;
     }
 
-    // Start elytra gliding
-    this.bot.setControlState("jump", true);
-    this.bot._client.write("entity_action", {
-      entityId: this.bot.entity.id,
-      actionId: 8, // Start fall flying
-      jumpBoost: 0,
-    });
+    // Phase 1: Liftoff - jump until airborne
+    if (this.ashfinder.debug) console.log("Starting elytra liftoff...");
 
-    this.elytraFlyingState.active = true;
-    this.elytraFlyingState.gliding = true;
+    bot.setControlState("jump", true);
+
+    // Wait until we're in the air and have some upward velocity
+    let liftoffAttempts = 0;
+    const maxLiftoffAttempts = 40; // ~2 seconds at 20 ticks/sec
+
+    while (bot.entity.onGround && liftoffAttempts < maxLiftoffAttempts) {
+      await bot.waitForTicks(1);
+      liftoffAttempts++;
+    }
+
+    if (bot.entity.onGround) {
+      bot.setControlState("jump", false);
+      this.isFlying = false;
+      throw new Error("Failed to lift off for elytra flight");
+    }
+
+    // Keep jumping a bit more to gain height
+    await bot.waitForTicks(3);
+    bot.setControlState("jump", false);
+
+    // Phase 2: Activate elytra mid-air
+    if (this.ashfinder.debug) console.log("Activating elytra glide...");
+
+    // Wait for falling state (velocity going down)
+    let fallWaitTicks = 0;
+    while (bot.entity.velocity.y > 0 && fallWaitTicks < 20) {
+      await bot.waitForTicks(1);
+      fallWaitTicks++;
+    }
+
+    // Manually trigger elytra using packet
+    try {
+      bot._client.write("entity_action", {
+        entityId: bot.entity.id,
+        actionId: 8, // Start elytra flying
+        jumpBoost: 0,
+      });
+
+      if (this.ashfinder.debug) console.log("Elytra packet sent");
+
+      // Wait for elytra state to activate
+      let elytraWaitTicks = 0;
+      while (!bot.entity.elytraFlying && elytraWaitTicks < 20) {
+        await bot.waitForTicks(1);
+        elytraWaitTicks++;
+
+        // Retry packet if not working
+        if (elytraWaitTicks % 5 === 0) {
+          bot._client.write("entity_action", {
+            entityId: bot.entity.id,
+            actionId: 8,
+            jumpBoost: 0,
+          });
+        }
+      }
+
+      if (!bot.entity.elytraFlying) {
+        console.warn("Elytra did not activate, but continuing anyway");
+      }
+
+      this.elytraFlyingState.active = true;
+      this.elytraFlyingState.gliding = true;
+      this.elytraFlyingState.liftoff = true;
+
+      // Phase 3: Initial velocity boost for stable glide
+      const vel = bot.entity.velocity;
+      const yaw = bot.entity.yaw;
+
+      // Give forward momentum in the direction we're facing
+      const forwardX = -Math.sin(yaw) * 0.3;
+      const forwardZ = -Math.cos(yaw) * 0.3;
+
+      bot.entity.velocity.set(
+        forwardX,
+        Math.max(vel.y, -0.1), // Gentle descent or maintain altitude
+        forwardZ
+      );
+
+      if (this.ashfinder.debug) {
+        console.log(
+          `Elytra flying activated! State: ${bot.entity.elytraFlying}`
+        );
+      }
+    } catch (error) {
+      console.error("Error activating elytra:", error);
+      this.isFlying = false;
+      this.elytraFlyingState.active = false;
+      throw error;
+    }
   }
 
   async _stopPacketFly() {

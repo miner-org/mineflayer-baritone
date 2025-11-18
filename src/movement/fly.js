@@ -39,7 +39,7 @@ class MoveFlyUp extends Move {
   addNeighbors(neighbors, targetNode) {
     if (this.isWalkable(targetNode)) {
       targetNode.attributes.isFlying = true;
-      targetNode.attributes.flyUp = true;
+      targetNode.attributes.flyDirection = "up";
       targetNode.attributes.name = this.name;
       neighbors.push(this.makeMovement(targetNode, this.COST_UP));
     }
@@ -60,7 +60,7 @@ class MoveFlyDown extends Move {
   addNeighbors(neighbors, targetNode) {
     if (this.isWalkable(targetNode)) {
       targetNode.attributes.isFlying = true;
-      targetNode.attributes.flyDown = true;
+      targetNode.attributes.flyDirection = "down";
       targetNode.attributes.name = this.name;
       neighbors.push(this.makeMovement(targetNode, this.COST_FALL));
     }
