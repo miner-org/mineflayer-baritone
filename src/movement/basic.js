@@ -88,7 +88,7 @@ class MoveForward extends Move {
 
     if (node.attributes.break.some((b) => b.equals(node))) {
       const supportBelowSolid = this.isSolid(below);
-      const willPlaceBelow = node.attributes.place.length > 0;
+      const willPlaceBelow = node.attributes.place.some((p) => p.equals(below));
       if (!supportBelowSolid && !willPlaceBelow) return;
     } else {
       if (
@@ -101,7 +101,7 @@ class MoveForward extends Move {
       }
     }
 
-    const breakCost = (node.attributes.break.length || 0) * this.COST_BREAK;
+    const breakCost = this.COST_BREAK;
     const totalCost =
       this.COST_NORMAL +
       breakCost +
@@ -243,16 +243,18 @@ class MoveForwardUp extends Move {
 
     // filter out invalids
     if (canBreak && node.attributes.break.length === 0) return;
-    // if (canPlace && node.attributes.place.length === 0) return;
-    if (!canBreak && !this.isStandable(node)) return;
+    if (canPlace && node.attributes.place.length === 0) return;
+    if (!canBreak && !this.isStandable(node) && !this.isAir(above)) return;
     if (
       canBreak &&
       node.attributes.break.length === 0 &&
       !this.isStandable(node)
     )
       return;
-    if (canBreak && node.attributes.break.length > 0 && !this.isSolid(below))
-      return;
+    if (canBreak && node.attributes.break.length > 0) {
+      const willPlaceBelow = node.attributes.place.some((p) => p.equals(below));
+      if (!this.isSolid(below) && !willPlaceBelow) return;
+    }
 
     const cost =
       this.COST_UP +
@@ -306,6 +308,8 @@ class MoveForwardDown extends Move {
     let fallDistance = 0;
     let below = forward.down(1);
 
+    // console.log(this.getBlock(below));
+
     // count how many air blocks until we hit a solid or exceed maxFall
     while (fallDistance < maxFall && this.isAir(below)) {
       fallDistance++;
@@ -313,29 +317,29 @@ class MoveForwardDown extends Move {
     }
 
     // require that we actually drop at least 1 block — otherwise this isn't a "down" move
-    if (fallDistance < 1) return;
+    if (fallDistance < 1 && !this.isHalfSlab(below)) return;
 
     // must land on solid
-    if (!this.isSolid(below)) return;
+    if (!this.isSolid(below) && !this.isHalfSlab(below)) return;
 
     // ignore farmland as landing (same as before)
     if (this.getBlock(below).name.includes("farmland")) return;
 
-    const targetNode = below.up(1);
+    const targetNode = !this.isHalfSlab(below) ? below.up(1) : below.up(0.5);
 
-    // sanity: target must be strictly lower than origin
-    if (Math.floor(targetNode.y) >= Math.floor(originVec.y)) return;
+    const walkable = this.isHalfSlab(below)
+      ? this.isWalkable(below.up(1))
+      : this.isWalkable(below.up(1));
 
     // ensure we can fit at landing spot
-    if (!this.isWalkable(targetNode)) return;
+    if (!walkable) return;
 
     targetNode.attributes = targetNode.attributes || {};
     targetNode.attributes.name = this.name;
     targetNode.attributes.fallDistance = fallDistance;
+    targetNode.attributes.originVec = originVec;
 
-    const cost =
-      this.COST_FALL +
-      (fallDistance > 1 ? fallDistance * (this.COST_FALL_PER_BLOCK ?? 1) : 0);
+    const cost = this.COST_FALL + fallDistance > 1 ? fallDistance : 0;
 
     targetNode.attributes.cost = cost;
 

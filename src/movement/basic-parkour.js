@@ -23,11 +23,15 @@ class MoveForwardParkour extends Move {
    * @param {DirectionalVec3} originVec
    */
   addNeighbors(neighbors, originVec) {
-    const maxDistance = 3;
-    let count = 0;
+    if (!this.isStandable(originVec)) return;
 
-    for (let distance = count; distance <= maxDistance; distance++) {
-      const landingNode = originVec.forward(distance + 1);
+    const maxDistance = 3;
+    const minDistance = 1;
+
+    const start = originVec.forward(1);
+
+    for (let distance = minDistance; distance <= maxDistance; distance++) {
+      const landingNode = start.forward(distance);
       const standingNode = landingNode.down(1);
 
       // Must land exactly same height
@@ -61,17 +65,18 @@ class MoveForwardParkour extends Move {
       // Body clearance must be fully walkable
       if (!bodyClear.every((node) => this.isWalkable(node))) continue;
 
-      // console.log("Parkour")
+      // console.log("Parkour", distance);
 
       // Valid Parkour
       const parkourNode = landingNode.clone();
       parkourNode.attributes = {
         name: this.name,
-        cost: this.COST_PARKOUR * distance,
+        cost: this.COST_PARKOUR + distance,
         nJump: distance === 1,
         sJump: distance >= 2,
         dist: distance,
         parkour: true,
+        originVec,
       };
       neighbors.push(
         this.makeMovement(parkourNode, parkourNode.attributes.cost)
@@ -90,34 +95,31 @@ class MoveForwardParkourUp extends Move {
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
-      if (this.isWater(originVec)) return;
+      if (!this.isWalkable(originVec)) continue; //dont fucknig know hwy this happens
+
+      if (this.isWater(originVec)) continue;
       this.addNeighbors(neighbors, originVec);
     }
   }
 
   addNeighbors(neighbors, originVec) {
+    if (!this.isStandable(originVec)) return;
     const minDistance = 1;
-    const maxDistance = 3; // small parkour forward
+    const maxDistance = 2; // small parkour forward
+    const start = originVec.forward(1);
 
     for (let distance = minDistance; distance <= maxDistance; distance++) {
-      const landingNode = originVec.forward(distance).up(1); // step up 1
+      const landingNode = start.forward(distance).up(1); // step up 1
       const standingNode = landingNode.down(1); // block under feet
 
-      // ❌ Must land exactly 1 block higher
-      if (landingNode.y !== originVec.y + 1) continue;
-      if (standingNode.y !== originVec.y) continue;
-
-      // ❌ Landing must be standable
       if (!this.isStandable(landingNode)) continue;
 
-      // ❌ Check gap clearance along path
       const bodyClear = [];
       const feetGap = [];
       let last = originVec;
 
       for (let i = 1; i <= distance; i++) {
         const forward = last.forward(1);
-        if (forward.y !== originVec.y) break; // must stay flat until final jump
 
         bodyClear.push(forward.up(1)); // head/body space
         feetGap.push(forward.down(1)); // gap under feet
@@ -132,12 +134,13 @@ class MoveForwardParkourUp extends Move {
       const parkourNode = landingNode.clone();
       parkourNode.attributes = {
         name: this.name,
-        cost: this.COST_PARKOUR * distance,
-        nJump: distance === 2 || 1,
-        sJump: distance > 2,
+        cost: this.COST_PARKOUR + distance,
+        nJump: distance === 1,
+        sJump: distance >= 2,
         dist: distance,
         up: true, // mark as upward jump
         parkour: true, // mark as parkour
+        originVec,
       };
 
       neighbors.push(
@@ -156,27 +159,24 @@ class MoveForwardParkourDown extends Move {
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
-      if (this.isWater(originVec)) return;
+      if (this.isWater(originVec)) continue;
       this.addNeighbors(neighbors, originVec);
     }
   }
 
   addNeighbors(neighbors, originVec) {
+    if (!this.isStandable(originVec)) return;
     const minDistance = 1;
-    const maxDistance = 3; // small parkour forward
+    const maxDistance = 2; // small parkour forward
+
+    const start = originVec.forward(1);
 
     for (let distance = minDistance; distance <= maxDistance; distance++) {
-      const landingNode = originVec.forward(distance).down(1); // step down 1
+      const landingNode = start.forward(distance).down(1); // step down 1
       const standingNode = landingNode.down(1); // block under feet
 
-      // ❌ Must land exactly 1 block lower
-      if (landingNode.y !== originVec.y - 1) continue;
-      if (standingNode.y !== originVec.y - 2) continue; // floor under feet
-
-      // ❌ Landing must be standable
       if (!this.isStandable(landingNode)) continue;
 
-      // ❌ Check gap clearance along path
       const bodyClear = [];
       const feetGap = [];
       let last = originVec;
@@ -186,24 +186,25 @@ class MoveForwardParkourDown extends Move {
         if (forward.y !== originVec.y) break; // must stay flat until final drop
 
         bodyClear.push(forward.up(1)); // head/body space
-        feetGap.push(forward.down(1)); // gap under feet
+        feetGap.push(forward.down(2)); // gap under feet
         last = forward;
       }
 
       // must have actual gap (air/water)
-      if (!feetGap.every((n) => this.isAir(n) || this.isWater(n))) continue;
+      if (!feetGap.every((n) => this.isWalkable(n) || this.isWater(n)))
+        continue;
       if (!bodyClear.every((n) => this.isWalkable(n))) continue;
 
-      // ✅ Valid parkour down move
       const parkourNode = landingNode.clone();
       parkourNode.attributes = {
         name: this.name,
-        cost: this.COST_PARKOUR * distance,
-        nJump: distance === 2 || 1,
-        sJump: distance > 2,
+        cost: this.COST_PARKOUR + distance,
+        nJump: distance <= 2,
+        sJump: distance >= 3,
         dist: distance,
         down: true, // mark as downward jump
         parkour: true, // mark as parkour
+        originVec,
       };
 
       neighbors.push(
@@ -243,7 +244,7 @@ class MoveAngledParkour extends Move {
             dir
           );
 
-          if (this.isWater(originVec)) return;
+          if (this.isWater(originVec)) continue;
           this.addNeighbors(neighbors, originVec, fx, rz);
         }
       }
@@ -335,7 +336,7 @@ class MoveDiagonalParkour extends Move {
     for (const dir of diagonalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
-      if (this.isWater(originVec)) return;
+      if (this.isWater(originVec)) continue;
       this.addNeighbors(neighbors, originVec);
     }
   }
@@ -399,7 +400,6 @@ class MoveDiagonalParkour extends Move {
   }
 }
 
-// Change the priorities at the bottom from 50-60 to 15-25 (higher than basic, but still considered)
 registerMoves([
   new MoveForwardParkour(15, {
     // Was 50

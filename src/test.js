@@ -1,5 +1,5 @@
 const mineflayer = require("mineflayer");
-const genMineflayer  = require("gen-mineflayer");
+const genMineflayer = require("gen-mineflayer");
 const inject = require("./loader");
 const Vec3 = require("vec3").Vec3;
 const { argv } = require("process");
@@ -28,9 +28,9 @@ bot.once("spawn", async () => {
   // bot.ashfinder.enableBreaking();
   pathExecutor = new PathExecutor(bot);
 
-  // bot.ashfinder.enableBreaking();
-  // bot.ashfinder.enablePlacing();
-  bot.ashfinder.enableFlight();
+  bot.ashfinder.enableBreaking();
+  bot.ashfinder.enablePlacing();
+  // bot.ashfinder.enableFlight();
   bot.ashfinder.config.debugMoves = true;
 
   bot.on("chat", async (username, message) => {
@@ -61,6 +61,7 @@ bot.once("spawn", async () => {
 
     if (command === "f!find") {
       const blockName = args[0];
+      const radius = parseInt(args[1]) || 1;
 
       if (!blockName) return bot.chat("No");
 
@@ -73,7 +74,7 @@ bot.once("spawn", async () => {
 
       const pos = block.position.clone().floored();
 
-      const goal = new GoalNear(pos, 1);
+      const goal = new GoalNear(pos, radius);
 
       await bot.ashfinder.goto(goal);
       bot.clearControlStates();
@@ -274,7 +275,7 @@ bot.once("spawn", async () => {
       bot.ashfinder.stop();
     }
 
-        if (command === "f!binfo") {
+    if (command === "f!binfo") {
       const eyePos = bot.blockAtEntityCursor(bot.players[username].entity);
 
       if (eyePos) {
@@ -300,6 +301,7 @@ bot.once("spawn", async () => {
 
     if (command === "f!find") {
       const blockName = args[0];
+      const radius = parseInt(args[1]) || 1;
 
       if (!blockName) return bot.chat("No");
 
@@ -312,7 +314,7 @@ bot.once("spawn", async () => {
 
       const pos = block.position.clone().floored();
 
-      const goal = new GoalNear(pos, 1);
+      const goal = new GoalNear(pos, radius);
 
       await bot.ashfinder.goto(goal);
       bot.clearControlStates();

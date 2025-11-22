@@ -23,6 +23,7 @@ class AshFinderPlugin extends EventEmitter {
     this.bot = bot;
     this.path = [];
     this.stopped = true;
+    this.isPathing = false;
     this.config = new AshFinderConfig();
     this.debug = false;
 
@@ -47,6 +48,7 @@ class AshFinderPlugin extends EventEmitter {
     // ensure controller exists for this run
     this._searchController = this._searchController || {};
     this._searchController.debug = this.debug;
+    // console.log("he was onece a dogg", options);
 
     const result = await astar(
       bot.entity.position.clone(),
@@ -164,6 +166,7 @@ class AshFinderPlugin extends EventEmitter {
   async goto(goal, options = { excludedPositions: [] }) {
     if (this.stopped) {
       this.stopped = false;
+      this.isPathing = true;
 
       if (this.config.fly) {
         const elytraArmor =
@@ -182,7 +185,16 @@ class AshFinderPlugin extends EventEmitter {
       const { path, status } = result;
 
       if (this.debug) {
-        console.log(path.map((node) => node.attributes.name));
+        console.log(
+          path.map(
+            (node) =>
+              `${node.attributes.name} (origin:${
+                node.attributes.originVec !== undefined
+                  ? node.attributes.originVec
+                  : "none"
+              }) (Target: ${node.worldPos})`
+          )
+        );
         console.log(status);
       }
 
@@ -191,6 +203,7 @@ class AshFinderPlugin extends EventEmitter {
         partial: status === "partial",
         targetGoal: goal,
         bestNode: result.bestNode,
+        pathOptions: options,
       });
 
       this.emit("pathStarted", {
@@ -202,9 +215,11 @@ class AshFinderPlugin extends EventEmitter {
       // Wait for the path to complete
       try {
         await executionPromise;
+        this.isPathing = false;
         return { status: "success" };
       } catch (err) {
         if (this.debug) console.error("Path execution failed:", err);
+        this.isPathing = false;
         return { status: "failed", error: err };
       }
     } else {

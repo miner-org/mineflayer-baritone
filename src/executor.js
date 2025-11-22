@@ -35,18 +35,21 @@ class PathExecutor {
     this.climbingState = false; // Can be false or { phase: 'positioning'|'climbing'|'descending', target: Vec3 }
     this.interactingState = false;
     this.elytraFlyingState = { active: false, gliding: false, liftoff: false };
+    this.bridgingState = { active: false, positioning: false, placing: false };
 
     this.placedNodes = new Set();
 
     this.executing = false;
     this.partial = false;
     this.goal = null;
+    this.pathOptions = null;
 
     this.placingState = false;
     this.placing = false;
     this.breakingState = false;
     this.digging = false;
     this.config = bot.ashfinder.config || {};
+    this.comingFromSJ = false;
 
     this.currentPromise = null;
     this.resolveCurrentPromise = null;
@@ -70,7 +73,7 @@ class PathExecutor {
     this.visitedPositions = new Set(); // Track where we've been
     this.lastProgressTime = Date.now(); // Track when we last made progress
     this.progressCheckInterval = 2000; // Check progress every 2 seconds
-    this.noProgressTimeout = 30000; // Replan if no progress for 30 seconds
+    this.noProgressTimeout = 10000; // Replan if no progress for 30 seconds
 
     this.params = {};
 
@@ -87,6 +90,7 @@ class PathExecutor {
    * @param {Goal} options.targetGoal - The current target goal
    * @param {Cell} options.bestNode - The best node found if path is partial
    * @param {Goal} options.finalGoal - The ultimate goal we're trying to reach (for partial paths)
+   * @param {Object} options.pathOptions
    */
   setPath(path, options = {}) {
     const {
@@ -96,6 +100,7 @@ class PathExecutor {
       finalGoal = null,
       isWaypoint = false,
       waypointIndex = null,
+      pathOptions = null,
     } = options;
 
     // Only create a new promise if one doesn't exist (i.e., not replanning)
@@ -109,6 +114,8 @@ class PathExecutor {
     this.finalGoal = finalGoal || targetGoal;
     this.currentWaypoint = isWaypoint ? targetGoal : null;
     this.waypointIndex = waypointIndex;
+
+    this.pathOptions = pathOptions;
 
     this.path = path;
     this.currentIndex = 0;
@@ -149,11 +156,11 @@ class PathExecutor {
     const pos = this.bot.entity.position;
 
     // Check for actual progress toward goal
-    if (this._checkStuckConditions(pos)) {
-      console.warn("Bot is stuck, replanning...");
-      this._handleStuckState();
-      return;
-    }
+    // if (this._checkStuckConditions(pos)) {
+    //   console.warn("Bot is stuck, replanning...");
+    //   this._handleStuckState();
+    //   return;
+    // }
 
     // Update last position for next check
     this.lastPosition = pos.clone();
@@ -213,6 +220,7 @@ class PathExecutor {
 
       this.currentIndex++;
       this.jumpState = null;
+      this.comingFromSJ = false;
       this.bot.setControlState("sprint", false);
       this._clearAllControls();
 
@@ -511,7 +519,7 @@ class PathExecutor {
 
     if (this.ashfinder.debug)
       console.log(
-        `Executing move: ${node.attributes.name} at ${node.worldPos} (${attributes.place?.length} places, ${attributes.break?.length} breaks)`
+        `Executing move: ${node.attributes.name} (cost:${node.attributes.cost}) at ${node.worldPos} (${attributes.place?.length} places, ${attributes.break?.length} breaks)`
       );
 
     // Handle water-related moves first
@@ -526,7 +534,8 @@ class PathExecutor {
     }
 
     if (attributes.sJump) {
-      this._sprintJump(node);
+      if (this.ashfinder.debug) console.log("Sprint jumping");
+      await this._sprintJump(node);
     } else if (attributes.nJump) {
       if (
         attributes.place?.length > 0 &&
@@ -540,7 +549,9 @@ class PathExecutor {
         await this._handleBreakingBlocks(node);
       }
 
-      this._simpleJump(node);
+      if (this.ashfinder.debug) console.log("simple jumping");
+
+      await this._simpleJump(node);
     } else if (attributes.ladder) {
       if (attributes.descend) {
         this._startClimbDown(node);
@@ -570,6 +581,7 @@ class PathExecutor {
         !this.toweringState.active &&
         !this.placedNodes.has(node.worldPos.toString())
       ) {
+        this._clearAllControls();
         await this.jumpAndPlaceBlock(node);
         // this.placedNodes.add(node.worldPos.toString());
       }
@@ -737,17 +749,56 @@ class PathExecutor {
         // --- BARITONE-STYLE BRIDGING ---
 
         // 1. Position at edge safely
-        await this._positionAtEdge(
+        const targetBlock = await this._positionAtEdge(
           targetPos,
-          node.attributes.dir || placePos.dir
+          node.direction || placePos.dir
         );
+
+        if (!targetBlock) {
+          console.log("put a bullet in my head");
+          break;
+        }
 
         // 2. Sneak to prevent falling
         bot.setControlState("sneak", true);
         await bot.waitForTicks(2);
 
-        // 3. Look down at placement position
-        await bot.lookAt(targetPos.offset(0.5, 0, 0.5), true);
+        // 3. Look at the closest face in the direction of placeDir
+        const placeDir = node.parent.worldPos
+          .clone()
+          .minus(targetBlock.position.clone())
+          .normalize();
+
+        const faces = [
+          { normal: new Vec3(1, 0, 0), offset: new Vec3(1, 0.5, 0.5) }, // east
+          { normal: new Vec3(-1, 0, 0), offset: new Vec3(0, 0.5, 0.5) }, // west
+          { normal: new Vec3(0, 1, 0), offset: new Vec3(0.5, 1, 0.5) }, // up
+          { normal: new Vec3(0, -1, 0), offset: new Vec3(0.5, 0, 0.5) }, // down
+          { normal: new Vec3(0, 0, 1), offset: new Vec3(0.5, 0.5, 1) }, // south
+          { normal: new Vec3(0, 0, -1), offset: new Vec3(0.5, 0.5, 0) }, // north
+        ];
+
+        let bestFace = null;
+        let bestDot = -Infinity;
+
+        for (const face of faces) {
+          const dot = placeDir.dot(face.normal);
+          if (dot > bestDot) {
+            bestDot = dot;
+            bestFace = face;
+          }
+        }
+
+        // safety fallback
+        if (!bestFace) {
+          bestFace = faces[3]; // look down
+        }
+
+        // compute target look point
+        const facePoint = targetPos.clone().add(bestFace.offset);
+
+        // actually look there
+        await bot.lookAt(facePoint, true);
         await bot.waitForTicks(1);
 
         // 4. Place block
@@ -784,44 +835,22 @@ class PathExecutor {
    */
   async _positionAtEdge(targetBlock, direction) {
     const bot = this.bot;
-    const pos = bot.entity.position;
+    let pos = bot.entity.position;
 
-    // Calculate edge position (move toward target until at edge)
-    const dir = direction
-      ? new Vec3(direction.x, 0, direction.z).normalize()
-      : targetBlock.minus(pos).normalize();
+    await this.bot.lookAt(targetBlock.offset(0, 1.5, 0));
 
-    // Move to edge of current block
-    const edgeThreshold = 0.3; // Distance from edge to start placing
+    bot.setControlState("sneak", true);
+    bot.setControlState("forward", true);
 
-    while (true) {
-      const currentPos = bot.entity.position;
-      const distToTarget = currentPos.distanceTo(targetBlock);
+    let blockAtFeet = bot.blockAt(pos.floored().offset(0, -1, 0));
 
-      // Check if we're at appropriate distance
-      if (distToTarget < 1.2 && distToTarget > 0.8) {
-        break; // Good position
-      }
-
-      // Check if we're about to fall
-      const blockAhead = bot.blockAt(
-        currentPos.offset(dir.x * 0.5, -1, dir.z * 0.5).floored()
-      );
-
-      if (!blockAhead || blockAhead.boundingBox === "empty") {
-        // At edge, stop
-        break;
-      }
-
-      // Move forward slightly
-      bot.lookAt(targetBlock.offset(0.5, 0, 0.5), true);
-      bot.setControlState("forward", true);
-      await bot.waitForTicks(1);
-      bot.setControlState("forward", false);
+    while (blockAtFeet.boundingBox !== "empty") {
+      pos = bot.entity.position;
+      blockAtFeet = bot.blockAt(pos.floored().offset(0, -1, 0));
       await bot.waitForTicks(1);
     }
 
-    bot.setControlState("forward", false);
+    return blockAtFeet;
   }
 
   _isInWater() {
@@ -934,7 +963,7 @@ class PathExecutor {
     this.ashfinder.stop();
   }
 
-  async _handlePartialPathEnd(bestNode) {
+  async _handlePartialPathEnd() {
     const bot = this.bot;
     const currentPos = bot.entity.position.clone().floored();
 
@@ -950,17 +979,14 @@ class PathExecutor {
       return new Vec3(x, y, z);
     });
 
-    const endFunc = createEndFunc(this.goal);
-    const newPath = await Astar(
-      currentPos,
-      this.goal.getPosition(),
+    // console.log(this.ashfinder._searchController);
+
+    const newPath = await this.ashfinder.generatePath(
       this.goal,
-      bot,
-      endFunc,
-      this.ashfinder.config,
-      excludedPositions, // Avoid areas we've already explored
-      this.ashfinder.debug
+      this.pathOptions
     );
+
+
 
     if (newPath.status === "no path") {
       // If no path avoiding visited areas, try again without exclusions
@@ -971,15 +997,9 @@ class PathExecutor {
           );
         }
 
-        const retryPath = await Astar(
-          currentPos,
-          this.goal.getPosition(),
+        const retryPath = await this.ashfinder.generatePath(
           this.goal,
-          bot,
-          endFunc,
-          this.ashfinder.config,
-          [],
-          this.ashfinder.debug
+          this.pathOptions
         );
 
         if (retryPath.status === "no path") {
@@ -1398,89 +1418,6 @@ class PathExecutor {
   }
 
   /**
-   * Sprint-jump across a chain of flat nodes.
-   * Auto-skips intermediate nodes to prevent backtracking.
-   */
-  _sprintJumpLookahead() {
-    const bot = this.bot;
-    const startIdx = this.currentIndex;
-    const startNode = this.path[startIdx];
-
-    if (!startNode) {
-      if (this.ashfinder.debug)
-        console.warn("No start node for sprint jump lookahead");
-      return;
-    }
-
-    // Init sprinting state if not already
-    if (!this.jumpState) {
-      this.jumpState = { jumped: false, timer: 0 };
-      bot.setControlState("sprint", true);
-      bot.setControlState("forward", true);
-    }
-
-    // Always face the final node in the chain (or at least a few nodes ahead)
-    const lookAheadIdx = Math.min(startIdx + 3, this.path.length - 1);
-    const lookTarget = this.path[lookAheadIdx].worldPos.offset(0, 1.6, 0);
-    bot.lookAt(lookTarget, true);
-
-    if (this.currentIndex >= this.path.length) {
-      this._onGoalReached();
-      return;
-    }
-
-    if (startIdx + 1 >= this.path.length) {
-      if (this.ashfinder.debug)
-        console.warn("No next node for sprint jump lookahead");
-      return;
-    }
-
-    // Jump timing
-    if (
-      !this.jumpState.jumped &&
-      this._shouldJumpNow(
-        startNode.worldPos,
-        this.path[startIdx + 1].worldPos,
-        bot
-      )
-    ) {
-      bot.setControlState("jump", true);
-      this.jumpState.jumped = true;
-    }
-
-    if (this.jumpState.jumped) {
-      this.jumpState.timer++;
-      if (this.jumpState.timer > 5) {
-        bot.setControlState("jump", false);
-      }
-    }
-
-    // --- Skip nodes that we already passed mid-sprint ---
-    while (
-      this.currentIndex < this.path.length &&
-      this._passedNode(this.path[this.currentIndex])
-    ) {
-      if (this.ashfinder.debug)
-        console.log(
-          `Sprint chaining: skipping node ${
-            this.path[this.currentIndex].worldPos
-          }`
-        );
-      this.currentIndex++;
-      this.jumpState = this.jumpState; // keep sprint state alive
-    }
-
-    // End sprint chain if terrain changes
-    if (
-      this.currentIndex >= this.path.length ||
-      !this._isStraightFlatRun(this.currentIndex)
-    ) {
-      if (this.ashfinder.debug) console.log("Sprint chain ended.");
-      bot.setControlState("sprint", false);
-    }
-  }
-
-  /**
    * Checks if the bot has passed a node (used for skipping during sprint chains)
    */
   _passedNode(node) {
@@ -1545,16 +1482,31 @@ class PathExecutor {
     this._clearAllControls();
     this.toweringState.active = true;
 
+    const placePos = node.attributes.place[0];
+    //make sure we are actually FUCKING STANDING WHERE WE NEED TO BE
+    await bot.lookAt(placePos, true);
+    let dist = bot.entity.position.distanceTo(placePos);
+
+    while (dist > 0.67) {
+      // console.log(dist);
+      bot.setControlState("forward", true);
+      await bot.lookAt(placePos, true);
+      dist = bot.entity.position.distanceTo(placePos);
+      await bot.waitForTicks(1);
+    }
+
+    this._clearAllControls();
+
     try {
       const blockPlace = getBlockToPlace(bot);
 
       bot.setControlState("jump", true);
 
-      console.log("one");
+      // console.log("one");
 
       await equipBlockIfNeeded(bot, blockPlace);
 
-      await bot.lookAt(bot.entity.position.offset(0, -1, 0), true);
+      await bot.lookAt(node.worldPos.offset(0, -1, 0), true);
 
       while (!bot.entity.onGround) {
         const footPos = bot.entity.position.floored().offset(0.5, -0.5, 0.5);
@@ -1706,13 +1658,14 @@ class PathExecutor {
    *
    * @param {Cell} node
    */
-  _simpleJump(node) {
+  async _simpleJump(node) {
     const bot = this.bot;
     const from = node.parent.worldPos;
     const to = node.worldPos;
 
     // Look toward jump direction
-    bot.lookAt(to.offset(0, 1.6, 0), true);
+    await bot.lookAt(to.offset(0, 1.6, 0), true);
+    // await bot.waitForTicks(1);
 
     // Ensure we're moving forward cleanly
     if (!this.jumpState) {
@@ -1735,7 +1688,8 @@ class PathExecutor {
         from.floored(),
         to.floored(),
         bot,
-        true
+        true,
+        node.attributes?.up ?? false
       );
       const shouldAutoJump = this._shouldAutoJump(to, bot);
       const isGapJump = horizontalDist > 0.9 && horizontalDist < 1.4;
@@ -1747,7 +1701,9 @@ class PathExecutor {
         bot.setControlState("jump", true);
 
         if (this.ashfinder.debug) {
-          console.log(`Simple jump triggered (autoJump: ${shouldAutoJump})`);
+          console.log(
+            `Simple jump triggered (autoJump: ${shouldAutoJump}) (shouldJumpNow: ${shouldJumpNow}) (GapJump:${isGapJump})`
+          );
         }
       }
     }
@@ -1757,19 +1713,11 @@ class PathExecutor {
       this.jumpState.timer++;
 
       // Use longer timer for auto-jumps (climbing up blocks)
-      const maxTimer = this.jumpState.isAutoJump ? 8 : 2;
+      const maxTimer = this.jumpState.isAutoJump ? 5 : 10;
 
       if (this.jumpState.timer > maxTimer) {
         bot.setControlState("jump", false);
-
-        // Only reset if we're on ground or falling (prevents premature reset mid-air)
-        if (bot.entity.onGround || bot.entity.velocity.y < -0.1) {
-          this.jumpState = null;
-
-          if (this.ashfinder.debug) {
-            console.log("Jump state reset - on ground or falling");
-          }
-        }
+        this.jumpState = null;
       }
     }
   }
@@ -1779,7 +1727,7 @@ class PathExecutor {
    * @param {Cell} node
    * @returns
    */
-  _sprintJump(node) {
+  async _sprintJump(node) {
     const bot = this.bot;
 
     if (!this.jumpState) {
@@ -1799,14 +1747,14 @@ class PathExecutor {
 
       this.jumpState = { jumped: false, timer: 0 };
 
-      // NEW: Make sure we're not moving in wrong direction first
       this._clearAllControls();
 
       bot.setControlState("sprint", true);
       bot.setControlState("forward", true);
     }
 
-    bot.lookAt(node.worldPos.offset(0, 1.6, 0), true);
+    await bot.lookAt(node.worldPos.offset(0, 1.6, 0), true);
+    // await bot.waitForTicks(1);
 
     if (
       !this.jumpState.jumped &&
@@ -1814,7 +1762,8 @@ class PathExecutor {
         node.parent.worldPos.floored(),
         node.worldPos.floored(),
         bot,
-        false
+        false,
+        node.attributes?.up ?? false
       )
     ) {
       bot.setControlState("jump", true);
@@ -1823,12 +1772,14 @@ class PathExecutor {
 
     if (this.jumpState.jumped) {
       this.jumpState.timer++;
-      if (this.jumpState.timer > 5) {
-        bot.setControlState("jump", false);
-        // NEW: Don't stop sprint immediately, let momentum carry
-        if (this.jumpState.timer > 10) {
-          bot.setControlState("sprint", false);
-        }
+      const dist = node.parent.worldPos.xzDistanceTo(node.worldPos);
+      const jumpTime = dist <= 3 ? 5 : 10;
+
+      // console.log(dist);
+
+      if (this.jumpState.timer > jumpTime) {
+        this._clearAllControls();
+        this.comingFromSJ = true;
       }
     }
   }
@@ -1968,7 +1919,10 @@ class PathExecutor {
       );
     }
 
-    const isCloseEnough = dx < 0.35 && dy <= 0.55 && dz < 0.35;
+    const horizontalThresh = this.comingFromSJ ? 0.45 : 0.35;
+
+    const isCloseEnough =
+      dx < horizontalThresh && dy <= 0.55 && dz < horizontalThresh;
 
     const isInWater = this._isInWater();
     const isOnGround =
@@ -2036,38 +1990,60 @@ class PathExecutor {
    * @param {Vec3} to - The target position (node.worldPos)
    * @param {Bot} bot - The Mineflayer bot
    * @param {boolean} [isNJump=false] - Whether this is a nJump move (affects threshold)
+   * @param {boolean} [up=false]
    * @returns {boolean}
    */
-  _shouldJumpNow(from, to, bot, isNJump = false) {
+  _shouldJumpNow(from, to, bot, isNJump = false, up = false) {
     const pos = bot.entity.position.clone();
+    const vel = bot.entity.velocity.clone(); // horizontal speed matters
+    const dt = 1 / 20; // one tick
 
-    if (this.ashfinder.debug)
-      console.log(`Bot pos: ${pos}, from: ${from}, to: ${to}`);
+    const centerOfBlock = from.offset(0.5, 0, 0.5);
+    const near = (a, b, tol) => a.distanceTo(b) <= tol;
 
-    // movement direction (xz only)
-    const dir = to.minus(from).normalize();
-    dir.y = 0;
+    // jump edge tuning
+    let idealEdgeDist = up ? 0.55 : 0.45;
+    const baseTolerance = 0.28;
 
-    // center of current block
-    const fromCenter = from.offset(0.5, 0, 0.5);
-
-    // edge point = center + 0.5 * direction
-    const edgePoint = fromCenter.offset(dir.x * 0.5, 0, dir.z * 0.5);
-
-    // dist from bot to that edge point (xz only)
-    const dx = pos.x - edgePoint.x;
-    const dz = pos.z - edgePoint.z;
-    const distToEdge = Math.sqrt(dx * dx + dz * dz);
-
-    // margin depends on jump type
-    const margin = isNJump ? 0.07 : 0.3;
-
-    if (this.ashfinder.debug) {
-      console.log(`distToEdge: ${distToEdge.toFixed(3)}, margin: ${margin}`);
+    // compute direction
+    const dir = to.clone().subtract(from);
+    if (dir.x === 0 && dir.z === 0) {
+      return near(centerOfBlock, pos, 0.35);
     }
 
-    const onGroundish = bot.entity.onGround || bot.entity.velocity.y < 0.05;
-    return onGroundish && distToEdge <= margin;
+    if (dir.x >= 2 || dir.z >= 2) {
+      idealEdgeDist = 0.35;
+    }
+
+    const dirFlat = dir.clone();
+    dirFlat.y = 0;
+    dirFlat.normalize();
+
+    // the "perfect" jump point
+    const idealJumpPoint = centerOfBlock.offset(
+      dirFlat.x * idealEdgeDist,
+      0,
+      dirFlat.z * idealEdgeDist
+    );
+
+    // Horizontal velocity along the jump direction
+    const horizVel = vel.clone();
+    horizVel.y = 0;
+
+    const speedTowardEdge = horizVel.dot(dirFlat); // signed speed
+
+    // how far we are from jump point rn
+    const distToEdge = pos.distanceTo(idealJumpPoint);
+
+    // how far we will move next tick (before jump triggers)
+    const predictedMove = Math.max(speedTowardEdge * dt, 0);
+
+    // dynamic tolerance
+    const dynamicTol = baseTolerance + Math.min(predictedMove * 1.4, 0.15);
+    // fast = looser, slow = tighter
+
+    // final decision
+    return Math.abs(distToEdge - predictedMove) <= dynamicTol;
   }
 
   /**

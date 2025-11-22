@@ -52,7 +52,7 @@ class GoalNear extends Goal {
     const dy = Math.abs(position.y - otherPosition.y);
     const dz = Math.abs(position.z - otherPosition.z);
 
-    return dx <= this.distance && dz <= this.distance && dy <= 1;
+    return dx <= this.distance && dz <= this.distance && dy <= this.distance;
   }
 }
 

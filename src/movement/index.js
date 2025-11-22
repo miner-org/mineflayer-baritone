@@ -120,13 +120,13 @@ class DirectionalVec3 extends Vec3 {
   }
 }
 
-const climbableBlocks = ["ladder", "vines"];
-const unbreakableBlocks = [
-  "bedrock",
-  "barrier",
-  "command_block",
-  "end_portal_frame",
-];
+class Vec3WithAttr extends Vec3 {
+  constructor(x, y, z, attributes = {}) {
+    super(x, y, z);
+    this.attributes = attributes;
+    this.cost = 0;
+  }
+}
 
 /**
  * @type {Array<Move>}
@@ -168,8 +168,8 @@ class Move {
     this.COST_NORMAL = 1;
     this.COST_UP = 1;
     this.COST_FALL = 1;
-    this.COST_BREAK = 1.5;
-    this.COST_PLACE = 1.5;
+    this.COST_BREAK = 1.4;
+    this.COST_PLACE = 1.4;
     this.COST_SWIM = 1;
     this.COST_SWIM_START = 1.1;
     this.COST_SWIM_EXIT = 1.1;
@@ -194,7 +194,7 @@ class Move {
     this.config = config;
     this.node = node; // keep the Cell (or null).
     this.mcData = require("minecraft-data")(bot.version);
-    // do NOT set this.origin = node; that causes confusion
+    this.virtualBlocks = new Map();
   }
 
   // === Inventory / Block Checks ===
@@ -251,7 +251,7 @@ class Move {
 
   isSolid(pos) {
     const block = this.getBlock(pos);
-    return !!block && block.boundingBox === "block";
+    return !!block && block.boundingBox === "block" && this.isFullBlock(pos);
   }
 
   isCarpetLike(pos) {
@@ -308,14 +308,6 @@ class Move {
 
   isStandable(node) {
     const below = node.down(1);
-
-    // Overlay wins over world
-    // only treat it as air if it *wasn't* intentionally scaffolded
-    // if (
-    //   this.node?.virtualBlocks?.get(below.toString()) === "air" &&
-    //   !this.node?.virtualBlocks?.has(node.toString()) // only if not landing
-    // )
-    //   return false;
 
     const blockBelow = this.getBlock(below);
     if (!blockBelow || blockBelow.name === "air") return false;
@@ -377,6 +369,24 @@ class Move {
     return block?.name.includes("slab");
   }
 
+  isHalfSlab(node) {
+    const block = this.getBlock(node);
+    if (!block?.name.includes("slab")) return false;
+    if (!block.shapes) return false;
+
+    if (block.shapes.length === 0) return false;
+
+    const shapes = block.shapes;
+
+    for (const shape of shapes) {
+      const [minX, minY, minZ, maxX, maxY, maxZ] = shape;
+
+      if (maxY === 0.5) return true;
+    }
+
+    return false;
+  }
+
   isFence(node) {
     const block = this.getBlock(node);
     if (!block) return false;
@@ -390,7 +400,12 @@ class Move {
     const block = this.getBlock(node);
     if (!block) return false;
     if (block.name.includes("farmland")) return true;
+    if (block.name.includes("door")) return false;
+    if (!block.shapes) return false;
+    if (block.shapes[0].length === 0) return false;
     const maxY = block.shapes[0]?.[4];
+
+    let yThreshhold = block.name.includes("slab") ? 0.5 : 1;
     return maxY === 1;
   }
 
@@ -423,8 +438,14 @@ class Move {
   // === Helpers ===
 
   makeMovement(position, cost) {
-    position.cost = cost;
-    return position;
+    const pos = new Vec3WithAttr(
+      position.x,
+      position.y,
+      position.z,
+      position.attributes
+    );
+    pos.cost = cost;
+    return pos;
   }
 
   forward(amount = 1, node = null, attributes) {
@@ -654,7 +675,7 @@ function getNeighbors2(node, config, manager, bot, end) {
         }
       } else {
         // Just reference parent's overlay if no changes
-        neighbor.virtualBlocks = node.virtualBlocks;
+        neighbor.virtualBlocks = new Map(node.virtualBlocks || []);
       }
 
       const key = `${neighbor.x},${neighbor.y},${neighbor.z}`;
@@ -665,43 +686,42 @@ function getNeighbors2(node, config, manager, bot, end) {
         continue;
       }
 
-      // Priority logic (keeping your existing logic)
-      const simpleMoves = new Set([
-        "MoveForward",
-        "MoveForwardUp",
-        "MoveForwardDown",
-      ]);
-      const isExistingSimple = simpleMoves.has(existing.attributes?.name);
-      const isNewSimple = simpleMoves.has(neighbor.attributes?.name);
+      // const simpleMoves = new Set([
+      //   "MoveForward",
+      //   "MoveForwardUp",
+      //   "MoveForwardDown",
+      // ]);
+      // const isExistingSimple = simpleMoves.has(existing.attributes?.name);
+      // const isNewSimple = simpleMoves.has(neighbor.attributes?.name);
 
-      let replace = false;
+      // let replace = false;
 
-      if (isNewSimple && !isExistingSimple) {
-        replace = true;
-      } else if (isExistingSimple && !isNewSimple) {
-        replace = false;
-      } else {
-        const existingMove = moveClasses.find(
-          (m) => m.name === existing.attributes?.name
-        );
-        const newMove = moveClasses.find(
-          (m) => m.name === neighbor.attributes?.name
-        );
+      // if (isNewSimple && !isExistingSimple) {
+      //   replace = true;
+      // } else if (isExistingSimple && !isNewSimple) {
+      //   replace = false;
+      // } else {
+      //   const existingMove = moveClasses.find(
+      //     (m) => m.name === existing.attributes?.name
+      //   );
+      //   const newMove = moveClasses.find(
+      //     (m) => m.name === neighbor.attributes?.name
+      //   );
 
-        const existingPriority = existingMove?.priority ?? 999;
-        const newPriority = move.priority;
+      //   const existingPriority = existingMove?.priority ?? 999;
+      //   const newPriority = move.priority;
 
-        if (newPriority < existingPriority) {
-          replace = true;
-        } else if (
-          newPriority === existingPriority &&
-          neighbor.cost < existing.cost
-        ) {
-          replace = true;
-        }
-      }
+      //   if (newPriority < existingPriority) {
+      //     replace = true;
+      //   } else if (
+      //     newPriority === existingPriority &&
+      //     neighbor.cost < existing.cost
+      //   ) {
+      //     replace = true;
+      //   }
+      // }
 
-      if (replace) neighborMap.set(key, neighbor);
+      // if (replace) neighborMap.set(key, neighbor);
     }
   }
 
@@ -718,7 +738,6 @@ module.exports = {
   registerMoves,
   DirectionalVec3,
   clamp,
-  // Enhanced move system exports
   getAllMoves,
   getMovesByCategory,
   getMovesByTag,
@@ -727,6 +746,7 @@ module.exports = {
   getCompatibleMoves,
   moveRegistry,
   moveClasses,
+  Vec3WithAttr,
 };
 
 requireDir("./");
