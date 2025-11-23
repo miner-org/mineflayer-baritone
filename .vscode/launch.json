@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug test script",
+      "program": "${workspaceFolder}/src/test.js",
+      "args": ["localhost", "46803"],
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}

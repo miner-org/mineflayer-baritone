@@ -28,8 +28,8 @@ bot.once("spawn", async () => {
   // bot.ashfinder.enableBreaking();
   pathExecutor = new PathExecutor(bot);
 
-  bot.ashfinder.enableBreaking();
-  bot.ashfinder.enablePlacing();
+  // bot.ashfinder.enableBreaking();
+  // bot.ashfinder.enablePlacing();
   // bot.ashfinder.enableFlight();
   bot.ashfinder.config.debugMoves = true;
 
@@ -317,6 +317,7 @@ bot.once("spawn", async () => {
       const goal = new GoalNear(pos, radius);
 
       await bot.ashfinder.goto(goal);
+      
       bot.clearControlStates();
       bot.setControlState("forward", false);
       bot.setControlState("sprint", false);

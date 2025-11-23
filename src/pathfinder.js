@@ -232,6 +232,8 @@ async function Astar(
 
       if (!currentNode) break;
 
+      // console.log(currentNode);
+
       const currentHash = posHash(currentNode.worldPos);
       // remove from open set and move to closed
       openMap.delete(currentHash);

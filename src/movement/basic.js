@@ -244,7 +244,7 @@ class MoveForwardUp extends Move {
     // filter out invalids
     if (canBreak && node.attributes.break.length === 0) return;
     if (canPlace && node.attributes.place.length === 0) return;
-    if (!canBreak && !this.isStandable(node) && !this.isAir(above)) return;
+    if (!canBreak && !this.isStandable(node)) return;
     if (
       canBreak &&
       node.attributes.break.length === 0 &&
@@ -255,6 +255,8 @@ class MoveForwardUp extends Move {
       const willPlaceBelow = node.attributes.place.some((p) => p.equals(below));
       if (!this.isSolid(below) && !willPlaceBelow) return;
     }
+
+    if (!canBreak && !this.isAir(above)) return
 
     const cost =
       this.COST_UP +
