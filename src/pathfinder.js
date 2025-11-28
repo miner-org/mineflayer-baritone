@@ -148,7 +148,10 @@ async function Astar(
 
   let startPos = start.floored().offset(0.5, 0, 0.5);
 
-  if (bot.blockAt(startPos).name === "farmland")
+  if (
+    bot.blockAt(startPos).name === "farmland" ||
+    bot.blockAt(startPos).name.includes("chest")
+  )
     startPos = startPos.offset(0, 1, 0);
 
   let excludedPositions =
@@ -466,6 +469,10 @@ function computeScore(node, goal, startPos) {
   const rawH = hCost1(node.worldPos, goal);
 
   let f = g + rawH;
+
+  const dist = node.worldPos.distanceTo(goal);
+
+  f -= dist <= 5 ? 0.12 : 0;
   return f;
 }
 

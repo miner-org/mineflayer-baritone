@@ -15,31 +15,51 @@ class MoveForward extends Move {
     const canPlace = this.config.placeBlocks && this.hasScaffoldingBlocks();
     const canBreak = this.config.breakBlocks;
 
-    const originFloorY = Math.floor(originVec.y) - 1;
-    const targetFloorY = Math.floor(below.y);
-
-    if (targetFloorY !== originFloorY) return;
-
     const isSolidBelow = this.isSolid(below);
-    const interactable = this.isInteractable(node);
+    const interactable = this.isInteractable(node) && !this.isTrapdoor(node);
     const isFeetAir = this.isAir(node);
     const isHeadAir = this.isAir(head);
     const isHeadCrouchPassable = this.isCrouchPassable(this.getBlock(head));
 
     if (
-      isSolidBelow &&
-      (isFeetAir || this.isCrouchPassable(this.getBlock(node))) &&
-      (isHeadAir || isHeadCrouchPassable) &&
-      !interactable
+      (this.isSlab(below) && this.isHalfSlab(below)) ||
+      (this.isSlab(node) && this.isHalfSlab(node))
     ) {
       node.attributes = {
         name: this.name,
         break: [],
         place: [],
-        crouch: isHeadCrouchPassable,
-        cost:
-          this.COST_NORMAL +
-          (isHeadCrouchPassable ? this.COST_CROUCH || 0.5 : 0),
+        crouch: false,
+        cost: this.COST_NORMAL,
+        interact: false,
+      };
+
+      neighbors.push(this.makeMovement(node, node.attributes.cost));
+      return;
+    }
+
+    if (isSolidBelow && interactable) {
+      node.attributes = {
+        name: this.name,
+        break: [],
+        place: [],
+        crouch: false,
+        cost: this.COST_NORMAL,
+
+        interact: true,
+      };
+
+      neighbors.push(this.makeMovement(node, node.attributes.cost));
+      return;
+    }
+
+    if (isSolidBelow && isFeetAir && isHeadAir && !interactable) {
+      node.attributes = {
+        name: this.name,
+        break: [],
+        place: [],
+
+        cost: this.COST_NORMAL,
         interact: false,
       };
 
@@ -68,29 +88,29 @@ class MoveForward extends Move {
     if (!this.isAir(node) && !interactable) {
       if (canBreak && this.isBreakable(node)) {
         node.attributes.break.push(node.clone());
-      } else {
-        return;
       }
     }
 
     // --- HEAD check ---
-    if (!this.isAir(head) && !interactable) {
+    if (
+      (!this.isAir(head) && !interactable) ||
+      !this.getBlock(head).name.includes("torch")
+    ) {
       if (this.isCrouchPassable(this.getBlock(head))) {
         node.attributes.crouch = true;
       } else {
         if (!canBreak || !this.isBreakable(head)) return;
-        const breakingFeet = node.attributes.break.length > 0;
-        const feetIsAir = this.isAir(node);
-        if (!breakingFeet && !feetIsAir) return;
         node.attributes.break.push(head.clone());
       }
     }
+
+    // console.log("reachign ehre");
 
     if (node.attributes.break.some((b) => b.equals(node))) {
       const supportBelowSolid = this.isSolid(below);
       const willPlaceBelow = node.attributes.place.some((p) => p.equals(below));
       if (!supportBelowSolid && !willPlaceBelow) return;
-    } else {
+    } else if (node.attributes.break.length === 0) {
       if (
         !this.isStandable(node) &&
         node.attributes.place.length === 0 &&
@@ -100,6 +120,9 @@ class MoveForward extends Move {
         return;
       }
     }
+
+    if (this.isBreakable(head) && !this.isBreakable(node)) return;
+    if (this.isBreakable(node) && !this.isBreakable(head)) return;
 
     const breakCost = this.COST_BREAK;
     const totalCost =
@@ -153,13 +176,18 @@ class MoveDiagonal extends Move {
     ];
 
     for (const offset of diagonalOffsets) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, offset);
+      const originVec = new DirectionalVec3(
+        origin.x,
+        origin.y,
+        origin.z,
+        offset
+      );
 
-      let node = this.origin.offset(offset.x, 0, offset.z);
+      const node = originVec.offset(offset.x, 0, offset.z);
 
-      // Check cardinal adjacent blocks
-      const adj1 = this.origin.offset(offset.x, 0, 0); // East/West
-      const adj2 = this.origin.offset(0, 0, offset.z); // North/South
+      // Cardinal adjacency
+      const adj1 = originVec.offset(offset.x, 0, 0);
+      const adj2 = originVec.offset(0, 0, offset.z);
 
       this.addNeighbors(neighbors, node, adj1, adj2);
     }
@@ -168,10 +196,13 @@ class MoveDiagonal extends Move {
   addNeighbors(neighbors, node, adj1, adj2) {
     const headNode = node.up(1);
 
-    // Prevent corner cutting
-    if (!this.isWalkable(adj1) || !this.isWalkable(adj2)) return;
+    // ⛔ Only block diagonal if BOTH sides are blocked
+    const adj1Blocked = !this.isWalkable(adj1) && !this.isStandable(adj1);
+    const adj2Blocked = !this.isWalkable(adj2) && !this.isStandable(adj2);
 
-    // Proceed with movement
+    if (adj1Blocked && adj2Blocked) return;
+
+    // Proceed if the diagonal space itself is valid
     if (
       this.isWalkable(node) &&
       this.isStandable(node) &&
@@ -244,6 +275,26 @@ class MoveForwardUp extends Move {
     // filter out invalids
     if (canBreak && node.attributes.break.length === 0) return;
     if (canPlace && node.attributes.place.length === 0) return;
+    // if only one is breakable and the rest arent then no no
+    if (
+      this.isBreakable(above) &&
+      !this.isBreakable(head) &&
+      !this.isBreakable(node)
+    )
+      return;
+    if (
+      this.isBreakable(head) &&
+      !this.isBreakable(above) &&
+      !this.isBreakable(node)
+    )
+      return;
+    if (
+      this.isBreakable(node) &&
+      !this.isBreakable(above) &&
+      !this.isBreakable(head)
+    )
+      return;
+
     if (!canBreak && !this.isStandable(node)) return;
     if (
       canBreak &&
@@ -256,7 +307,7 @@ class MoveForwardUp extends Move {
       if (!this.isSolid(below) && !willPlaceBelow) return;
     }
 
-    if (!canBreak && !this.isAir(above)) return
+    if (!canBreak && !this.isAir(above)) return;
 
     const cost =
       this.COST_UP +
@@ -359,55 +410,90 @@ class MoveDiagonalUp extends Move {
     ];
 
     for (const offset of diagonalOffsets) {
-      this.origin = new DirectionalVec3(origin.x, origin.y, origin.z, offset);
+      const originVec = new DirectionalVec3(
+        origin.x,
+        origin.y,
+        origin.z,
+        offset
+      );
 
-      const node = this.origin.offset(offset.x, 1, offset.z);
+      const node = originVec.offset(offset.x, 1, offset.z);
 
       // Check cardinal adjacent blocks
-      const adj1 = this.origin.offset(offset.x, 1, 0); // East/West
-      const adj2 = this.origin.offset(0, 1, offset.z); // North/South
+      const adj1 = originVec.offset(offset.x, 1, 0); // East/West
+      const adj2 = originVec.offset(0, 1, offset.z); // North/South
 
       this.addNeighbors(neighbors, node, adj1, adj2);
     }
   }
 
-  addNeighbors(neighbors, forward) {
-    if (!this.isWalkable(forward)) return;
+  addNeighbors(neighbors, node, adj1, adj2) {
+    const headNode = node.up(1);
 
-    let maxFall = this.config.maxFallDist ?? 3;
-    let fallDistance = 0;
-    let below = forward.down(1);
+    const adj1Blocked = !this.isWalkable(adj1) && !this.isStandable(adj1);
+    const adj2Blocked = !this.isWalkable(adj2) && !this.isStandable(adj2);
 
-    // Ensure this move is actually DOWN
-    if (forward.y >= this.origin.y) return; // ✅ Only allow lower
+    if (adj1Blocked && adj2Blocked) return;
 
-    // Fall until we hit something solid or max fall distance
-    while (fallDistance < maxFall && this.isAir(below)) {
-      fallDistance++;
-      below = below.down(1);
+    // Must be able to step *onto* the diagonal block
+    if (!this.isWalkable(node) || !this.isStandable(node)) return;
+
+    // Headspace must be clear
+    if (!this.isAir(headNode)) return;
+
+    node.attributes["name"] = this.name;
+    const cost = this.COST_DIAGONAL + this.COST_UP;
+    node.attributes["cost"] = cost;
+    node.attributes["nJump"] = true;
+    neighbors.push(this.makeMovement(node, cost));
+  }
+}
+
+class MoveDiagonalDown extends Move {
+  generate(cardinalDirections, origin, neighbors) {
+    const diagonalOffsets = [
+      { x: 1, z: 1 },
+      { x: -1, z: 1 },
+      { x: 1, z: -1 },
+      { x: -1, z: -1 },
+    ];
+
+    for (const offset of diagonalOffsets) {
+      const originVec = new DirectionalVec3(
+        origin.x,
+        origin.y,
+        origin.z,
+        offset
+      );
+
+      const node = originVec.offset(offset.x, -1, offset.z);
+
+      // Check cardinal adjacent blocks
+      const adj1 = originVec.offset(offset.x, -1, 0); // East/West
+      const adj2 = originVec.offset(0, -1, offset.z); // North/South
+
+      this.addNeighbors(neighbors, node, adj1, adj2);
     }
+  }
 
-    if (!this.isSolid(below)) return;
+  addNeighbors(neighbors, node, adj1, adj2) {
+    const headNode = node.up(1);
 
-    // Disallow farmland landing
-    if (this.getBlock(below).name.includes("farmland")) return;
+    const adj1Blocked = !this.isWalkable(adj1) && !this.isStandable(adj1);
+    const adj2Blocked = !this.isWalkable(adj2) && !this.isStandable(adj2);
 
-    const targetNode = below.up(1);
+    if (adj1Blocked && adj2Blocked) return;
 
-    // Only valid if still lower than origin (true downward step)
-    if (targetNode.y >= this.origin.y) return;
+    // Must be able to step *onto* the diagonal block
+    if (!this.isWalkable(node) || !this.isStandable(node)) return;
 
-    if (!this.isWalkable(targetNode)) return;
+    // Headspace must be clear
+    if (!this.isWalkable(headNode)) return;
 
-    targetNode.attributes["name"] = this.name;
-    targetNode.attributes["fallDistance"] = fallDistance;
-
-    const cost =
-      this.COST_FALL +
-      (fallDistance > 0 ? fallDistance * (this.COST_FALL_PER_BLOCK ?? 1) : 0);
-
-    targetNode.attributes["cost"] = cost;
-    neighbors.push(this.makeMovement(targetNode, cost));
+    node.attributes["name"] = this.name;
+    const cost = this.COST_DIAGONAL + this.COST_FALL;
+    node.attributes["cost"] = cost;
+    neighbors.push(this.makeMovement(node, cost));
   }
 }
 
@@ -443,4 +529,5 @@ registerMoves([
     description: "Diagonal upward movement",
     testConfig: { breakBlocks: false, placeBlocks: false },
   }),
+  new MoveDiagonalDown(10)
 ]);

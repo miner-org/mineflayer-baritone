@@ -222,14 +222,11 @@ class MoveSwimUp extends Move {
     // Must be in water to swim up
     if (!this.isWater(originVec)) return;
 
-    // Try swimming up 1-2 blocks
-    for (let height = 1; height <= 2; height++) {
-      const node = originVec.up(height);
-      this.addNeighbors(neighbors, node, originVec, height);
-    }
+    const node = originVec.up(1);
+    this.addNeighbors(neighbors, node, originVec);
   }
 
-  addNeighbors(neighbors, node, originVec, height) {
+  addNeighbors(neighbors, node, originVec) {
     const below = node.down(1);
     const head = node.up(1);
 
@@ -240,15 +237,14 @@ class MoveSwimUp extends Move {
     if (!validTarget) return;
 
     // Head must be clear
-    if (!this.isAir(head) && !this.isWater(head)) return;
+    if (this.isWalkable(head)) return;
 
-    const cost = (this.COST_SWIM ?? this.COST_NORMAL + 1.2) * height;
+    const cost = (this.COST_SWIM ?? this.COST_NORMAL + 1.2);
 
     node.attributes = {
       name: this.name,
       swim: true,
       up: true,
-      height,
       cost,
     };
 

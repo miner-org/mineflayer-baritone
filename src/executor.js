@@ -36,6 +36,7 @@ class PathExecutor {
     this.interactingState = false;
     this.elytraFlyingState = { active: false, gliding: false, liftoff: false };
     this.bridgingState = { active: false, positioning: false, placing: false };
+    this.stuckState = { stuck: false, lastNodeTime: Date.now() };
 
     this.placedNodes = new Set();
 
@@ -54,6 +55,13 @@ class PathExecutor {
     this.currentPromise = null;
     this.resolveCurrentPromise = null;
     this.rejectCurrentPromise = null;
+
+    this.completionPromise = null;
+    this.resolveCompletion = null;
+    this.rejectCompletion = null;
+
+    this.movePromise = null;
+
     this.finalGoal = null;
 
     this.previousNode = null;
@@ -62,24 +70,56 @@ class PathExecutor {
     this.isFlying = false;
     this.flyingInterval = null;
 
+    this.closingDoorState = false;
+
     this.currentWaypoint = null;
     this.waypointTolerance = 3; // How close to get to intermediate waypoints
 
-    this.lastPosition = null; // Vec3 of last check
-    this.stuckTimer = 0; // ticks stuck count
-    this.stuckThreshold = 800; // ticks to consider stuck (~1 sec at 20 ticks/sec)
-    this.stuckDistanceThreshold = 0.35; // how much movement counts as NOT stuck
-
     this.visitedPositions = new Set(); // Track where we've been
-    this.lastProgressTime = Date.now(); // Track when we last made progress
-    this.progressCheckInterval = 2000; // Check progress every 2 seconds
-    this.noProgressTimeout = 10000; // Replan if no progress for 30 seconds
 
     this.params = {};
 
-    this.bot.on("physicsTick", () => {
-      if (this.executing) this.tick();
-    });
+    this.handlingEnd = false;
+    this.handlingStuck = false;
+
+    this.paused = false;
+    this.running = false;
+
+    this._startLoop();
+  }
+
+  _startLoop() {
+    if (this.running) return;
+    this.running = true;
+
+    const loop = async () => {
+      if (!this.running) return;
+
+      if (!this.paused) this.tick();
+      setTimeout(loop, 20);
+    };
+
+    loop();
+  }
+
+  _startCompletionPromiseIfNeeded() {
+    if (!this.completionPromise) {
+      this.completionPromise = new Promise((resolve, reject) => {
+        this.resolveCompletion = () => {
+          if (this.ashfinder.debug)
+            console.log("[executor] resolving completion promise");
+          resolve();
+        };
+        this.rejectCompletion = (err) => {
+          if (this.ashfinder.debug)
+            console.log(
+              "[executor] rejecting completion promise:",
+              err && err.message
+            );
+          reject(err);
+        };
+      });
+    }
   }
 
   /**
@@ -97,46 +137,188 @@ class PathExecutor {
       partial = false,
       targetGoal = null,
       bestNode = null,
-      finalGoal = null,
-      isWaypoint = false,
-      waypointIndex = null,
       pathOptions = null,
     } = options;
 
-    // Only create a new promise if one doesn't exist (i.e., not replanning)
-    if (!this.currentPromise || !isWaypoint) {
-      this.currentPromise = new Promise((resolve, reject) => {
-        this.resolveCurrentPromise = resolve;
-        this.rejectCurrentPromise = reject;
-      });
-    }
+    // ensure there's a single completion promise for the whole goto() lifecycle
+    this._startCompletionPromiseIfNeeded();
 
-    this.finalGoal = finalGoal || targetGoal;
-    this.currentWaypoint = isWaypoint ? targetGoal : null;
-    this.waypointIndex = waypointIndex;
-
-    this.pathOptions = pathOptions;
-
+    // configure executor for this path segment
     this.path = path;
     this.currentIndex = 0;
-    this.placedNodes.clear();
-    this.jumpState = null;
-    this.executing = true;
     this.partial = partial;
     this.goal = targetGoal;
+    this.params.bestNode = bestNode;
+    this.pathOptions = pathOptions;
+    this.executing = true;
+    this.handlingEnd = false; // new path = new flow
+    this.handlingStuck = false;
+    this.stuckState = { stuck: false, lastNodeTime: Date.now() };
 
     if (this.ashfinder.debug) {
-      const wpInfo = isWaypoint ? ` (waypoint ${waypointIndex})` : "";
       console.log(
-        `${partial ? "Executing partial" : "Executing full"} path${wpInfo}`
+        `${
+          partial ? "Executing partial" : "Executing full"
+        } path to ${targetGoal}`
       );
     }
 
-    if (bestNode) {
-      this.params.bestNode = bestNode;
+    // return the single completion promise (same across replans)
+    return this.completionPromise;
+  }
+
+  /**
+   * Called on every physics tick
+   */
+  async tick() {
+    if (!this.executing) return;
+
+    // prevent duplicate end triggers
+    if (this.handlingEnd) return;
+
+    if (this.handlingStuck) return;
+
+    if (this.closingDoorState) return;
+
+    if (this.currentIndex >= this.path.length) {
+      this.handlingEnd = true;
+      this._onPathEnd();
+      return;
     }
 
-    return this.currentPromise;
+    if (this.stuckState.stuck && !this.handlingStuck) {
+      this.handlingStuck = true;
+      this.handleStuck();
+      return;
+    }
+
+    const node = this.path[this.currentIndex];
+    if (this._isActionBusy()) return;
+
+    const reached = this._hasReachedNode(node);
+    if (reached) {
+      this.currentIndex++;
+      this.jumpState = null;
+      this.comingFromSJ = false;
+      this._clearAllControls();
+
+      if (
+        this.previousNode &&
+        this.previousNode.attributes.interact &&
+        this.ashfinder.config.closeInteractables &&
+        !this.closingDoorState
+      ) {
+        let block = this.bot.blockAt(this.previousNode.worldPos);
+        await this.bot.lookAt(node.worldPos, true);
+        this.closingDoorState = true;
+        if (block.getProperties().open) {
+          await this.bot.activateBlock(block);
+          block = this.bot.blockAt(this.previousNode.worldPos);
+          await this.bot.waitForTicks(1);
+        }
+
+        this.closingDoorState = false;
+      }
+
+      this.previousNode = node;
+      this.stuckState.lastNodeTime = Date.now();
+
+      if (this.currentIndex >= this.path.length) {
+        this.handlingEnd = true;
+        this._onPathEnd();
+      }
+      return;
+    }
+
+    this.updateStuckState();
+
+    this._executeMove(node);
+  }
+
+  updateStuckState() {
+    //basically we just check time diff
+    const currentTime = Date.now();
+    const timeSinceLastNode = currentTime - this.stuckState.lastNodeTime;
+
+    if (timeSinceLastNode >= this.ashfinder.config.stuckTimeout) {
+      console.log("Ashfinder is stuck cuz its very noob!");
+      console.log("replanning!");
+
+      this.stuckState.stuck = true;
+    }
+  }
+
+  async handleStuck() {
+    try {
+      const newPath = await this._generateNextPath();
+      this.setPath(newPath.path, {
+        partial: newPath.status === "partial",
+        targetGoal: this.goal,
+        bestNode: newPath.bestNode,
+        pathOptions: this.pathOptions,
+      });
+    } catch (error) {
+      console.log("Failed to generate a path");
+      console.error(error);
+    }
+  }
+
+  async _onPathEnd() {
+    try {
+      if (this.partial) {
+        this.partial = false;
+        const newPath = await this._generateNextPath();
+        this.setPath(newPath.path, {
+          partial: newPath.status === "partial",
+          targetGoal: this.goal,
+          bestNode: newPath.bestNode,
+          pathOptions: this.pathOptions,
+        });
+      } else {
+        this._resolveCompletion();
+        this.executing = false;
+      }
+    } finally {
+      this.handlingEnd = false; // always release lock after handling
+    }
+  }
+
+  async _generateNextPath() {
+    // if you want to pass exclusions use this.visitedPositions -> pathOptions currently
+    const newPath = await this.ashfinder.generatePath(
+      this.goal,
+      this.pathOptions
+    );
+    if (newPath.status === "no path") {
+      throw new Error("No path found after partial path");
+    }
+    return newPath;
+  }
+
+  _resolveCompletion() {
+    if (this.resolveCompletion) {
+      try {
+        this.resolveCompletion();
+      } finally {
+        this._clearCompletion();
+      }
+    }
+  }
+
+  _rejectCompletion(err) {
+    if (this.rejectCompletion) {
+      try {
+        this.rejectCompletion(err);
+      } finally {
+        this._clearCompletion();
+      }
+    }
+  }
+
+  _clearCompletion() {
+    this.completionPromise = null;
+    this.resolveCompletion = null;
+    this.rejectCompletion = null;
   }
 
   /**
@@ -147,297 +329,6 @@ class PathExecutor {
     this.config = config;
   }
 
-  /**
-   * Called on every physics tick
-   */
-  async tick() {
-    if (!this.executing) return;
-
-    const pos = this.bot.entity.position;
-
-    // Check for actual progress toward goal
-    // if (this._checkStuckConditions(pos)) {
-    //   console.warn("Bot is stuck, replanning...");
-    //   this._handleStuckState();
-    //   return;
-    // }
-
-    // Update last position for next check
-    this.lastPosition = pos.clone();
-
-    // path complete check
-    if (this.currentIndex >= this.path.length) {
-      this._onGoalReached();
-      return;
-    }
-
-    const node = this.path[this.currentIndex];
-    const nextNode = this.path[this.currentIndex + 1];
-
-    if (this._isActionBusy()) return;
-
-    const reached = this._hasReachedNode(
-      node,
-      this.jumpState?.jumped ||
-        this.toweringState.active ||
-        this.swimmingState?.active ||
-        this.climbingState
-    );
-
-    if (reached) {
-      // stop climbing controls if this was a ladder node
-      if (node.attributes.ladder) {
-        // console.log("Dih")
-        this.bot.setControlState("forward", false);
-        this.bot.setControlState("jump", false);
-        this.bot.setControlState("sneak", false);
-        this.climbingState = false; // Reset entire state
-        this.climbingTarget = null;
-      }
-
-      if (!this.bot.physicsEnabled) this.bot.physicsEnabled = true;
-
-      // ---- SAVE PREVIOUS NODE BEFORE ADVANCING ----
-      this.previousNode = node;
-
-      // handle interactables on previous node
-      // if (
-      //   this.previousNode?.attributes.interact &&
-      //   this.ashfinder.config.closeInteractables
-      // ) {
-      //   const blockAt = this.bot.blockAt(this.previousNode.worldPos);
-      //   if (blockAt && blockAt.getProperties().open) {
-      //     if (this.ashfinder.debug)
-      //       console.log(`Closing block at ${this.previousNode.worldPos}`);
-      //     await this.bot.lookAt(this.previousNode.worldPos, true);
-      //     try {
-      //       await this.bot.activateBlock(blockAt);
-      //     } catch (error) {
-      //       console.log("Error closing block:", error);
-      //     }
-      //   }
-      // }
-
-      this.currentIndex++;
-      this.jumpState = null;
-      this.comingFromSJ = false;
-      this.bot.setControlState("sprint", false);
-      this._clearAllControls();
-
-      if (this.ashfinder.debug)
-        console.log(
-          `Reached node: ${node.attributes.name} at ${node.worldPos}`
-        );
-      return;
-    }
-
-    if (this.ashfinder.debug) {
-      if (this.bot.entity.elytraFlying) {
-        console.log("We are flying");
-      }
-    }
-
-    this.currentPromise = this._executeMove(node, nextNode);
-    await this.currentPromise;
-    this.currentPromise = null;
-  }
-
-  /**
-   * Comprehensive stuck detection system
-   * @param {Vec3} currentPos - Current bot position
-   * @returns {boolean} - True if bot is stuck
-   */
-  _checkStuckConditions(currentPos) {
-    const now = Date.now();
-
-    // Track visited positions for loop detection
-    const posKey = `${Math.floor(currentPos.x)},${Math.floor(
-      currentPos.y
-    )},${Math.floor(currentPos.z)}`;
-    if (!this.visitedPositions.has(posKey)) {
-      this.visitedPositions.add(posKey);
-      this.lastProgressTime = now;
-
-      // Prevent memory leak on very long paths
-      if (this.visitedPositions.size > 10000) {
-        const oldest = Array.from(this.visitedPositions).slice(0, 5000);
-        oldest.forEach((key) => this.visitedPositions.delete(key));
-      }
-    }
-
-    // Check 1: No new positions visited for too long
-    if (now - this.lastProgressTime > this.noProgressTimeout) {
-      return true;
-    }
-
-    // Check 2: Physical movement detection
-    if (this.lastPosition && !this._isValidStationary()) {
-      const movement = this._calculateMovement(currentPos, this.lastPosition);
-
-      if (!movement.isMoving) {
-        this.stuckTimer++;
-
-        // Progressive timeout based on context
-        const threshold = this._getStuckThreshold();
-
-        if (this.stuckTimer > threshold) {
-          return true;
-        }
-      } else {
-        this.stuckTimer = 0;
-      }
-    }
-
-    // Check 3: Repetitive position cycling (going back and forth)
-    if (this._detectPositionCycle()) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Calculate movement metrics between two positions
-   * @param {Vec3} current - Current position
-   * @param {Vec3} previous - Previous position
-   * @returns {Object} Movement data
-   */
-  _calculateMovement(current, previous) {
-    const verticalMovement = Math.abs(current.y - previous.y);
-    const horizontalMovement = Math.sqrt(
-      Math.pow(current.x - previous.x, 2) + Math.pow(current.z - previous.z, 2)
-    );
-
-    const totalMovement = Math.sqrt(
-      horizontalMovement * horizontalMovement +
-        verticalMovement * verticalMovement
-    );
-
-    return {
-      vertical: verticalMovement,
-      horizontal: horizontalMovement,
-      total: totalMovement,
-      isMoving:
-        verticalMovement > 0.05 ||
-        horizontalMovement > this.stuckDistanceThreshold,
-    };
-  }
-
-  /**
-   * Check if bot is legitimately stationary (not stuck)
-   * @returns {boolean}
-   */
-  _isValidStationary() {
-    // Bot is busy with actions that prevent movement
-    if (this._isActionBusy()) return true;
-
-    const node = this.path[this.currentIndex];
-    if (!node) return false;
-
-    // Legitimate stationary states
-    return (
-      this.swimmingState?.active ||
-      node.attributes?.interact ||
-      node.attributes?.ladder ||
-      !this.bot.entity.onGround // In air
-    );
-  }
-
-  /**
-   * Get adaptive stuck threshold based on current action
-   * @returns {number} Ticks before considering stuck
-   */
-  _getStuckThreshold() {
-    const node = this.path[this.currentIndex];
-
-    // Higher thresholds for complex actions
-    if (node?.attributes?.ascend) return 1200; // Towering needs more time
-    if (node?.attributes?.swim) return 1000; // Swimming can be slow
-    if (node?.attributes?.parkour) return 600; // Parkour needs precision
-    if (this.swimmingState?.active) return 1000;
-
-    return this.stuckThreshold; // Default 800 ticks
-  }
-
-  /**
-   * Detect if bot is cycling between same positions
-   * @returns {boolean}
-   */
-  _detectPositionCycle() {
-    if (this.visitedPositions.size < 10) return false;
-
-    const recentPositions = Array.from(this.visitedPositions).slice(-20);
-    const uniqueRecent = new Set(recentPositions);
-
-    // If we're revisiting the same ~3 positions repeatedly
-    if (uniqueRecent.size <= 3 && recentPositions.length >= 15) {
-      if (this.ashfinder.debug) {
-        console.log("Detected position cycling pattern");
-      }
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Handle stuck state and initiate recovery
-   */
-  _handleStuckState() {
-    this.stuckTimer = 0;
-    this.visitedPositions.clear();
-    this.lastProgressTime = Date.now();
-
-    // Optional: Try small random movement to escape local traps
-    if (this.bot.entity.onGround) {
-      const randomDir = Math.random() < 0.5 ? "left" : "right";
-      this.bot.setControlState(randomDir, true);
-      setTimeout(() => this.bot.setControlState(randomDir, false), 200);
-    }
-
-    this.replanPath();
-  }
-
-  replanPath() {
-    if (this.ashfinder.debug) console.log("Replanning path...");
-
-    const originalResolve = this.resolveCurrentPromise;
-    const originalReject = this.rejectCurrentPromise;
-
-    this.currentIndex = 0;
-    this.placedNodes.clear();
-    this.executing = false;
-    this.resetStates();
-
-    // Determine target: current waypoint or final goal
-    const targetGoal = this.currentWaypoint || this.finalGoal;
-
-    if (!targetGoal) {
-      console.error("No target goal available for replanning!");
-      if (originalReject) {
-        originalReject(new Error("No target goal for replanning"));
-      }
-      this.stop();
-      this.ashfinder.stop();
-      return;
-    }
-
-    this.findPathToGoal(targetGoal)
-      .then(() => {
-        // Path found - execution continues via tick()
-      })
-      .catch((err) => {
-        if (originalReject) {
-          originalReject(err);
-        }
-        this.stop();
-        this.ashfinder.stop();
-      });
-
-    this.resolveCurrentPromise = originalResolve;
-    this.rejectCurrentPromise = originalReject;
-  }
-
   resetStates() {
     this.placingState = false;
     this.placing = false;
@@ -446,55 +337,11 @@ class PathExecutor {
     this.toweringState = { active: false, phase: 0 };
     this.swimmingState = { active: false, sinking: false, floating: false };
     this.elytraFlyingState = { active: false, gliding: false };
+    this.stuckState = { stuck: false, stuckTimer: 0, lastNodeTime: 0 };
     this.climbingState = false;
     this.climbingTarget = null;
     this.interactingState = false;
     this.jumpState = null;
-    this.lastPosition = null;
-    this.stuckTimer = 0;
-  }
-
-  /**
-   *
-   * @returns {Promise<void>}
-   * */
-  async findPathToGoal(targetGoal = null) {
-    const goal = targetGoal || this.finalGoal;
-
-    if (!goal) {
-      console.warn("No goal set for pathfinding!");
-      return;
-    }
-
-    const endFunc = createEndFunc(goal);
-    const newPath = await Astar(
-      this.bot.entity.position.clone().floored(),
-      goal.getPosition(),
-      goal,
-      this.bot,
-      endFunc,
-      this.ashfinder.config,
-      [],
-      this.ashfinder.debug
-    );
-
-    if (newPath.status === "no path") {
-      if (this.rejectCurrentPromise) {
-        this.rejectCurrentPromise(new Error("No path found"));
-        this.rejectCurrentPromise = null;
-        this.resolveCurrentPromise = null;
-        this.currentPromise = null;
-      }
-      return;
-    }
-
-    return this.setPath(newPath.path, {
-      partial: newPath.status === "partial",
-      targetGoal: goal,
-      bestNode: newPath.bestNode,
-      isWaypoint: !!this.currentWaypoint,
-      waypointIndex: this.waypointIndex,
-    });
   }
 
   /**
@@ -561,21 +408,49 @@ class PathExecutor {
     } else if (
       attributes.interact &&
       !this.interactingState &&
-      !block.getProperties().open
+      attributes.interactBlock
     ) {
-      if (this.ashfinder.debug)
-        console.log(`Interacting with block at ${node.worldPos}`);
+      const block = this.bot.blockAt(attributes.interactBlock);
+      const isOpen = block?.getProperties()?.open;
 
-      await this.bot.lookAt(node.worldPos, true);
       this.interactingState = true;
 
       try {
+        // 1. Look at trapdoor
+        await this.bot.lookAt(block.position, true);
+        await this.bot.waitForTicks(1);
+
+        // 2. Toggle trapdoor state
         await this.bot.activateBlock(block);
-      } catch (error) {
-        console.log("Error interacting with block:", error);
+        await this.bot.waitForTicks(2);
+
+        // 3. If trapdoor is now HORIZONTAL, we gotta enter crawl mode
+        const updated = this.bot.blockAt(block.position);
+        const nowOpen = updated?.getProperties()?.open;
+
+        const isHorizontal = nowOpen; // (for trapdoors, open = horizontal)
+
+        if (isHorizontal) {
+          // 4. Walk under trapdoor
+          this._walkTo(node.worldPos);
+          await this.bot.waitForTicks(5);
+
+          this._clearAllControls();
+
+          await this.bot.waitForTicks(2);
+
+          await this.bot.lookAt(block.position, true);
+          await this.bot.activateBlock(block);
+
+          await this.bot.waitForTicks(8);
+        }
+      } catch (err) {
+        console.log("Trapdoor interaction fail:", err);
       } finally {
         this.interactingState = false;
       }
+
+      return;
     } else if (attributes.ascend) {
       if (
         !this.toweringState.active &&
@@ -875,154 +750,6 @@ class PathExecutor {
 
     // Moving up from water level suggests exiting water
     return toY > fromY && this._isInWater();
-  }
-
-  _onGoalReached() {
-    // Check if we're following an entity
-    if (this.ashfinder.following?.active) {
-      const entity = this.ashfinder.following.entity;
-      const distance = this.ashfinder.following.distance;
-
-      if (!entity.isValid) {
-        this.ashfinder.stopFollowing();
-        return;
-      }
-
-      const currentDist = this.bot.entity.position.distanceTo(entity.position);
-
-      // If entity is still far, keep following
-      if (currentDist > distance) {
-        if (this.ashfinder.debug) {
-          console.log(
-            `Entity moved, continuing follow (dist: ${currentDist.toFixed(1)})`
-          );
-        }
-
-        const { GoalNear } = require("./goal");
-        const goal = new GoalNear(entity.position, distance);
-
-        this.findPathToGoal(goal).catch(() => {
-          this.ashfinder.stopFollowing();
-        });
-        return;
-      }
-    }
-
-    // If this was a waypoint, don't stop - the waypoint planner will continue
-    if (this.currentWaypoint) {
-      if (this.ashfinder.debug) {
-        console.log(
-          `Reached waypoint ${this.waypointIndex}, ready for next segment`
-        );
-      }
-
-      this.ashfinder.emit("waypoint-reached", {
-        waypoint: this.currentWaypoint,
-        index: this.waypointIndex,
-      });
-
-      if (this.resolveCurrentPromise) {
-        this.resolveCurrentPromise();
-        this.resolveCurrentPromise = null;
-        this.rejectCurrentPromise = null;
-        this.currentPromise = null;
-      }
-
-      // Don't call stop() - waypoint planner will handle next segment
-      this.executing = false;
-      this.visitedPositions.clear();
-      return;
-    }
-
-    // Regular goal reached
-    if (this.partial) {
-      if (this.ashfinder.debug) console.warn("Reached end of partial path.");
-      this.ashfinder.emit("goal-reach-partial", this.goal);
-      this.partial = false;
-      this._handlePartialPathEnd(this.params.bestNode).catch((err) => {
-        if (this.rejectCurrentPromise) {
-          this.rejectCurrentPromise(err);
-          this.rejectCurrentPromise = null;
-          this.resolveCurrentPromise = null;
-          this.currentPromise = null;
-        }
-        this.stop();
-        this.ashfinder.stop();
-      });
-      return;
-    }
-
-    this.ashfinder.emit("goal-reach", this.goal);
-    if (this.resolveCurrentPromise) {
-      this.resolveCurrentPromise();
-      this.resolveCurrentPromise = null;
-      this.rejectCurrentPromise = null;
-      this.currentPromise = null;
-    }
-    this.stop();
-    this.ashfinder.stop();
-  }
-
-  async _handlePartialPathEnd() {
-    const bot = this.bot;
-    const currentPos = bot.entity.position.clone().floored();
-
-    if (this.ashfinder.debug) {
-      console.log(
-        `Partial path ended at ${currentPos}, continuing to ${this.goal.getPosition()}`
-      );
-    }
-
-    // Pass visited positions to avoid revisiting same areas
-    const excludedPositions = Array.from(this.visitedPositions).map((key) => {
-      const [x, y, z] = key.split(",").map(Number);
-      return new Vec3(x, y, z);
-    });
-
-    // console.log(this.ashfinder._searchController);
-
-    const newPath = await this.ashfinder.generatePath(
-      this.goal,
-      this.pathOptions
-    );
-
-
-
-    if (newPath.status === "no path") {
-      // If no path avoiding visited areas, try again without exclusions
-      if (excludedPositions.length > 0) {
-        if (this.ashfinder.debug) {
-          console.log(
-            "No path found avoiding visited areas, trying without exclusions"
-          );
-        }
-
-        const retryPath = await this.ashfinder.generatePath(
-          this.goal,
-          this.pathOptions
-        );
-
-        if (retryPath.status === "no path") {
-          throw new Error(
-            "No path found to goal after partial path completion"
-          );
-        }
-
-        return this.setPath(retryPath.path, {
-          partial: retryPath.status === "partial",
-          targetGoal: this.goal,
-          bestNode: retryPath.bestNode,
-        });
-      }
-
-      throw new Error("No path found to goal after partial path completion");
-    }
-
-    return this.setPath(newPath.path, {
-      partial: newPath.status === "partial",
-      targetGoal: this.goal,
-      bestNode: newPath.bestNode,
-    });
   }
 
   _clearAllControls() {
@@ -1651,6 +1378,7 @@ class PathExecutor {
    */
   _walkTo(target) {
     this.bot.lookAt(target.offset(0, 1.6, 0), true);
+    this.bot.setControlState("sprint", true);
     this.bot.setControlState("forward", true);
   }
 
@@ -1664,8 +1392,9 @@ class PathExecutor {
     const to = node.worldPos;
 
     // Look toward jump direction
-    await bot.lookAt(to.offset(0, 1.6, 0), true);
-    // await bot.waitForTicks(1);
+    await bot.lookAt(to.offset(0, 1.5, 0), true);
+
+    if (this.jumpState && this.jumpState.jumped) return;
 
     // Ensure we're moving forward cleanly
     if (!this.jumpState) {
@@ -1713,7 +1442,7 @@ class PathExecutor {
       this.jumpState.timer++;
 
       // Use longer timer for auto-jumps (climbing up blocks)
-      const maxTimer = this.jumpState.isAutoJump ? 5 : 10;
+      const maxTimer = this.jumpState.isAutoJump ? 3 : 10;
 
       if (this.jumpState.timer > maxTimer) {
         bot.setControlState("jump", false);
@@ -1773,7 +1502,10 @@ class PathExecutor {
     if (this.jumpState.jumped) {
       this.jumpState.timer++;
       const dist = node.parent.worldPos.xzDistanceTo(node.worldPos);
-      const jumpTime = dist <= 3 ? 5 : 10;
+      let jumpTime = 5;
+      if (dist === 4) {
+        jumpTime = 15;
+      }
 
       // console.log(dist);
 
@@ -2012,7 +1744,7 @@ class PathExecutor {
     }
 
     if (dir.x >= 2 || dir.z >= 2) {
-      idealEdgeDist = 0.35;
+      idealEdgeDist = 0.25;
     }
 
     const dirFlat = dir.clone();
@@ -2075,7 +1807,7 @@ class PathExecutor {
     return onGround && canJumpUp;
   }
 
-  stop() {
+  stop(reason = "death") {
     this.executing = false;
     this.placedNodes.clear();
     this._clearAllControls();
@@ -2087,7 +1819,7 @@ class PathExecutor {
     this.lastProgressTime = Date.now();
 
     if (this.rejectCurrentPromise) {
-      this.rejectCurrentPromise(new Error("Path execution was stopped"));
+      this.rejectCurrentPromise(reason);
       this.resolveCurrentPromise = null;
       this.rejectCurrentPromise = null;
       this.currentPromise = null;

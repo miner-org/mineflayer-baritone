@@ -292,7 +292,10 @@ bot.once("spawn", async () => {
       // bot.creative.startFlying();
 
       const goal = new GoalExact(endPos, 1);
-      await bot.ashfinder.gotoSmart(goal);
+
+      await bot.ashfinder.goto(goal);
+
+      console.log("fuck me in the titties");
     }
 
     if (command === "f!disableOutput") {
@@ -317,7 +320,7 @@ bot.once("spawn", async () => {
       const goal = new GoalNear(pos, radius);
 
       await bot.ashfinder.goto(goal);
-      
+
       bot.clearControlStates();
       bot.setControlState("forward", false);
       bot.setControlState("sprint", false);

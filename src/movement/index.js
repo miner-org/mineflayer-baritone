@@ -240,13 +240,8 @@ class Move {
 
   isAir(pos) {
     const block = this.getBlock(pos);
-    return (
-      !block ||
-      block.name === "air" ||
-      (block.boundingBox === "empty" &&
-        block.name.includes("cobweb") &&
-        !block.name.includes("water"))
-    );
+    if (!block) return false;
+    return block.boundingBox === "empty" && !this.isWater(pos);
   }
 
   isSolid(pos) {
@@ -259,6 +254,22 @@ class Move {
     if (!block) return false;
 
     return block.name.includes("carpet") || block.name === "snow";
+  }
+
+  isTrapdoor(node) {
+    const block = this.getBlock(node);
+
+    if (!block) return false;
+
+    return block.name.includes("trapdoor") && block.name !== "iron_trapdoor";
+  }
+
+  isTopTrapdoor(node) {
+    const block = this.getBlock(node);
+
+    if (!block) return false;
+
+    return this.isTrapdoor(node) && block.getProperties().half === "top";
   }
 
   /**
@@ -401,6 +412,7 @@ class Move {
     if (!block) return false;
     if (block.name.includes("farmland")) return true;
     if (block.name.includes("door")) return false;
+    if (block.name.includes("stair")) return true;
     if (!block.shapes) return false;
     if (block.shapes[0].length === 0) return false;
     const maxY = block.shapes[0]?.[4];

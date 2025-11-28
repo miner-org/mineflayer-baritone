@@ -33,6 +33,13 @@ class AshFinderPlugin extends EventEmitter {
       this.#pathExecutor = new PathExecutor(this.bot, this);
       this.waypointPlanner = new SmartWaypointPlanner(this.bot, this);
     });
+
+    this.bot.on("death", () => {
+      console.log(
+        "Bot unfortunatly met its end and now we have to stop pathfinding. Such a shame"
+      );
+      this.stop();
+    });
   }
 
   /**
@@ -116,6 +123,7 @@ class AshFinderPlugin extends EventEmitter {
     this.stopped = true;
     this.following = false;
     this.bot.clearControlStates();
+    this.#pathExecutor.stop("pathfinder stopping");
     this.emit("stopped");
   }
 
@@ -164,69 +172,60 @@ class AshFinderPlugin extends EventEmitter {
    * @param {{excludedPositions?: Vec3[]}} options
    */
   async goto(goal, options = { excludedPositions: [] }) {
-    if (this.stopped) {
-      this.stopped = false;
-      this.isPathing = true;
+    if (!this.stopped) {
+      throw new Error(
+        "Already going to a goal, please wait until the current path is completed."
+      );
+    }
 
-      if (this.config.fly) {
-        const elytraArmor =
-          this.bot.inventory.slots[this.bot.getEquipmentDestSlot("torso")];
+    this.stopped = false;
+    this.isPathing = true;
 
-        if (!elytraArmor) {
-          const elytraInv = this.bot.inventory
-            .items()
-            .find((i) => i.name.includes("elytra"));
-
-          if (!elytraInv) throw new Error("No elytra found!");
-        }
+    if (this.config.fly) {
+      const elytraArmor =
+        this.bot.inventory.slots[this.bot.getEquipmentDestSlot("torso")];
+      if (!elytraArmor) {
+        const elytraInv = this.bot.inventory
+          .items()
+          .find((i) => i.name.includes("elytra"));
+        if (!elytraInv) throw new Error("No elytra found!");
       }
+    }
 
-      const result = await this.generatePath(goal, options);
-      const { path, status } = result;
+    try {
+      const { path, status, bestNode } = await this.generatePath(goal, options);
 
       if (this.debug) {
         console.log(
           path.map(
             (node) =>
               `${node.attributes.name} (origin:${
-                node.attributes.originVec !== undefined
-                  ? node.attributes.originVec
-                  : "none"
+                node.attributes.originVec ?? "none"
               }) (Target: ${node.worldPos})`
           )
         );
         console.log(status);
       }
 
-      // Set the path and get the execution promise
       const executionPromise = this.#pathExecutor.setPath(path, {
         partial: status === "partial",
         targetGoal: goal,
-        bestNode: result.bestNode,
+        bestNode,
         pathOptions: options,
       });
 
-      this.emit("pathStarted", {
-        path,
-        status,
-        goal,
-      });
+      this.emit("pathStarted", { path, status, goal });
 
-      // Wait for the path to complete
-      try {
-        await executionPromise;
-        this.isPathing = false;
-        return { status: "success" };
-      } catch (err) {
-        if (this.debug) console.error("Path execution failed:", err);
-        this.isPathing = false;
-        return { status: "failed", error: err };
-      }
-    } else {
-      const error =
-        "Already going to a goal, please wait until the current path is completed.";
-      console.log(error);
-      throw new Error(error);
+      await executionPromise;
+
+      return { status: "success" };
+    } catch (err) {
+      if (this.debug) console.error("Path execution failed:", err);
+
+      return { status: "failed", error: err };
+    } finally {
+      this.stopped = true;
+      this.isPathing = false;
     }
   }
 
@@ -424,7 +423,6 @@ class AshFinderPlugin extends EventEmitter {
     if (this._searchController && this._searchController.active) {
       this._searchController.applyVirtual(key, state);
 
-      // ADD THIS: Actually prune invalid nodes
       const { pruneOpenSet } = require("./utils");
       const { moveClasses } = require("./movement");
       pruneOpenSet(this._searchController, this.bot, this.config);
@@ -527,6 +525,7 @@ class AshFinderConfig {
     ];
 
     this.thinkTimeout = 30000;
+    this.stuckTimeout = 5000;
     this.maxPartialPaths = 5;
     this.debugMoves = false;
   }
@@ -608,6 +607,7 @@ class AshFinderConfig {
     ];
 
     this.thinkTimeout = 5000;
+    this.stuckTimeout = 5000;
     this.debugMoves = false;
   }
 

@@ -206,6 +206,80 @@ class GoalAvoid extends Goal {
   }
 }
 
+class GoalAvoidXZ extends Goal {
+  /**
+   * @param {Vec3} avoidPos - position to avoid
+   * @param {number} minDistance - how far to stay away
+   * @param {Bot} bot - so we can calculate a safe target away from avoidPos
+   */
+  constructor(avoidPos, minDistance, bot) {
+    super(avoidPos);
+    this.avoidPos = avoidPos;
+    this.minDistance = minDistance;
+
+    // sample multiple directions & pick best
+    this.safeTarget = this.findBestSafeTarget(bot);
+  }
+
+  vecLength(v) {
+    return Math.sqrt(v.x * v.x + v.z * v.z);
+  }
+
+  normalize(v) {
+    const len = this.vecLength(v);
+    if (len === 0) return new Vec3(1, 0, 0); // fallback
+    return new Vec3(v.x / len, 0, v.z / len);
+  }
+
+  // sample safe spots around the danger zone
+  findBestSafeTarget(bot) {
+    const playerPos = bot.entity.position.floored();
+
+    // try 8 directions (N, NE, E, SE, S, SW, W, NW)
+    const directions = [
+      new Vec3(1, 0, 0),
+      new Vec3(-1, 0, 0),
+      new Vec3(0, 0, 1),
+      new Vec3(0, 0, -1),
+      new Vec3(1, 0, 1),
+      new Vec3(1, 0, -1),
+      new Vec3(-1, 0, 1),
+      new Vec3(-1, 0, -1),
+    ];
+
+    let bestTarget = null;
+    let bestScore = -Infinity;
+
+    for (const dir of directions) {
+      const norm = this.normalize(dir);
+      const candidate = this.avoidPos.plus(norm.scaled(this.minDistance + 2));
+
+      // scoring system: prefer points further from danger & closer to player
+      const distFromDanger = candidate.xzDistanceTo(this.avoidPos);
+      const distFromPlayer = -candidate.xzDistanceTo(playerPos); // closer is better
+
+      const score = distFromDanger + distFromPlayer * 0.5;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestTarget = candidate;
+      }
+    }
+
+    return bestTarget.floored().offset(0.5, 0, 0.5);
+  }
+
+  getPosition() {
+    return this.safeTarget;
+  }
+
+  isReached(otherPosition) {
+    if (!otherPosition) return false;
+    const dist = otherPosition.xzDistanceTo(this.avoidPos);
+    return dist > this.minDistance;
+  }
+}
+
 /**
  * This goal is used to combine multiple goals
  */
@@ -322,12 +396,6 @@ class GoalLookAtBlock extends Goal {
   }
 }
 
-function getShapeFaceCenters(shapes, face, half) {
-  return [
-    new Vec3(0.5, half === "top" ? 0.875 : 0.125, 0.5).plus(face.scaled(0.5)),
-  ];
-}
-
 module.exports = {
   Goal,
   GoalNear,
@@ -340,5 +408,6 @@ module.exports = {
   GoalXZ,
   GoalXZNear,
   GoalLookAtBlock,
-  GoalFollowEntity
+  GoalFollowEntity,
+  GoalAvoidXZ,
 };
