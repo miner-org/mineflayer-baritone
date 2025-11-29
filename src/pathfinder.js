@@ -24,9 +24,9 @@ const compare = (a, b) => {
 };
 
 function posHash(node) {
-  const x = node.x | 0;
-  const y = node.y | 0;
-  const z = node.z | 0;
+  const x = Math.round(node.x * 2) / 2;
+  const y = Math.round(node.y);
+  const z = Math.round(node.z * 2) / 2;
   return `${x},${y},${z}`;
 }
 
@@ -280,6 +280,8 @@ async function Astar(
         getEnd()
       );
 
+      // console.log(neighbors)
+
       const distToGoal = currentNode.worldPos.distanceTo(getEnd());
       const distFromStart = currentNode.worldPos.distanceTo(startPos);
 
@@ -309,7 +311,10 @@ async function Astar(
 
       for (const n of neighbors) {
         const nHash = posHash(n);
-        if (closedSet.has(nHash)) continue;
+
+        if (closedSet.has(nHash)) {
+          continue;
+        }
         processNeighbor(currentNode, n);
       }
 

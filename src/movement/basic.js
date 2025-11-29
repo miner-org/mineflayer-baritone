@@ -5,6 +5,7 @@ class MoveForward extends Move {
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       const node = originVec.forward(1);
+
       this.addNeighbors(neighbors, node, originVec, end);
     }
   }
@@ -19,7 +20,6 @@ class MoveForward extends Move {
     const interactable = this.isInteractable(node) && !this.isTrapdoor(node);
     const isFeetAir = this.isAir(node);
     const isHeadAir = this.isAir(head);
-    const isHeadCrouchPassable = this.isCrouchPassable(this.getBlock(head));
 
     if (
       (this.isSlab(below) && this.isHalfSlab(below)) ||
@@ -58,11 +58,9 @@ class MoveForward extends Move {
         name: this.name,
         break: [],
         place: [],
-
         cost: this.COST_NORMAL,
         interact: false,
       };
-
       neighbors.push(this.makeMovement(node, node.attributes.cost));
       return; // 🚀 early exit
     }
@@ -529,5 +527,5 @@ registerMoves([
     description: "Diagonal upward movement",
     testConfig: { breakBlocks: false, placeBlocks: false },
   }),
-  new MoveDiagonalDown(10)
+  new MoveDiagonalDown(10),
 ]);
