@@ -35,9 +35,7 @@ class AshFinderPlugin extends EventEmitter {
     });
 
     this.bot.on("death", () => {
-      console.log(
-        "Bot unfortunatly met its end and now we have to stop pathfinding. Such a shame"
-      );
+      if (!this.stopped) return;
       this.stop();
     });
   }
@@ -502,7 +500,7 @@ class AshFinderConfig {
       "warped_fence_gate",
       "crimson_fence_gate",
     ];
-    this.climbableBlocks = ["vine", "ladder", "scaffolding"];
+    this.climbableBlocks = ["vine", "ladder"];
     this.closeInteractables = true;
 
     // Blocks that cannot be broken under any circumstances

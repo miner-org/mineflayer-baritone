@@ -9,6 +9,8 @@ const {
   autoTool,
   createEndFunc,
   dig,
+  getLookAngles,
+  angleDiff,
 } = require("./utils");
 const { PlayerState } = require("prismarine-physics");
 
@@ -47,7 +49,7 @@ class PathExecutor {
 
     this.placingState = false;
     this.placing = false;
-    this.breakingState = false;
+    this.breakingState = null;
     this.digging = false;
     this.config = bot.ashfinder.config || {};
     this.comingFromSJ = false;
@@ -188,6 +190,7 @@ class PathExecutor {
 
     if (this.stuckState.stuck && !this.handlingStuck) {
       this.handlingStuck = true;
+      // console.log("D")
       this.handleStuck();
       return;
     }
@@ -198,7 +201,7 @@ class PathExecutor {
     const reached = this._hasReachedNode(node);
     if (reached) {
       this.currentIndex++;
-      this.jumpState = null;
+      this.jumpState = false;
       this.comingFromSJ = false;
       this._clearAllControls();
 
@@ -232,13 +235,16 @@ class PathExecutor {
 
     this.updateStuckState();
 
-    this._executeMove(node);
+    await this._executeMove(node);
   }
 
   updateStuckState() {
     //basically we just check time diff
     const currentTime = Date.now();
     const timeSinceLastNode = currentTime - this.stuckState.lastNodeTime;
+
+    if (this.climbingState.phase === "climbing") return;
+    if (this.breakingState) return;
 
     if (timeSinceLastNode >= this.ashfinder.config.stuckTimeout) {
       console.log("Ashfinder is stuck cuz its very noob!");
@@ -275,6 +281,7 @@ class PathExecutor {
           pathOptions: this.pathOptions,
         });
       } else {
+        this._clearAllControls();
         this._resolveCompletion();
         this.executing = false;
       }
@@ -332,7 +339,7 @@ class PathExecutor {
   resetStates() {
     this.placingState = false;
     this.placing = false;
-    this.breakingState = false;
+    this.breakingState = null;
     this.digging = false;
     this.toweringState = { active: false, phase: 0 };
     this.swimmingState = { active: false, sinking: false, floating: false };
@@ -376,9 +383,9 @@ class PathExecutor {
       return;
     }
 
-    if (nextNode && nextNode.attributes.parkour && !attributes.parkour) {
-      this.bot.setControlState("sprint", true);
-    }
+    // if (nextNode && nextNode.attributes.parkour && !attributes.parkour) {
+    //   this.bot.setControlState("sprint", true);
+    // }
 
     if (attributes.sJump) {
       if (this.ashfinder.debug) console.log("Sprint jumping");
@@ -396,15 +403,17 @@ class PathExecutor {
         await this._handleBreakingBlocks(node);
       }
 
+      if (this.breakingState && this.breakingState.active) return;
+
       if (this.ashfinder.debug) console.log("simple jumping");
 
       await this._simpleJump(node);
     } else if (attributes.ladder) {
       if (attributes.descend) {
         this._startClimbDown(node);
+      } else if (attributes.enter) {
+        this._walkTo(node.worldPos);
       } else this._startClimb(node);
-
-      return;
     } else if (
       attributes.interact &&
       !this.interactingState &&
@@ -460,11 +469,34 @@ class PathExecutor {
         await this.jumpAndPlaceBlock(node);
         // this.placedNodes.add(node.worldPos.toString());
       }
+      return;
     } else if (attributes.isFlying) {
       //verticla movements123
       //gay men
       if (!this.isFlying) await this._startPacketFly();
       await this._flyTo(node);
+    } else if (attributes.scaffoldingUp) {
+      // first: center the bot over the block
+      if (!this._isCentered(node.worldPos)) {
+        return; // wait until centered
+      }
+
+      // already centered — now check distance
+      const distY = Math.abs(this.bot.entity.position.y - node.worldPos.y);
+      console.log(distY);
+      if (distY < 1) return;
+
+      this.bot.setControlState("jump", true);
+    } else if (attributes.scaffoldingDown) {
+      // must reach the node and be centered before sneaking
+      if (!this._hasReachedNode(node, true)) return;
+
+      if (!this._isCentered(node.worldPos)) {
+        return;
+      }
+
+      this._clearAllControls();
+      this.bot.setControlState("sneak", true);
     } else {
       if (
         attributes.place?.length > 0 &&
@@ -491,10 +523,35 @@ class PathExecutor {
       }
 
       // this.bot.physics.gravity = this.previousGravity;
+
+      if (this.breakingState && this.breakingState.active) return;
       if (this.isFlying) this._stopPacketFly();
 
       this._walkTo(node.worldPos);
     }
+  }
+
+  _isCentered(pos) {
+    const botPos = this.bot.entity.position;
+    const dx = Math.abs(botPos.x - (pos.x + 0.5));
+    const dz = Math.abs(botPos.z - (pos.z + 0.5));
+
+    console.log(dx, dz);
+    return dx <= 0.6 && dz <= 0.6;
+  }
+
+  _centerBot(pos) {
+    const botPos = this.bot.entity.position;
+
+    const targetX = pos.x + 0.5;
+    const targetZ = pos.z + 0.5;
+
+    const dx = targetX - botPos.x;
+    const dz = targetZ - botPos.z;
+
+    // lil nudges
+    this.bot.setControlState("forward", true);
+    this.bot.lookAt(pos, true);
   }
 
   _isActionBusy() {
@@ -524,11 +581,11 @@ class PathExecutor {
   /**
    * Place all blocks required for a node, sequentially.
    */
-  async _placeBlock(node) {
+  async _placeBlock(node, clearStates = true) {
     const bot = this.bot;
     const blockPlace = getBlockToPlace(bot);
 
-    this._clearAllControls();
+    if (clearStates) this._clearAllControls();
     await bot.waitForTicks(5);
 
     if (this.placingState) {
@@ -621,8 +678,6 @@ class PathExecutor {
 
         if (!block || block.boundingBox !== "empty") continue;
 
-        // --- BARITONE-STYLE BRIDGING ---
-
         // 1. Position at edge safely
         const targetBlock = await this._positionAtEdge(
           targetPos,
@@ -645,12 +700,12 @@ class PathExecutor {
           .normalize();
 
         const faces = [
-          { normal: new Vec3(1, 0, 0), offset: new Vec3(1, 0.5, 0.5) }, // east
-          { normal: new Vec3(-1, 0, 0), offset: new Vec3(0, 0.5, 0.5) }, // west
+          { normal: new Vec3(1, 0, 0), offset: new Vec3(1, -0.5, 0.5) }, // east
+          { normal: new Vec3(-1, 0, 0), offset: new Vec3(0, -0.5, 0.5) }, // west
           { normal: new Vec3(0, 1, 0), offset: new Vec3(0.5, 1, 0.5) }, // up
           { normal: new Vec3(0, -1, 0), offset: new Vec3(0.5, 0, 0.5) }, // down
-          { normal: new Vec3(0, 0, 1), offset: new Vec3(0.5, 0.5, 1) }, // south
-          { normal: new Vec3(0, 0, -1), offset: new Vec3(0.5, 0.5, 0) }, // north
+          { normal: new Vec3(0, 0, 1), offset: new Vec3(0.5, -0.5, 1) }, // south
+          { normal: new Vec3(0, 0, -1), offset: new Vec3(0.5, -0.5, 0) }, // north
         ];
 
         let bestFace = null;
@@ -668,6 +723,9 @@ class PathExecutor {
         if (!bestFace) {
           bestFace = faces[3]; // look down
         }
+
+        console.log(bestFace);
+        console.log("best face");
 
         // compute target look point
         const facePoint = targetPos.clone().add(bestFace.offset);
@@ -1074,39 +1132,18 @@ class PathExecutor {
   /**
    * Handles climbing ladders to reach the target node.
    */
-  _startClimb(node) {
+  async _startClimb(node) {
     const bot = this.bot;
     const target = node.worldPos;
 
-    // Initialize climbing state with phases
-    if (!this.climbingState) {
-      this.climbingState = { phase: "positioning", target: target.clone() };
-    }
+    if (!this.climbingState) this.climbingState = { lookedAtTarget: false };
 
-    const pos = bot.entity.position;
-    const dx = Math.abs(pos.x - target.x);
-    const dz = Math.abs(pos.z - target.z);
-
-    // Phase 1: Position in front of ladder
-    if (this.climbingState.phase === "positioning") {
-      if (dx > 0.25 || dz > 0.25) {
-        bot.lookAt(target.offset(0, 1, 0), true);
-        bot.setControlState("forward", true);
-        if (this.ashfinder.debug) console.log("Positioning for ladder climb");
-        return;
-      }
-
-      // Positioned! Move to climbing phase
-      bot.setControlState("forward", false);
-      this.climbingState.phase = "climbing";
-      if (this.ashfinder.debug) console.log("Positioned, starting climb");
-    }
-
-    // Phase 2: Actually climb
-    if (this.climbingState.phase === "climbing") {
-      bot.setControlState("forward", true);
-      // bot.setControlState("jump", true);
-    }
+    if (!this.climbingState.lookedAtTarget)
+      bot.lookAt(target.offset(0, 1, 0), true);
+    this.climbingState.lookedAtTarget = true;
+    await bot.waitForTicks(5);
+    // bot.setControlState("jump", true);
+    bot.setControlState("forward", true);
   }
 
   _startClimbDown(node) {
@@ -1204,50 +1241,33 @@ class PathExecutor {
    */
   async jumpAndPlaceBlock(node) {
     const bot = this.bot;
-
     if (this.toweringState.active) return;
-    this._clearAllControls();
-    this.toweringState.active = true;
 
     const placePos = node.attributes.place[0];
-    //make sure we are actually FUCKING STANDING WHERE WE NEED TO BE
-    await bot.lookAt(placePos, true);
-    let dist = bot.entity.position.distanceTo(placePos);
 
-    while (dist > 0.67) {
-      // console.log(dist);
-      bot.setControlState("forward", true);
-      await bot.lookAt(placePos, true);
-      dist = bot.entity.position.distanceTo(placePos);
-      await bot.waitForTicks(1);
-    }
-
+    this.toweringState.active = true;
     this._clearAllControls();
+
+    // FORCE the bot to be exactly centered where it should be
+    await this._snapToXZ(placePos);
 
     try {
       const blockPlace = getBlockToPlace(bot);
-
-      bot.setControlState("jump", true);
-
-      // console.log("one");
-
       await equipBlockIfNeeded(bot, blockPlace);
 
+      bot.setControlState("jump", true);
       await bot.lookAt(node.worldPos.offset(0, -1, 0), true);
 
       while (!bot.entity.onGround) {
         const footPos = bot.entity.position.floored().offset(0.5, -0.5, 0.5);
-        const blockBelow = bot.blockAt(footPos);
-        if (blockBelow && blockBelow.boundingBox === "empty") {
+        const below = bot.blockAt(footPos);
+
+        if (below && below.boundingBox === "empty") {
           try {
             await placeBlockAtTarget(bot, footPos, { x: 0, z: 0 }, blockPlace);
-            if (this.ashfinder.debug)
-              console.log(`Placed block at ${footPos} while towering`);
-          } catch (err) {
-            if (this.ashfinder.debug)
-              console.warn("Towering place failed, retrying...", err);
-          }
+          } catch (_) {}
         }
+
         await bot.waitForTicks(1);
       }
 
@@ -1256,6 +1276,48 @@ class PathExecutor {
       bot.setControlState("jump", false);
       this.toweringState.active = false;
       this.toweringState.phase = 0;
+    }
+  }
+
+  async _snapToXZ(targetPos) {
+    const bot = this.bot;
+    this._clearAllControls();
+
+    // target center
+    const tx = targetPos.x;
+    const tz = targetPos.z;
+
+    while (true) {
+      const dx = tx - bot.entity.position.x;
+      const dz = tz - bot.entity.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+
+      if (dist < 0.25) {
+        // DEAD-ON ACCURACY
+        this._clearAllControls();
+        return;
+      }
+
+      // Stop sliding
+      bot.setControlState("back", false);
+      bot.setControlState("forward", false);
+      bot.setControlState("left", false);
+      bot.setControlState("right", false);
+
+      // Normalize direction
+      const angle = Math.atan2(-dx, -dz) + Math.PI;
+      bot.look(bot.entity.yaw, bot.entity.pitch, true);
+
+      // Move toward the exact point
+      bot.lookAt(new Vec3(tx, bot.entity.position.y, tz), true);
+      bot.setControlState("forward", true);
+
+      // If overshooting, brake
+      if (dist < 0.3) {
+        bot.setControlState("forward", false);
+      }
+
+      await bot.waitForTicks(1);
     }
   }
 
@@ -1390,26 +1452,45 @@ class PathExecutor {
     const bot = this.bot;
     const from = node.parent.worldPos;
     const to = node.worldPos;
+    const eyePos = bot.entity.position.offset(0, bot.entity.eyeHeight, 0);
+    const target = to.offset(0, 1.3, 0);
 
-    // Look toward jump direction
-    await bot.lookAt(to.offset(0, 1.5, 0), true);
+    const { yaw } = getLookAngles(eyePos, target);
+    await bot.look(yaw, 0, true);
 
-    if (this.jumpState && this.jumpState.jumped) return;
+    const yawDiff = Math.abs(angleDiff(bot.entity.yaw, yaw));
 
-    // Ensure we're moving forward cleanly
+    // console.log(yawDiff, "Yaw difference");
+
+    if (yawDiff > 0.08) {
+      return;
+    }
+
+    // if (this.jumpState && this.jumpState.jumped) return;
+
     if (!this.jumpState) {
       this._clearAllControls();
     }
 
     bot.setControlState("forward", true);
 
-    // Init jump state if needed
     if (!this.jumpState)
-      this.jumpState = { jumped: false, timer: 0, isAutoJump: false };
+      this.jumpState = {
+        jumped: false,
+        timer: 0,
+        isAutoJump: false,
+        forwardTicks: 0,
+      };
 
     const dx = to.x - from.x;
     const dz = to.z - from.z;
     const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+
+    this.jumpState.forwardTicks++;
+
+    if (node.attributes.up && this.jumpState.forwardTicks < 5) {
+      return; // build velocity before jump
+    }
 
     // Trigger jump once when reaching edge
     if (!this.jumpState.jumped) {
@@ -1458,59 +1539,87 @@ class PathExecutor {
    */
   async _sprintJump(node) {
     const bot = this.bot;
+    const from = node.parent.worldPos;
+    const to = node.worldPos;
+
+    const eyePos = bot.entity.position.offset(0, bot.entity.eyeHeight, 0);
+    const target = to.offset(0, 1.6, 0);
+
+    const { yaw } = getLookAngles(eyePos, target);
+    await bot.look(yaw, 0, true);
+
+    const yawDiff = Math.abs(angleDiff(bot.entity.yaw, yaw));
+    if (yawDiff > 0.08) return;
+
+    if (this.jumpState && this.jumpState.jumped && this.jumpState.done) return;
 
     if (!this.jumpState) {
-      const canMakeIt = this._canReachJumpTarget(
-        node.parent.worldPos,
-        node.worldPos,
-        true
-      );
-
-      if (!canMakeIt) {
-        if (this.ashfinder.debug)
-          console.warn("Jump simulation failed - attempting anyway");
+      const canMakeIt = this._canReachJumpTarget(from, to, true);
+      if (!canMakeIt && this.ashfinder.debug) {
+        console.warn("Sprint jump sim failed — fuck it we ball");
       }
 
-      if (this.ashfinder.debug)
-        console.log("Attempting sprint jump to", node.worldPos);
-
-      this.jumpState = { jumped: false, timer: 0 };
-
       this._clearAllControls();
+
+      this.jumpState = {
+        jumped: false,
+        timer: 0,
+        forwardTicks: 0,
+        isAutoJump: false,
+        done: false,
+      };
 
       bot.setControlState("sprint", true);
       bot.setControlState("forward", true);
     }
 
-    await bot.lookAt(node.worldPos.offset(0, 1.6, 0), true);
-    // await bot.waitForTicks(1);
+    this.jumpState.forwardTicks++;
 
-    if (
-      !this.jumpState.jumped &&
-      this._shouldJumpNow(
-        node.parent.worldPos.floored(),
-        node.worldPos.floored(),
+    if (node.attributes?.up && this.jumpState.forwardTicks < 6) {
+      return;
+    }
+
+    // Trigger jump ONCE
+    if (!this.jumpState.jumped) {
+      const shouldJumpNow = this._shouldJumpNow(
+        from.floored(),
+        to.floored(),
         bot,
         false,
         node.attributes?.up ?? false
-      )
-    ) {
-      bot.setControlState("jump", true);
-      this.jumpState.jumped = true;
+      );
+
+      if (shouldJumpNow) {
+        this.jumpState.jumped = true;
+        this.jumpState.timer = 0;
+
+        bot.setControlState("jump", true);
+
+        if (this.ashfinder.debug) {
+          console.log(`Sprint jump triggered`);
+        }
+      }
     }
 
     if (this.jumpState.jumped) {
       this.jumpState.timer++;
-      const dist = node.parent.worldPos.xzDistanceTo(node.worldPos);
-      let jumpTime = 5;
-      if (dist === 4) {
-        jumpTime = 15;
+
+      const dx = to.x - from.x;
+      const dz = to.z - from.z;
+      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+
+      let maxTimer = 6;
+      if (horizontalDist >= 4) maxTimer = 20;
+
+      if (this.jumpState.timer === 5 && node.attributes?.place) {
+        await this._placeBlock(node, false);
       }
 
-      // console.log(dist);
-
-      if (this.jumpState.timer > jumpTime) {
+      if (this.jumpState.timer > maxTimer) {
         this._clearAllControls();
+
+        this.jumpState.done = true;
+        this.jumpState = null;
         this.comingFromSJ = true;
       }
     }
@@ -1520,52 +1629,49 @@ class PathExecutor {
    * Break all blocks required for a node, sequentially.
    */
   async _handleBreakingBlocks(node) {
-    let promises = [];
+    if (this.breakingState?.active) return;
 
     const bot = this.bot;
+    const breakNodes = node.attributes.break;
+    if (!breakNodes || breakNodes.length === 0) return;
+
     this._clearAllControls();
 
-    // and array of directional vec3
-    const breakNodes = node.attributes.break;
+    this.breakingState = {
+      active: true,
+      toBreak: breakNodes.length,
+      broken: 0,
+    };
 
-    this.breakingState = true;
+    try {
+      for (const pos of breakNodes) {
+        const block = bot.blockAt(pos);
+        if (!block) continue;
+        if (block.boundingBox !== "block") continue;
 
-    for (const pos of breakNodes) {
-      const block = bot.blockAt(pos);
+        if (bot.ashfinder.debug) {
+          showPathParticleEffect(bot, block.position, {
+            r: 0.11,
+            g: 0.11,
+            b: 0.11,
+          });
+        }
 
-      // console.log(block.position)
+        await autoTool(bot, block);
+        await bot.lookAt(block.position.offset(0.5, 0.5, 0.5), true);
 
-      if (bot.ashfinder.debug)
-        showPathParticleEffect(bot, block.position, {
-          r: 0.11,
-          b: 0.11,
-          g: 0.11,
-        });
-
-      if (block.boundingBox === "block") {
-        promises.push(
-          (async () => {
-            try {
-              if (!this.digging) {
-                this.digging = true;
-
-                await autoTool(bot, block);
-                await bot.lookAt(block.position.offset(0.5, 0, 0.5), true);
-                await dig(bot, block);
-                this.digging = false;
-              }
-            } catch (error) {
-              console.error(`Error digging block at ${block.position}:`, error);
-              this.digging = false;
-            }
-          })()
-        );
+        // block might change while looking
+        if (bot.blockAt(pos)?.boundingBox === "block") {
+          await bot.dig(block, true);
+          this.breakingState.broken++;
+        }
       }
+    } catch (err) {
+      console.error("Block breaking failed:", err);
+    } finally {
+      this.breakingState.active = false;
+      this.breakingState = null;
     }
-
-    await Promise.all(promises);
-
-    this.breakingState = false;
   }
 
   /**
@@ -1651,17 +1757,21 @@ class PathExecutor {
       );
     }
 
-    const horizontalThresh = this.comingFromSJ ? 0.45 : 0.35;
+    let horizontalThresh = this.comingFromSJ ? 0.45 : 0.35;
+    let yThresh = node.attributes.nJump || node.attributes.sJump ? 1 : 0.67;
+
+    if (node.attributes.scaffolding) horizontalThresh = 0.7;
 
     const isCloseEnough =
-      dx < horizontalThresh && dy <= 0.55 && dz < horizontalThresh;
+      dx < horizontalThresh && dy <= yThresh && dz < horizontalThresh;
 
     const isInWater = this._isInWater();
     const isOnGround =
       this.bot.entity.onGround ||
       ignoreGround ||
       isInWater ||
-      node.attributes.isFlying;
+      node.attributes.isFlying ||
+      node.attributes.ladder;
 
     return isCloseEnough && isOnGround;
   }
@@ -1744,7 +1854,7 @@ class PathExecutor {
     }
 
     if (dir.x >= 2 || dir.z >= 2) {
-      idealEdgeDist = 0.25;
+      idealEdgeDist = 0.3;
     }
 
     const dirFlat = dir.clone();
@@ -1775,7 +1885,7 @@ class PathExecutor {
     // fast = looser, slow = tighter
 
     // final decision
-    return Math.abs(distToEdge - predictedMove) <= dynamicTol;
+    return Math.abs(distToEdge) <= 0.25;
   }
 
   /**

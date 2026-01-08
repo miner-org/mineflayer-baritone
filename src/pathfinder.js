@@ -371,12 +371,26 @@ async function Astar(
     const totalScaffoldingUsed = currentNode.scaffoldingUsed + placesInMove;
 
     let neighborCost = neighborData.cost;
+
+    const end = getEnd();
+    const distToGoal = neighborData.worldPos
+      ? neighborData.worldPos.distanceTo(end)
+      : new Vec3(neighborData.x, neighborData.y, neighborData.z).distanceTo(
+          end
+        );
+
+    const BIAS_RADIUS = 10;
+    if (distToGoal < BIAS_RADIUS) {
+      const t = distToGoal / BIAS_RADIUS;
+      const biasMultiplier = 0.5 + 0.5 * t; // ranges [0.5 .. 1]
+      neighborCost *= biasMultiplier;
+    }
+
     const tempG = currentNode.gCost + neighborCost;
 
     let neighbor = openMap.get(hash);
 
     if (!neighbor) {
-      // New node
       neighbor = new Cell();
       neighbor.worldPos = new Vec3(
         neighborData.x,
@@ -385,8 +399,8 @@ async function Astar(
       );
       neighbor.direction = neighborData.dir;
       neighbor.gCost = tempG;
-      neighbor.hCost = hCost1(neighbor.worldPos, getEnd());
-      neighbor.fCost = computeScore(neighbor, getEnd(), startPos);
+      neighbor.hCost = hCost1(neighbor.worldPos, end);
+      neighbor.fCost = computeScore(neighbor, end, startPos);
       neighbor.parent = currentNode;
       neighbor.moveName = neighborData.attributes.name;
       neighbor.attributes = neighborData.attributes;
@@ -396,17 +410,15 @@ async function Astar(
       openMap.set(hash, neighbor);
       openHeap.push(neighbor);
     } else if (tempG < neighbor.gCost) {
-      // Better path found
       neighbor.gCost = tempG;
-      neighbor.hCost = hCost1(neighbor.worldPos, getEnd());
-      neighbor.fCost = computeScore(neighbor, getEnd(), startPos);
+      neighbor.hCost = hCost1(neighbor.worldPos, end);
+      neighbor.fCost = computeScore(neighbor, end, startPos);
       neighbor.parent = currentNode;
       neighbor.moveName = neighborData.attributes.name;
       neighbor.attributes = neighborData.attributes;
       neighbor.virtualBlocks = neighborData.virtualBlocks;
       neighbor.scaffoldingUsed = totalScaffoldingUsed;
 
-      // push updated node to heap (duplicates allowed; stale entries are skipped on pop)
       openHeap.push(neighbor);
     }
   }
@@ -470,15 +482,31 @@ function applyHazardPenalty(neighborData, bot) {
  */
 function computeScore(node, goal, startPos) {
   const g = node.gCost;
+  const h = node.hCost;
 
-  const rawH = hCost1(node.worldPos, goal);
+  const EPSILON = 3e-4;
 
-  let f = g + rawH;
+  return g + h * (1 + EPSILON);
+}
 
-  const dist = node.worldPos.distanceTo(goal);
+function hCost1(a, b) {
+  const dx = Math.abs(b.x - a.x);
+  const dz = Math.abs(b.z - a.z);
+  const dy = Math.abs(b.y - a.y);
 
-  f -= dist <= 5 ? 0.12 : 0;
-  return f;
+  const diag = Math.min(dx, dz);
+  const straight = Math.max(dx, dz) - diag;
+  const horizontalCost = diag * Math.SQRT2 + straight;
+
+  const base = horizontalCost + dy;
+
+  const BIAS_RADIUS = 12;
+  const STRENGTH = 1.5;
+
+  const t = Math.min(base / BIAS_RADIUS, 1);
+  const bias = 1 + STRENGTH * Math.exp(-4 * t);
+
+  return base;
 }
 
 function chebyshev(a, b) {
@@ -498,20 +526,6 @@ function chebyshev(a, b) {
     cost2 * (dmid - dmin) + // moves that go diagonally in 2 axes
     cost1 * (dmax - dmid) // moves that go straight
   );
-}
-
-function hCost1(a, b) {
-  const dx = Math.abs(b.x - a.x);
-  const dz = Math.abs(b.z - a.z);
-  const dy = Math.abs(b.y - a.y);
-
-  // horizontal cost using octile metric
-  const diag = Math.min(dx, dz);
-  const straight = Math.max(dx, dz) - diag;
-
-  const horizontalCost = diag * Math.SQRT2 + straight * 1;
-
-  return horizontalCost + dy;
 }
 
 function averageDistance(node, goal) {

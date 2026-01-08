@@ -68,7 +68,7 @@ class MoveLadderExit extends Move {
     if (fromLadder && toStandable && blockBelow && headClear) {
       node.attributes["name"] = this.name;
       node.attributes["ladder"] = false;
-      node.attributes["cost"] = this.COST_LADDER_EXIT ?? this.COST_NORMAL + 1;
+      node.attributes["cost"] = this.COST_LADDER_EXIT ?? this.COST_NORMAL;
       neighbors.push(this.makeMovement(node, node.attributes["cost"]));
     }
   }
@@ -77,47 +77,30 @@ class MoveLadderExit extends Move {
 class MoveLadderClimb extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (this.config.fly) return;
-    // For each cardinal direction, check if ladder climb is possible at origin
-    // for (const dir of cardinalDirections) {
-    const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
+
+    const node = new DirectionalVec3(origin.x, origin.y, origin.z, {
       x: 0,
       z: 0,
     });
 
-    const node = originVec.clone();
-    const nodeBelow = node.down(1);
-
-    // if (!this.isClimbable(nodeBelow)) return;
-
-    // We only consider climbing if the bot is currently on a ladder block or next to one
+    // Must currently be on a ladder
     if (!this.isClimbable(node)) return;
 
-    // console.log("Seeyuh");
+    const up = node.up(1);
+    const head = node.up(2);
 
-    // From the origin, climb upwards along the ladder stack
-    let climbPos = node.clone();
+    // Only climb one block
+    if (!this.isClimbable(up)) return;
+    // if (!this.isAir(head)) return;
 
-    let lastValid = climbPos.clone(); // Start with origin
+    up.attributes = up.attributes || {};
+    up.attributes.name = this.name;
+    up.attributes.ladder = true;
+    up.attributes.cost = this.COST_LADDER ?? this.COST_NORMAL + 1;
+    // console.log("da")
 
-    while (true) {
-      if (!this.isClimbable(climbPos)) break;
-      const headPos = climbPos.up(1);
-      if (!(this.isAir(headPos) || this.isClimbable(headPos))) break;
-
-      lastValid = climbPos.clone();
-
-      climbPos = climbPos.up(1);
-    }
-
-    lastValid.attributes = lastValid.attributes || {};
-    lastValid.attributes["name"] = this.name;
-    lastValid.attributes["ladder"] = true;
-    lastValid.attributes["cost"] = this.COST_LADDER;
-    neighbors.push(
-      this.makeMovement(lastValid, this.COST_LADDER ?? this.COST_NORMAL + 1)
-    );
+    neighbors.push(this.makeMovement(up, up.attributes.cost));
   }
-  // }
 }
 
 class MoveLadderDescend extends Move {

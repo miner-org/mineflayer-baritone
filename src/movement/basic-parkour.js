@@ -39,7 +39,22 @@ class MoveForwardParkour extends Move {
       if (standingNode.y !== originVec.y - 1) continue;
 
       // Broken or unsafe landing
-      if (!this.isStandable(landingNode)) continue;
+      if (!this.isStandable(landingNode)) {
+        const canPlace = this.config.placeBlocks && this.hasScaffoldingBlocks();
+
+        const down = landingNode.down(1);
+
+        const canScaffold =
+          this.isAir(down) &&
+          this.isAir(down.down(1)) &&
+          canPlace &&
+          this.canPlaceBlock(down) &&
+          !this.manager.isAreaMarkedNode(down) &&
+          this.canAffordPlacement(1) &&
+          distance > 2;
+
+        if (!canScaffold) continue;
+      }
 
       // Check gap clearance
       const bodyClear = [];
@@ -78,6 +93,11 @@ class MoveForwardParkour extends Move {
         parkour: true,
         originVec,
       };
+
+      if (this.isAir(landingNode.down(1))) {
+        parkourNode.attributes.place = [landingNode.clone().down(1)];
+        parkourNode.attributes.cost * 2;
+      }
       neighbors.push(
         this.makeMovement(parkourNode, parkourNode.attributes.cost)
       );

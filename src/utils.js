@@ -430,20 +430,19 @@ function createEndFunc(goal) {
   };
 }
 
-async function forceDig(bot, block) {
+async function forceDig(bot, block, timeoutMs = 3000) {
   const pos = block.position;
   const center = pos.offset(0.5, 0.5, 0.5);
-
   const face = 1;
 
   // 1. Look at block
   await bot.lookAt(center, true);
   await bot.waitForTicks(1);
 
-  // 2. Force server to register our view
+  // 2. Force server view sync
   const conv = (yaw, pitch) => ({
-    yaw: 180 - (yaw * 180) / Math.PI, // Flip around PI
-    pitch: -((pitch * 180) / Math.PI), // Invert pitch
+    yaw: 180 - (yaw * 180) / Math.PI,
+    pitch: -((pitch * 180) / Math.PI),
   });
 
   bot._client.write("position_look", {
@@ -456,7 +455,7 @@ async function forceDig(bot, block) {
     onGround: bot.entity.onGround ?? true,
   });
 
-  await bot.waitForTicks(1); // give server time to update
+  await bot.waitForTicks(1);
 
   // 3. Start dig
   bot.swingArm();
@@ -466,7 +465,7 @@ async function forceDig(bot, block) {
     face,
   });
 
-  // 4. Wait realistic time
+  // 4. Wait realistic dig time
   const digTime = bot.digTime(block);
   await bot.waitForTicks(Math.ceil(digTime / 50));
 
@@ -478,11 +477,38 @@ async function forceDig(bot, block) {
   });
 
   return new Promise((resolve) => {
-    const key = pos.toString();
-    const handler = (oldBlock, newBlock) => {
+    const key = pos.toString?.() ?? `${pos.x},${pos.y},${pos.z}`;
+    let done = false;
+
+    const cleanup = () => {
       bot.off(`blockUpdate:${key}`, handler);
-      resolve({ success: newBlock.type === 0, newBlock });
+      clearTimeout(timer);
     };
+
+    const handler = (oldBlock, newBlock) => {
+      if (done) return;
+      done = true;
+      cleanup();
+
+      resolve({
+        success: newBlock.type === 0,
+        timedOut: false,
+        newBlock,
+      });
+    };
+
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      cleanup();
+
+      resolve({
+        success: false,
+        timedOut: true,
+        newBlock: bot.blockAt(pos),
+      });
+    }, timeoutMs);
+
     bot.on(`blockUpdate:${key}`, handler);
   });
 }
@@ -545,6 +571,25 @@ function pruneOpenSet(searchController, bot, config) {
   }
 }
 
+function getLookAngles(from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dz = to.z - from.z;
+
+  const yaw = Math.atan2(-dx, -dz);
+  const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+  const pitch = Math.atan2(-dy, horizontalDist);
+
+  return { yaw, pitch };
+}
+
+function angleDiff(a, b) {
+  let diff = a - b;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  return diff;
+}
+
 module.exports = {
   vectorProjection,
   shouldAutoJump,
@@ -562,5 +607,7 @@ module.exports = {
   createEndFunc,
   dig: forceDig,
   pruneOpenSet,
+  getLookAngles,
+  angleDiff,
   cellStillValid: isCellStillValid,
 };

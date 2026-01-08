@@ -238,10 +238,25 @@ class Move {
     return this.bot.blockAt(pos);
   }
 
+  canPlaceBlock(pos) {
+    const offsets = [
+      [0, -1, 0],
+      [1, 0, 0],
+      [-1, 0, 0],
+      [0, 0, 1],
+      [0, 0, -1],
+    ];
+    return offsets.some(([dx, dy, dz]) => this.isSolid(pos.offset(dx, dy, dz)));
+  }
+
   isAir(pos) {
     const block = this.getBlock(pos);
     if (!block) return false;
-    return block.boundingBox === "empty" && !this.isWater(pos);
+    return (
+      block.boundingBox === "empty" &&
+      !this.isWater(pos) &&
+      !this.isScaffolding(pos)
+    );
   }
 
   isSolid(pos) {
@@ -309,12 +324,21 @@ class Move {
     if (!block) return false;
     const above = this.getBlock(node.offset(0, 1, 0));
     return (
+      !this.isScaffolding(node) &&
       block.boundingBox === "empty" &&
       above.boundingBox === "empty" &&
       block.name !== "water" &&
       !this.config.blocksToStayAway.includes(block.name) &&
       !this.isStair(node)
     );
+  }
+
+  isScaffolding(node) {
+    const block = this.getBlock(node);
+
+    if (!block) return false;
+
+    return block.name.includes("scaffolding");
   }
 
   isStandable(node) {

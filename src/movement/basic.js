@@ -91,8 +91,9 @@ class MoveForward extends Move {
 
     // --- HEAD check ---
     if (
-      (!this.isAir(head) && !interactable) ||
-      !this.getBlock(head).name.includes("torch")
+      !this.isAir(head) &&
+      !this.getBlock(head).name.includes("torch") &&
+      !interactable
     ) {
       if (this.isCrouchPassable(this.getBlock(head))) {
         node.attributes.crouch = true;
@@ -102,27 +103,27 @@ class MoveForward extends Move {
       }
     }
 
-    // console.log("reachign ehre");
+    // if (node.attributes.break.some((b) => b.equals(node))) {
+    //   const supportBelowSolid = this.isSolid(below);
+    //   const willPlaceBelow = node.attributes.place.some((p) => p.equals(below));
+    //   if (!supportBelowSolid && !willPlaceBelow) return;
+    // } else if (node.attributes.break.length === 0) {
+    //   if (
+    //     !this.isStandable(node) &&
+    //     node.attributes.place.length === 0 &&
+    //     !interactable &&
+    //     !node.attributes.crouch
+    //   ) {
+    //     return;
+    //   }
+    // }
 
-    if (node.attributes.break.some((b) => b.equals(node))) {
-      const supportBelowSolid = this.isSolid(below);
-      const willPlaceBelow = node.attributes.place.some((p) => p.equals(below));
-      if (!supportBelowSolid && !willPlaceBelow) return;
-    } else if (node.attributes.break.length === 0) {
-      if (
-        !this.isStandable(node) &&
-        node.attributes.place.length === 0 &&
-        !interactable &&
-        !node.attributes.crouch
-      ) {
-        return;
-      }
-    }
+    if (canBreak && this.isBreakable(head) && !this.isBreakable(node)) return;
+    if (canBreak && this.isBreakable(node) && !this.isBreakable(head)) return;
 
-    if (this.isBreakable(head) && !this.isBreakable(node)) return;
-    if (this.isBreakable(node) && !this.isBreakable(head)) return;
+    if (!canBreak && !this.isStandable(node)) return;
 
-    const breakCost = this.COST_BREAK;
+    const breakCost = this.COST_BREAK * node.attributes.break.length;
     const totalCost =
       this.COST_NORMAL +
       breakCost +
@@ -150,17 +151,6 @@ class MoveForward extends Move {
       name.includes("trapdoor") ||
       name.includes("carpet")
     );
-  }
-
-  canPlaceBlock(pos) {
-    const offsets = [
-      [0, -1, 0],
-      [1, 0, 0],
-      [-1, 0, 0],
-      [0, 0, 1],
-      [0, 0, -1],
-    ];
-    return offsets.some(([dx, dy, dz]) => this.isSolid(pos.offset(dx, dy, dz)));
   }
 }
 
@@ -416,6 +406,8 @@ class MoveDiagonalUp extends Move {
       );
 
       const node = originVec.offset(offset.x, 1, offset.z);
+
+      if (this.isClimbable(originVec)) continue;
 
       // Check cardinal adjacent blocks
       const adj1 = originVec.offset(offset.x, 1, 0); // East/West

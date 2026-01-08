@@ -396,6 +396,61 @@ class GoalLookAtBlock extends Goal {
   }
 }
 
+class GoalLookAtBlockFace extends Goal {
+  constructor(position, world, options = {}) {
+    super(position);
+    this.world = world;
+
+    this.reach = options.reach ?? 4.5;
+    this.entityHeight = options.entityHeight ?? 1.6;
+
+    // face must be one of: "north", "south", "west", "east", "up", "down"
+    this.face = options.face;
+  }
+
+  isReached(nodePos) {
+    const node = nodePos.offset(0, this.entityHeight, 0);
+    const blockCenter = this.getPosition().offset(0.5, 0.5, 0.5);
+
+    if (node.distanceTo(blockCenter) > this.reach) return false;
+
+    // Direction vectors for each face
+    const faceDirs = {
+      up: new Vec3(0, 1, 0),
+      down: new Vec3(0, -1, 0),
+      north: new Vec3(0, 0, -1),
+      south: new Vec3(0, 0, 1),
+      west: new Vec3(-1, 0, 0),
+      east: new Vec3(1, 0, 0),
+    };
+
+    const dir = faceDirs[this.face];
+    if (!dir) return false;
+
+    // Compute the exact face center
+    const faceTarget = blockCenter.plus(dir.scaled(0.5));
+
+    // Direction from bot head → the face center
+    const rayDir = faceTarget.minus(node).normalize();
+
+    // Try raycast
+    const hit = this.world.raycast(node, rayDir, this.reach);
+
+    // Must hit exactly this block AND that face
+    if (!hit) return false;
+
+    const sameBlock =
+      hit.position.x === this.getPosition().x &&
+      hit.position.y === this.getPosition().y &&
+      hit.position.z === this.getPosition().z;
+
+    const sameFace =
+      hit.face?.x === dir.x && hit.face?.y === dir.y && hit.face?.z === dir.z;
+
+    return sameBlock && sameFace;
+  }
+}
+
 module.exports = {
   Goal,
   GoalNear,
@@ -408,6 +463,7 @@ module.exports = {
   GoalXZ,
   GoalXZNear,
   GoalLookAtBlock,
+  GoalLookAtBlockFace,
   GoalFollowEntity,
   GoalAvoidXZ,
 };

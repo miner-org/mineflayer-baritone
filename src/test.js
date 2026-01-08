@@ -28,7 +28,7 @@ bot.once("spawn", async () => {
   // bot.ashfinder.enableBreaking();
   pathExecutor = new PathExecutor(bot);
 
-  // bot.ashfinder.enableBreaking();
+  bot.ashfinder.enableBreaking();
   // bot.ashfinder.enablePlacing();
   // bot.ashfinder.enableFlight();
   bot.ashfinder.config.debugMoves = true;
@@ -302,6 +302,10 @@ bot.once("spawn", async () => {
       bot.chat("/gamerule sendCommandFeedback false");
     }
 
+    if (command === "f!sneakTest") {
+      
+    }
+
     if (command === "f!find") {
       const blockName = args[0];
       const radius = parseInt(args[1]) || 1;
@@ -374,6 +378,15 @@ bot.once("spawn", async () => {
 
       const goal = new GoalAvoid(bot.entity.position, 10, bot);
       await bot.ashfinder.goto(goal);
+    }
+
+    if (command === "f!pos") {
+      console.log(bot.entity.position, bot.entity.height, "bot");
+      const player = bot.players[username];
+
+      const entity = player.entity;
+
+      console.log(entity.position, entity.height, "player");
     }
   });
 
