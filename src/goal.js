@@ -52,7 +52,9 @@ class GoalNear extends Goal {
     const dy = Math.abs(position.y - otherPosition.y);
     const dz = Math.abs(position.z - otherPosition.z);
 
-    return dx <= this.distance && dz <= this.distance && dy <= this.distance;
+    const dist = dx + dz + dy;
+
+    return dist <= this.distance;
   }
 }
 
@@ -380,7 +382,7 @@ class GoalLookAtBlock extends Goal {
       const faceOffset = new Vec3(
         axis === "x" ? visible[axis] * 0.5 : 0,
         axis === "y" ? visible[axis] * 0.5 : 0,
-        axis === "z" ? visible[axis] * 0.5 : 0
+        axis === "z" ? visible[axis] * 0.5 : 0,
       );
 
       const target = position.offset(0, 0.5, 0).plus(faceOffset);
@@ -404,7 +406,7 @@ class GoalLookAtBlockFace extends Goal {
     this.reach = options.reach ?? 4.5;
     this.entityHeight = options.entityHeight ?? 1.6;
 
-    // face must be one of: "north", "south", "west", "east", "up", "down"
+    // face must be one of: "north", "south", "east", "west", "up", "down"
     this.face = options.face;
   }
 
@@ -424,6 +426,15 @@ class GoalLookAtBlockFace extends Goal {
       east: new Vec3(1, 0, 0),
     };
 
+    const faceNumDir = {
+      0: new Vec3(0, -1, 0), // down
+      1: new Vec3(0, 1, 0), // up
+      2: new Vec3(0, 0, -1), // north
+      3: new Vec3(0, 0, 1), // south
+      4: new Vec3(-1, 0, 0), // west
+      5: new Vec3(1, 0, 0), // east
+    };
+
     const dir = faceDirs[this.face];
     if (!dir) return false;
 
@@ -436,6 +447,8 @@ class GoalLookAtBlockFace extends Goal {
     // Try raycast
     const hit = this.world.raycast(node, rayDir, this.reach);
 
+    // console.log(hit);
+
     // Must hit exactly this block AND that face
     if (!hit) return false;
 
@@ -444,8 +457,10 @@ class GoalLookAtBlockFace extends Goal {
       hit.position.y === this.getPosition().y &&
       hit.position.z === this.getPosition().z;
 
+    const hitFace = faceNumDir[hit.face] ?? new Vec3(0, 1, 0);
+
     const sameFace =
-      hit.face?.x === dir.x && hit.face?.y === dir.y && hit.face?.z === dir.z;
+      hitFace.x === dir.x && hitFace.y === dir.y && hitFace.z === dir.z;
 
     return sameBlock && sameFace;
   }

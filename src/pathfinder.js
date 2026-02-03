@@ -142,7 +142,7 @@ async function Astar(
   config,
   options = {},
   debug = false,
-  searchController = null
+  searchController = null,
 ) {
   const getEnd = () => goal.getPosition();
 
@@ -157,7 +157,7 @@ async function Astar(
   let excludedPositions =
     options && options.excludedPositions !== null
       ? options.excludedPositions.map((pos) =>
-          pos.floored().offset(0.5, 0, 0.5)
+          pos.floored().offset(0.5, 0, 0.5),
         )
       : [];
 
@@ -183,6 +183,7 @@ async function Astar(
   let bestNode = null;
   let bestScore = Infinity;
   let iteration = 0;
+  const visitedChunks = new Set(); // "cx,cz" of every chunk expanded
 
   if (searchController) {
     searchController.openMap = openMap;
@@ -204,10 +205,11 @@ async function Astar(
     };
   }
 
+  const end = getEnd();
+
   return new Promise(async (resolve) => {
     let startTime = performance.now();
     let lastSleep = performance.now();
-    const straightLineDistance = startPos.distanceTo(endPos);
 
     while (openHeap.size() > 0) {
       iteration++;
@@ -217,7 +219,6 @@ async function Astar(
         lastSleep = performance.now();
       }
 
-      // Pop until we get a non-stale node
       let currentNode = null;
       while (true) {
         const popped = openHeap.pop();
@@ -241,6 +242,9 @@ async function Astar(
       // remove from open set and move to closed
       openMap.delete(currentHash);
       closedSet.add(currentHash);
+      visitedChunks.add(
+        `${currentNode.worldPos.x >> 4},${currentNode.worldPos.z >> 4}`,
+      );
 
       if (debug) {
         const distToGoal = currentNode.worldPos.distanceTo(endPos);
@@ -253,7 +257,7 @@ async function Astar(
 
         bot.chat(
           `/particle dust{color:[${color}],scale:1} ` +
-            `${currentNode.worldPos.x} ${currentNode.worldPos.y} ${currentNode.worldPos.z} 0.1 0.1 0.1 1 4 force`
+            `${currentNode.worldPos.x} ${currentNode.worldPos.y} ${currentNode.worldPos.z} 0.1 0.1 0.1 1 4 force`,
         );
       }
 
@@ -268,6 +272,7 @@ async function Astar(
           cost: currentNode.fCost,
           status: "found",
           openMap: openMap,
+          visitedChunks,
           iterations: iteration,
         });
       }
@@ -277,28 +282,17 @@ async function Astar(
         config,
         nodemanager,
         bot,
-        getEnd()
+        getEnd(),
       );
 
       // console.log(neighbors)
-
-      const distToGoal = currentNode.worldPos.distanceTo(getEnd());
       const distFromStart = currentNode.worldPos.distanceTo(startPos);
 
-      // If we're exploring way beyond what makes sense, skip
-      if (
-        distToGoal > straightLineDistance * 2 &&
-        distFromStart > straightLineDistance * 1.5
-      ) {
-        continue;
-      }
-
-      // Track best node for partial path returns
       const h = hCost1(currentNode.worldPos, getEnd());
-      const fromStart = currentNode.worldPos.distanceTo(startPos);
       if (
         h < bestScore ||
-        (h === bestScore && fromStart > bestNode?.worldPos.distanceTo(startPos))
+        (h === bestScore &&
+          distFromStart > bestNode?.worldPos.distanceTo(startPos))
       ) {
         bestNode = currentNode;
         bestScore = h;
@@ -306,7 +300,7 @@ async function Astar(
 
       if (debug)
         bot.chat(
-          `/particle dust{color:[0.38,0.21,0.51],scale:1} ${currentNode.worldPos.x} ${currentNode.worldPos.y} ${currentNode.worldPos.z} 0.1 0.1 0.1 1 4 force`
+          `/particle dust{color:[0.38,0.21,0.51],scale:1} ${currentNode.worldPos.x} ${currentNode.worldPos.y} ${currentNode.worldPos.z} 0.1 0.1 0.1 1 4 force`,
         );
 
       for (const n of neighbors) {
@@ -320,7 +314,6 @@ async function Astar(
 
       let currentTime = performance.now();
       if (currentTime - startTime >= config.thinkTimeout) {
-        // Timeout: return partial path
         if (bestNode) {
           if (searchController) {
             searchController.active = false;
@@ -333,6 +326,7 @@ async function Astar(
             exploredNodes: closedSet.size,
             remainingNodes: openMap.size,
             openMap: openMap,
+            visitedChunks,
             iterations: iteration,
           });
         } else {
@@ -344,6 +338,7 @@ async function Astar(
             status: "no path",
             exploredNodes: closedSet.size,
             remainingNodes: openMap.size,
+            visitedChunks,
             iterations: iteration,
           });
         }
@@ -360,6 +355,7 @@ async function Astar(
       status: "no path",
       exploredNodes: closedSet.size,
       remainingNodes: openMap.size,
+      visitedChunks,
       iterations: iteration,
     });
   });
@@ -372,19 +368,18 @@ async function Astar(
 
     let neighborCost = neighborData.cost;
 
-    const end = getEnd();
-    const distToGoal = neighborData.worldPos
-      ? neighborData.worldPos.distanceTo(end)
-      : new Vec3(neighborData.x, neighborData.y, neighborData.z).distanceTo(
-          end
-        );
+    // const distToGoal = neighborData.worldPos
+    //   ? neighborData.worldPos.distanceTo(end)
+    //   : new Vec3(neighborData.x, neighborData.y, neighborData.z).distanceTo(
+    //       end
+    //     );
 
-    const BIAS_RADIUS = 10;
-    if (distToGoal < BIAS_RADIUS) {
-      const t = distToGoal / BIAS_RADIUS;
-      const biasMultiplier = 0.5 + 0.5 * t; // ranges [0.5 .. 1]
-      neighborCost *= biasMultiplier;
-    }
+    // const BIAS_RADIUS = 10;
+    // if (distToGoal < BIAS_RADIUS) {
+    //   const t = distToGoal / BIAS_RADIUS;
+    //   const biasMultiplier = 0.5 + 0.5 * t; // ranges [0.5 .. 1]
+    //   neighborCost *= biasMultiplier;
+    // }
 
     const tempG = currentNode.gCost + neighborCost;
 
@@ -395,7 +390,7 @@ async function Astar(
       neighbor.worldPos = new Vec3(
         neighborData.x,
         neighborData.y,
-        neighborData.z
+        neighborData.z,
       );
       neighbor.direction = neighborData.dir;
       neighbor.gCost = tempG;
@@ -424,55 +419,6 @@ async function Astar(
   }
 }
 
-function getProximityPenalty(pos, bot, blockName, maxRadius, maxPenalty) {
-  // Scan within radius and return the highest penalty based on distance
-  let highestPenalty = 0;
-  for (let dx = -maxRadius; dx <= maxRadius; dx++) {
-    for (let dy = -maxRadius; dy <= maxRadius; dy++) {
-      for (let dz = -maxRadius; dz <= maxRadius; dz++) {
-        const checkPos = pos.offset(dx, dy, dz);
-        const block = bot.blockAt(checkPos);
-        if (!block || block.name !== blockName) continue;
-
-        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        const penalty = Math.max(0, maxPenalty * (1 - distance / maxRadius));
-        if (penalty > highestPenalty) highestPenalty = penalty;
-      }
-    }
-  }
-  return highestPenalty;
-}
-
-/**
- *
- * @param {Vec3WithAttr} neighborData
- * @param {import("mineflayer").Bot} bot
- */
-function applyHazardPenalty(neighborData, bot) {
-  const pos = new Vec3(neighborData.x, neighborData.y, neighborData.z);
-
-  // Quick check: only scan for hazards if we have reason to believe they're nearby
-  // This saves a ton of computation
-  const feetBlock = bot.blockAt(pos);
-  const belowBlock = bot.blockAt(pos.offset(0, -1, 0));
-
-  // Only do expensive radius search if we're near suspicious blocks
-  if (
-    feetBlock?.name === "lava" ||
-    belowBlock?.name === "lava" ||
-    feetBlock?.material === "lava" ||
-    belowBlock?.material === "lava"
-  ) {
-    const lavaPenalty = getProximityPenalty(pos, bot, "lava", 2, 8);
-    neighborData.cost += lavaPenalty;
-  }
-
-  if (feetBlock?.name === "cactus" || belowBlock?.name === "cactus") {
-    const cactusPenalty = getProximityPenalty(pos, bot, "cactus", 2, 4);
-    neighborData.cost += cactusPenalty;
-  }
-}
-
 /**
  *
  * @param {Cell} node
@@ -484,29 +430,21 @@ function computeScore(node, goal, startPos) {
   const g = node.gCost;
   const h = node.hCost;
 
-  const EPSILON = 3e-4;
-
-  return g + h * (1 + EPSILON);
+  return g + h;
 }
 
 function hCost1(a, b) {
-  const dx = Math.abs(b.x - a.x);
-  const dz = Math.abs(b.z - a.z);
-  const dy = Math.abs(b.y - a.y);
+  // const dx = Math.abs(b.x - a.x);
+  // const dz = Math.abs(b.z - a.z);
+  // const dy = Math.abs(b.y - a.y);
 
-  const diag = Math.min(dx, dz);
-  const straight = Math.max(dx, dz) - diag;
-  const horizontalCost = diag * Math.SQRT2 + straight;
+  // const diag = Math.min(dx, dz);
+  // const straight = Math.max(dx, dz) - diag;
+  // const horizontalCost = diag * Math.SQRT2 + straight;
 
-  const base = horizontalCost + dy;
+  // const base = horizontalCost + dy;
 
-  const BIAS_RADIUS = 12;
-  const STRENGTH = 1.5;
-
-  const t = Math.min(base / BIAS_RADIUS, 1);
-  const bias = 1 + STRENGTH * Math.exp(-4 * t);
-
-  return base;
+  return manhattanDistance(a, b);
 }
 
 function chebyshev(a, b) {
@@ -528,35 +466,16 @@ function chebyshev(a, b) {
   );
 }
 
-function averageDistance(node, goal) {
-  const verticalGap = Math.abs(goal.y - node.y);
-  const PUSH_FACTOR = verticalGap > 4 ? 1.8 : 1.3;
-
-  const m = manhattanDistance(node, goal, PUSH_FACTOR);
-  const o = octileDistance(node, goal, PUSH_FACTOR);
-
-  const verticalReward =
-    verticalGap > 1 ? Math.max(0, 6 - verticalGap) * 0.1 : 0;
-
-  const distXZ = node.offset(0, -Math.abs(node.y - goal.y), 0).distanceTo(goal);
-  const climbingPenalty =
-    node.y > goal.y && node.y - goal.y > 2 && distXZ < 4 ? 0.4 : 0;
-
-  const steepPenalty = goal.y < node.y && node.y - goal.y > 3 ? 0.5 : 0;
-
-  return (m + o) / 2 + verticalReward + climbingPenalty + steepPenalty;
-}
-
-function manhattanDistance(node, goal, push = 1.3) {
+function manhattanDistance(node, goal) {
   const dx = Math.abs(node.x - goal.x);
   const dy = Math.abs(node.y - goal.y);
   const dz = Math.abs(node.z - goal.z);
-  return dx + dz + dy * push;
+  return dx + dz + dy * 0.95;
 }
 
-function octileDistance(node, goal, push = 1.3) {
+function octileDistance(node, goal) {
   const dx = Math.abs(goal.x - node.x);
-  const dy = Math.abs(goal.y - node.y) * push;
+  const dy = Math.abs(goal.y - node.y);
   const dz = Math.abs(goal.z - node.z);
 
   const sorted = [dx, dy, dz].sort((a, b) => a - b);
@@ -571,18 +490,15 @@ function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val));
 }
 
-function euclideanDistance(node, goal, blockID = null) {
-  const verticalCostMultiplier = 1.5;
+function euclideanDistance(node, goal) {
   const dx = Math.abs(goal.x - node.x);
   const dy = Math.abs(goal.y - node.y);
   const dz = Math.abs(goal.z - node.z);
 
   const horizontalDistance = Math.sqrt(dx * dx + dz * dz);
-  const verticalDistance = dy * verticalCostMultiplier;
+  const verticalDistance = dy;
 
-  const cost = blockMapCost.get(blockID) ?? 1;
-
-  return (horizontalDistance + verticalDistance) * cost;
+  return horizontalDistance + verticalDistance;
 }
 
 function reconstructPath(node) {

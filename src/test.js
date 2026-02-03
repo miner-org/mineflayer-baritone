@@ -4,7 +4,12 @@ const inject = require("./loader");
 const Vec3 = require("vec3").Vec3;
 const { argv } = require("process");
 // const { elytrafly } = require("mineflayer-elytrafly");
-const { GoalNear, GoalExact, GoalAvoid } = require("./goal");
+const {
+  GoalNear,
+  GoalExact,
+  GoalAvoid,
+  GoalLookAtBlockFace,
+} = require("./goal");
 const PathExecutor = require("./executor");
 const sussyVersions = ["1.21", "1.21.1", "1.21.2", "1.21.3", "1.21.4"];
 
@@ -28,7 +33,7 @@ bot.once("spawn", async () => {
   // bot.ashfinder.enableBreaking();
   pathExecutor = new PathExecutor(bot);
 
-  bot.ashfinder.enableBreaking();
+  // bot.ashfinder.enableBreaking();
   // bot.ashfinder.enablePlacing();
   // bot.ashfinder.enableFlight();
   bot.ashfinder.config.debugMoves = true;
@@ -294,8 +299,6 @@ bot.once("spawn", async () => {
       const goal = new GoalExact(endPos, 1);
 
       await bot.ashfinder.goto(goal);
-
-      console.log("fuck me in the titties");
     }
 
     if (command === "f!disableOutput") {
@@ -303,7 +306,6 @@ bot.once("spawn", async () => {
     }
 
     if (command === "f!sneakTest") {
-      
     }
 
     if (command === "f!find") {
@@ -377,6 +379,21 @@ bot.once("spawn", async () => {
       //i think this goal works by finding a postion that is away from the target
 
       const goal = new GoalAvoid(bot.entity.position, 10, bot);
+      await bot.ashfinder.goto(goal);
+    }
+
+    if (command === "f!goalFace") {
+      const player = bot.players[username];
+
+      const entity = player.entity;
+
+      const block = bot.blockAtEntityCursor(entity);
+
+      if (!block) return console.log("FIck");
+
+      const face = args[0];
+
+      const goal = new GoalLookAtBlockFace(block.position, bot.world, { face });
       await bot.ashfinder.goto(goal);
     }
 

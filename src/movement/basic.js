@@ -16,14 +16,15 @@ class MoveForward extends Move {
     const canPlace = this.config.placeBlocks && this.hasScaffoldingBlocks();
     const canBreak = this.config.breakBlocks;
 
-    const isSolidBelow = this.isSolid(below);
+    const isSolidBelow = this.isSolid(below) && !this.isClimbable(below);
     const interactable = this.isInteractable(node) && !this.isTrapdoor(node);
     const isFeetAir = this.isAir(node);
     const isHeadAir = this.isAir(head);
 
     if (
       (this.isSlab(below) && this.isHalfSlab(below)) ||
-      (this.isSlab(node) && this.isHalfSlab(node))
+      (this.isSlab(node) && this.isHalfSlab(node)) ||
+      this.isTopTrapdoor(below)
     ) {
       node.attributes = {
         name: this.name,
@@ -62,7 +63,7 @@ class MoveForward extends Move {
         interact: false,
       };
       neighbors.push(this.makeMovement(node, node.attributes.cost));
-      return; // 🚀 early exit
+      return;
     }
 
     // --- continue with normal checks if not standable ---
@@ -95,12 +96,8 @@ class MoveForward extends Move {
       !this.getBlock(head).name.includes("torch") &&
       !interactable
     ) {
-      if (this.isCrouchPassable(this.getBlock(head))) {
-        node.attributes.crouch = true;
-      } else {
-        if (!canBreak || !this.isBreakable(head)) return;
-        node.attributes.break.push(head.clone());
-      }
+      if (!canBreak || !this.isBreakable(head)) return;
+      node.attributes.break.push(head.clone());
     }
 
     // if (node.attributes.break.some((b) => b.equals(node))) {
@@ -118,17 +115,14 @@ class MoveForward extends Move {
     //   }
     // }
 
-    if (canBreak && this.isBreakable(head) && !this.isBreakable(node)) return;
-    if (canBreak && this.isBreakable(node) && !this.isBreakable(head)) return;
+    // if (canBreak && this.isBreakable(head) && !this.isBreakable(node)) return;
+    // if (canBreak && this.isBreakable(node) && !this.isBreakable(head)) return;
 
     if (!canBreak && !this.isStandable(node)) return;
 
-    const breakCost = this.COST_BREAK * node.attributes.break.length;
-    const totalCost =
-      this.COST_NORMAL +
-      breakCost +
-      (node.attributes.place.length || 0) * this.COST_PLACE +
-      (node.attributes.crouch ? this.COST_CROUCH || 0.5 : 0);
+    const breakCost = node.attributes.break.length > 0 ? this.COST_BREAK : 0;
+    const placeCost = node.attributes.place.length > 0 ? this.COST_PLACE : 0;
+    const totalCost = this.COST_NORMAL + breakCost + placeCost;
 
     node.attributes.cost = totalCost;
     node.attributes.interact = interactable;
@@ -168,12 +162,11 @@ class MoveDiagonal extends Move {
         origin.x,
         origin.y,
         origin.z,
-        offset
+        offset,
       );
 
       const node = originVec.offset(offset.x, 0, offset.z);
 
-      // Cardinal adjacency
       const adj1 = originVec.offset(offset.x, 0, 0);
       const adj2 = originVec.offset(0, 0, offset.z);
 
@@ -184,13 +177,11 @@ class MoveDiagonal extends Move {
   addNeighbors(neighbors, node, adj1, adj2) {
     const headNode = node.up(1);
 
-    // ⛔ Only block diagonal if BOTH sides are blocked
     const adj1Blocked = !this.isWalkable(adj1) && !this.isStandable(adj1);
     const adj2Blocked = !this.isWalkable(adj2) && !this.isStandable(adj2);
 
     if (adj1Blocked && adj2Blocked) return;
 
-    // Proceed if the diagonal space itself is valid
     if (
       this.isWalkable(node) &&
       this.isStandable(node) &&
@@ -296,14 +287,12 @@ class MoveForwardUp extends Move {
     }
 
     if (!canBreak && !this.isAir(above)) return;
+    const breakCost = node.attributes.break.length > 0 ? this.COST_BREAK : 0;
+    const placeCost = node.attributes.place.length > 0 ? this.COST_PLACE : 0;
+    const totalCost = this.COST_NORMAL + breakCost + placeCost;
 
-    const cost =
-      this.COST_UP +
-      node.attributes.break.length * this.COST_BREAK +
-      node.attributes.place.length * this.COST_PLACE;
-
-    node.attributes.cost = cost;
-    neighbors.push(this.makeMovement(node, cost));
+    node.attributes.cost = totalCost;
+    neighbors.push(this.makeMovement(node, totalCost));
   }
 
   canPlaceBlock(pos) {
@@ -402,12 +391,14 @@ class MoveDiagonalUp extends Move {
         origin.x,
         origin.y,
         origin.z,
-        offset
+        offset,
       );
 
       const node = originVec.offset(offset.x, 1, offset.z);
 
       if (this.isClimbable(originVec)) continue;
+
+      if (!this.isWalkable(originVec.up(1))) continue;
 
       // Check cardinal adjacent blocks
       const adj1 = originVec.offset(offset.x, 1, 0); // East/West
@@ -453,7 +444,7 @@ class MoveDiagonalDown extends Move {
         origin.x,
         origin.y,
         origin.z,
-        offset
+        offset,
       );
 
       const node = originVec.offset(offset.x, -1, offset.z);

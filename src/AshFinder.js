@@ -32,6 +32,37 @@ class AshFinderPlugin extends EventEmitter {
     this.bot.on("spawn", () => {
       this.#pathExecutor = new PathExecutor(this.bot, this);
       this.waypointPlanner = new SmartWaypointPlanner(this.bot, this);
+
+      this._visitedChunks = new Set();
+
+      // ── chunk-load replan (same idea as mineflayer-pathfinder) ──────
+      // When a chunk loads that is adjacent to a chunk A* already explored,
+      // the existing path may be stale (A* couldn't see into that chunk).
+      // Nuke the current path and replan from the bot's current position
+      // with the fresh data — exactly what mineflayer-pathfinder does.
+      this.bot.on("chunkColumnLoad", (chunk) => {
+        // nothing to invalidate if we're idle
+        if (this.stopped || !this.#pathExecutor) return;
+
+        const cx = chunk.x >> 4;
+        const cz = chunk.z >> 4;
+
+        // check the 4 cardinal neighbours
+        if (
+          this._visitedChunks.has(`${cx - 1},${cz}`) ||
+          this._visitedChunks.has(`${cx + 1},${cz}`) ||
+          this._visitedChunks.has(`${cx},${cz - 1}`) ||
+          this._visitedChunks.has(`${cx},${cz + 1}`)
+        ) {
+          if (this.debug)
+            console.log(
+              `[AshFinder] chunkColumnLoad replan — new chunk ${cx},${cz} borders visited search`,
+            );
+          // clear stale visited set so we don't keep firing for the same chunk
+          this._visitedChunks = new Set();
+          this.#pathExecutor.triggerReplan();
+        }
+      });
     });
 
     this.bot.on("death", () => {
@@ -64,12 +95,15 @@ class AshFinderPlugin extends EventEmitter {
       this.config,
       options,
       this.debug,
-      this._searchController
+      this._searchController,
     );
 
     // once astar resolves, controller.active will be set to false by astar
     this._searchController = this._searchController || {};
     this._searchController.active = false;
+
+    // keep the visited-chunks set alive so chunkColumnLoad can check against it
+    this._visitedChunks = result.visitedChunks || new Set();
 
     return result;
   }
@@ -94,6 +128,14 @@ class AshFinderPlugin extends EventEmitter {
 
   enableFlight() {
     this.config.fly = true;
+  }
+
+  enableParkour() {
+    this.config.parkour = true;
+  }
+
+  disableParkour() {
+    this.config.parkour = false;
   }
 
   /**
@@ -172,7 +214,7 @@ class AshFinderPlugin extends EventEmitter {
   async goto(goal, options = { excludedPositions: [] }) {
     if (!this.stopped) {
       throw new Error(
-        "Already going to a goal, please wait until the current path is completed."
+        "Already going to a goal, please wait until the current path is completed.",
       );
     }
 
@@ -199,8 +241,8 @@ class AshFinderPlugin extends EventEmitter {
             (node) =>
               `${node.attributes.name} (origin:${
                 node.attributes.originVec ?? "none"
-              }) (Target: ${node.worldPos})`
-          )
+              }) (Target: ${node.worldPos})`,
+          ),
         );
         console.log(status);
       }
@@ -226,53 +268,6 @@ class AshFinderPlugin extends EventEmitter {
       this.isPathing = false;
     }
   }
-
-  // /**
-  //  *
-  //  * @param {Goal} goal
-  //  * @param {{excludedPositions?: Vec3[]}} options
-  //  */
-  // async flyTo(goal, options) {
-  //   if (this.stopped) {
-  //     options.fly = true;
-  //     this.stopped = false;
-
-  //     const result = await this.generatePath(goal, options);
-  //     const { path, status } = result;
-
-  //     if (this.debug) {
-  //       console.log(path.map((node) => node.attributes.name));
-  //       console.log(status);
-  //     }
-
-  //     // Set the path and get the execution promise
-  //     const executionPromise = this.#pathExecutor.setPath(path, {
-  //       partial: status === "partial",
-  //       targetGoal: goal,
-  //       bestNode: result.bestNode,
-  //     });
-
-  //     this.emit("pathStarted", {
-  //       path,
-  //       status,
-  //       goal,
-  //     });
-
-  //     // Wait for the path to complete
-  //     try {
-  //       await executionPromise;
-  //       return { status: "success" };
-  //     } catch (err) {
-  //       if (this.debug) console.error("Path execution failed:", err);
-  //       return { status: "failed", error: err };
-  //     }
-  //   } else {
-  //     const error =
-  //       "Already going to a goal, please wait until the current path is completed.";
-  //     console.log(error);
-  //     throw new Error(error);
-  //   }
-  // }
 
   /**
    * Continuously follow an entity
@@ -353,8 +348,8 @@ class AshFinderPlugin extends EventEmitter {
     if (distance > waypointThreshold) {
       console.log(
         `Long distance detected (${distance.toFixed(
-          1
-        )} blocks), using waypoint system`
+          1,
+        )} blocks), using waypoint system`,
       );
 
       const planner = new WaypointPlanner(bot, this);
@@ -363,8 +358,8 @@ class AshFinderPlugin extends EventEmitter {
       // Use regular pathfinding for short distances
       console.log(
         `Short distance (${distance.toFixed(
-          1
-        )} blocks), using direct pathfinding`
+          1,
+        )} blocks), using direct pathfinding`,
       );
       return await this.goto(goal);
     }
@@ -604,7 +599,7 @@ class AshFinderConfig {
       "piston_head",
     ];
 
-    this.thinkTimeout = 5000;
+    this.thinkTimeout = 1000;
     this.stuckTimeout = 5000;
     this.debugMoves = false;
   }

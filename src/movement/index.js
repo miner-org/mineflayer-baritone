@@ -23,7 +23,7 @@ class DirectionalVec3 extends Vec3 {
       this.y,
       this.z + this.dir.z * amount,
       this.dir,
-      attributes
+      attributes,
     );
   }
 
@@ -33,7 +33,7 @@ class DirectionalVec3 extends Vec3 {
       this.y,
       this.z + this.dir.x * amount,
       this.dir,
-      attributes
+      attributes,
     );
   }
 
@@ -43,7 +43,7 @@ class DirectionalVec3 extends Vec3 {
       this.y,
       this.z - this.dir.x * amount,
       this.dir,
-      attributes
+      attributes,
     );
   }
 
@@ -53,7 +53,7 @@ class DirectionalVec3 extends Vec3 {
       this.y + amount,
       this.z,
       this.dir,
-      attributes
+      attributes,
     );
   }
 
@@ -63,7 +63,7 @@ class DirectionalVec3 extends Vec3 {
       this.y - amount,
       this.z,
       this.dir,
-      attributes
+      attributes,
     );
   }
 
@@ -73,7 +73,7 @@ class DirectionalVec3 extends Vec3 {
       this.y + dy,
       this.z + dz,
       this.dir,
-      attributes
+      attributes,
     );
   }
 
@@ -83,7 +83,7 @@ class DirectionalVec3 extends Vec3 {
       this.y,
       this.z,
       this.dir,
-      this.attributes
+      this.attributes,
     );
   }
 
@@ -93,7 +93,7 @@ class DirectionalVec3 extends Vec3 {
       this.y + vec.y,
       this.z + vec.z,
       this.dir,
-      this.attributes
+      this.attributes,
     );
   }
 
@@ -168,8 +168,8 @@ class Move {
     this.COST_NORMAL = 1;
     this.COST_UP = 1;
     this.COST_FALL = 1;
-    this.COST_BREAK = 1.4;
-    this.COST_PLACE = 1.4;
+    this.COST_BREAK = this.COST_NORMAL + 0.12;
+    this.COST_PLACE = this.COST_NORMAL + 0.12;
     this.COST_SWIM = 1;
     this.COST_SWIM_START = 1.1;
     this.COST_SWIM_EXIT = 1.1;
@@ -212,7 +212,7 @@ class Move {
       .items()
       .reduce(
         (sum, item) => sum + (blocks.includes(item.name) ? item.count : 0),
-        0
+        0,
       );
   }
 
@@ -354,7 +354,8 @@ class Move {
       this.isWalkable(node) &&
       !this.isLava(node) &&
       !this.isClimbable(below) &&
-      !this.isCarpetLike(below)
+      !this.isCarpetLike(below) &&
+      !this.isClimbable(below)
     );
   }
 
@@ -409,7 +410,7 @@ class Move {
     if (!block?.name.includes("slab")) return false;
     if (!block.shapes) return false;
 
-    if (block.shapes.length === 0) return false;
+    if (block?.shapes?.length === 0) return false;
 
     const shapes = block.shapes;
 
@@ -427,7 +428,7 @@ class Move {
     if (!block) return false;
     if (this.isInteractable(node)) return false;
     return ["fence", "wall", "cobblestone_wall"].some((n) =>
-      block.name.includes(n)
+      block.name.includes(n),
     );
   }
 
@@ -478,7 +479,7 @@ class Move {
       position.x,
       position.y,
       position.z,
-      position.attributes
+      position.attributes,
     );
     pos.cost = cost;
     return pos;
@@ -593,7 +594,7 @@ function bestHarvestTool(bot, block) {
       false,
       false,
       enchants,
-      effects
+      effects,
     );
     if (digTime < fastest) {
       fastest = digTime;
@@ -721,43 +722,6 @@ function getNeighbors2(node, config, manager, bot, end) {
         neighborMap.set(key, neighbor);
         continue;
       }
-
-      // const simpleMoves = new Set([
-      //   "MoveForward",
-      //   "MoveForwardUp",
-      //   "MoveForwardDown",
-      // ]);
-      // const isExistingSimple = simpleMoves.has(existing.attributes?.name);
-      // const isNewSimple = simpleMoves.has(neighbor.attributes?.name);
-
-      // let replace = false;
-
-      // if (isNewSimple && !isExistingSimple) {
-      //   replace = true;
-      // } else if (isExistingSimple && !isNewSimple) {
-      //   replace = false;
-      // } else {
-      //   const existingMove = moveClasses.find(
-      //     (m) => m.name === existing.attributes?.name
-      //   );
-      //   const newMove = moveClasses.find(
-      //     (m) => m.name === neighbor.attributes?.name
-      //   );
-
-      //   const existingPriority = existingMove?.priority ?? 999;
-      //   const newPriority = move.priority;
-
-      //   if (newPriority < existingPriority) {
-      //     replace = true;
-      //   } else if (
-      //     newPriority === existingPriority &&
-      //     neighbor.cost < existing.cost
-      //   ) {
-      //     replace = true;
-      //   }
-      // }
-
-      // if (replace) neighborMap.set(key, neighbor);
     }
   }
 

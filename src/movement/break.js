@@ -6,23 +6,20 @@ class MoveForwardDownBreak extends Move {
 
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
-      const node = originVec.offset(dir.x, -1, dir.z); // feet after stepping down
+      const node = originVec.offset(dir.x, -1, dir.z); 
       this.addNeighbors(neighbors, node, originVec);
     }
   }
 
   addNeighbors(neighbors, node, originVec) {
-    const below = node.down(1); // landing support
+    const below = node.down(1);
     const head = node.up(1);
     const top = node.up(2);
 
-    // must be exactly 1 block lower
     if (Math.floor(node.y) !== Math.floor(originVec.y) - 1) return;
 
-    // if already standable, no breaking needed
     if (this.isStandable(node)) return;
 
-    // must land on solid ground
     if (!this.isSolid(below)) return;
 
     const canBreak = this.config.breakBlocks;
@@ -32,7 +29,6 @@ class MoveForwardDownBreak extends Move {
       break: [],
     };
 
-    // === Collect breakable blocks ===
     const checkNodes = [node, head, top];
 
     if (canBreak) {
@@ -52,7 +48,7 @@ class MoveForwardDownBreak extends Move {
     if (node.attributes.break.length === 0) {
       if (this.config.debugMoves)
         console.debug(
-          `[${this.name}] no blocks to break at ${node.toString()}`
+          `[${this.name}] no blocks to break at ${node.toString()}`,
         );
       return;
     }
@@ -76,7 +72,7 @@ class MoveBreakDown extends Move {
       z: 0,
     });
 
-    const down = this.origin.offset(0, -1, 0); // one block below
+    const down = this.origin.offset(0, -1, 0); 
     this.addNeighbors(neighbors, down);
   }
 
@@ -87,17 +83,13 @@ class MoveBreakDown extends Move {
   addNeighbors(neighbors, node) {
     const footBlock = this.origin.down(1);
 
-    // must stand on something stable
     if (!this.isSolid(footBlock)) return;
     if (!this.isWalkable(this.origin)) return;
 
-    // the block right under us
     const target = node;
 
-    // must be breakable
     if (!this.isBreakable(target, this.config)) return;
 
-    // check what’s under the block we break
     let landing = target.down(1);
 
     if (!this.isSolid(landing)) {
@@ -111,14 +103,11 @@ class MoveBreakDown extends Move {
         below = below.down(1);
       }
 
-      // if we never hit solid → no landing spot → cancel
       if (!this.isSolid(below)) return;
 
-      // valid solid block, update landing
       landing = below;
     }
-
-    // cool, we break the target and land (possibly after a small fall)
+    
     const moveNode = landing.up(1);
 
     moveNode.attributes = {
