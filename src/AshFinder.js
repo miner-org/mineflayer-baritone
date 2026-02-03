@@ -35,34 +35,29 @@ class AshFinderPlugin extends EventEmitter {
 
       this._visitedChunks = new Set();
 
-      // ── chunk-load replan (same idea as mineflayer-pathfinder) ──────
-      // When a chunk loads that is adjacent to a chunk A* already explored,
-      // the existing path may be stale (A* couldn't see into that chunk).
-      // Nuke the current path and replan from the bot's current position
-      // with the fresh data — exactly what mineflayer-pathfinder does.
-      this.bot.on("chunkColumnLoad", (chunk) => {
-        // nothing to invalidate if we're idle
-        if (this.stopped || !this.#pathExecutor) return;
+      // this.bot.on("chunkColumnLoad", (chunk) => {
+      //   // nothing to invalidate if we're idle
+      //   if (this.stopped || !this.#pathExecutor) return;
 
-        const cx = chunk.x >> 4;
-        const cz = chunk.z >> 4;
+      //   const cx = chunk.x >> 4;
+      //   const cz = chunk.z >> 4;
 
-        // check the 4 cardinal neighbours
-        if (
-          this._visitedChunks.has(`${cx - 1},${cz}`) ||
-          this._visitedChunks.has(`${cx + 1},${cz}`) ||
-          this._visitedChunks.has(`${cx},${cz - 1}`) ||
-          this._visitedChunks.has(`${cx},${cz + 1}`)
-        ) {
-          if (this.debug)
-            console.log(
-              `[AshFinder] chunkColumnLoad replan — new chunk ${cx},${cz} borders visited search`,
-            );
-          // clear stale visited set so we don't keep firing for the same chunk
-          this._visitedChunks = new Set();
-          this.#pathExecutor.triggerReplan();
-        }
-      });
+      //   // check the 4 cardinal neighbours
+      //   if (
+      //     this._visitedChunks.has(`${cx - 1},${cz}`) ||
+      //     this._visitedChunks.has(`${cx + 1},${cz}`) ||
+      //     this._visitedChunks.has(`${cx},${cz - 1}`) ||
+      //     this._visitedChunks.has(`${cx},${cz + 1}`)
+      //   ) {
+      //     if (this.debug)
+      //       console.log(
+      //         `[AshFinder] chunkColumnLoad replan — new chunk ${cx},${cz} borders visited search`,
+      //       );
+      //     // clear stale visited set so we don't keep firing for the same chunk
+      //     this._visitedChunks = new Set();
+      //     this.#pathExecutor.triggerReplan();
+      //   }
+      // });
     });
 
     this.bot.on("death", () => {
@@ -221,6 +216,17 @@ class AshFinderPlugin extends EventEmitter {
     this.stopped = false;
     this.isPathing = true;
 
+    const isLoaded = this.bot.blockAt(goal.getPosition()) !== null;
+    let defaultTimeout = this.config.thinkTimeout;
+
+    if (!isLoaded) {
+      console.log(
+        "[AshFinder]: Goal position is not loaded... changing think timeout to 1s",
+      );
+
+      this.config.thinkTimeout = 1000;
+    }
+
     if (this.config.fly) {
       const elytraArmor =
         this.bot.inventory.slots[this.bot.getEquipmentDestSlot("torso")];
@@ -266,6 +272,7 @@ class AshFinderPlugin extends EventEmitter {
     } finally {
       this.stopped = true;
       this.isPathing = false;
+      this.config.thinkTimeout = defaultTimeout;
     }
   }
 
@@ -517,7 +524,7 @@ class AshFinderConfig {
       "piston_head",
     ];
 
-    this.thinkTimeout = 30000;
+    this.thinkTimeout = 1000;
     this.stuckTimeout = 5000;
     this.maxPartialPaths = 5;
     this.debugMoves = false;
