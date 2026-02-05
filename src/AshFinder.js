@@ -524,7 +524,7 @@ class AshFinderConfig {
       "piston_head",
     ];
 
-    this.thinkTimeout = 1000;
+    this.thinkTimeout = 30000;
     this.stuckTimeout = 5000;
     this.maxPartialPaths = 5;
     this.debugMoves = false;
@@ -606,7 +606,7 @@ class AshFinderConfig {
       "piston_head",
     ];
 
-    this.thinkTimeout = 1000;
+    this.thinkTimeout = 30000;
     this.stuckTimeout = 5000;
     this.debugMoves = false;
   }

@@ -365,7 +365,7 @@ class PathExecutor {
     this.swimmingState = { active: false, sinking: false, floating: false };
     this.elytraFlyingState = { active: false, gliding: false };
     this.stuckState = { stuck: false, stuckTimer: 0, lastNodeTime: 0 };
-    this.climbingState = false;
+    this.climbingState = {};
     this.climbingTarget = null;
     this.interactingState = false;
     this.jumpState = null;
@@ -563,7 +563,6 @@ class PathExecutor {
 
     const targetX = pos.x + 0.5;
     const targetZ = pos.z + 0.5;
-
 
     // lil nudges
     this.bot.setControlState("forward", true);
@@ -913,7 +912,6 @@ class PathExecutor {
 
     if (!this.elytraFlyingState.active) return;
 
-
     // HOVER MODE - velocity-based position hold
     const isStable = this._hoverAt(target, {
       stiffness: 0.4,
@@ -1144,16 +1142,34 @@ class PathExecutor {
    */
   async _startClimb(node) {
     const bot = this.bot;
-    const target = node.worldPos;
+    const target = this._getLadderLookAtPos(node);
 
     if (!this.climbingState) this.climbingState = { lookedAtTarget: false };
 
-    if (!this.climbingState.lookedAtTarget)
-      bot.lookAt(target.offset(0, 1, 0), true);
-    this.climbingState.lookedAtTarget = true;
+    bot.lookAt(target.offset(0, 1, 0), true);
+
     await bot.waitForTicks(5);
     // bot.setControlState("jump", true);
     bot.setControlState("forward", true);
+  }
+
+  _getLadderLookAtPos(node) {
+    const pos = node.worldPos;
+    const block = this.bot.blockAt(pos);
+
+    if (!block || block.name !== "ladder") return pos;
+
+    const facing = block.getProperties().facing;
+
+    const opposite = {
+      north: { x: 0, y: 0, z: 1 },
+      south: { x: 0, y: 0, z: -1 },
+      west: { x: 1, y: 0, z: 0 },
+      east: { x: -1, y: 0, z: 0 },
+    };
+
+    const off = opposite[facing];
+    return pos.offset(off.x, off.y, off.z);
   }
 
   _startClimbDown(node) {
@@ -1927,7 +1943,6 @@ async function equipBlockIfNeeded(bot, item) {
 async function placeBlockAtTarget(bot, cell, dir, blockPlace) {
   const pos = cell;
   const block = bot.blockAt(pos);
-
 
   try {
     await equipBlockIfNeeded(bot, blockPlace);
