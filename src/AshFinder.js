@@ -1,6 +1,6 @@
 const EventEmitter = require("events");
 const PathExecutor = require("./executor");
-const { Goal, GoalFollowEntity } = require("./goal");
+const { Goal, GoalNear, GoalFollowEntity } = require("./goal");
 const { createEndFunc } = require("./utils");
 
 const { Vec3 } = require("vec3");
@@ -10,13 +10,11 @@ const { SmartWaypointPlanner, WaypointPlanner } = require("./waypoints");
 const astar = require("./pathfinder").Astar;
 
 class AshFinderPlugin extends EventEmitter {
-  /**
-   * @type {PathExecutor}
-   */
+  /** @type {PathExecutor} */
   #pathExecutor;
 
   /**
-   * @param {import('mineflayer').Bot} bot
+   * @param {import("mineflayer").Bot} bot
    */
   constructor(bot) {
     super();
@@ -24,217 +22,159 @@ class AshFinderPlugin extends EventEmitter {
     this.path = [];
     this.stopped = true;
     this.isPathing = false;
+    this.following = null;
     this.config = new AshFinderConfig();
     this.debug = false;
 
     this.#pathExecutor = null;
     this.waypointPlanner = null;
-    this.bot.on("spawn", () => {
-      this.#pathExecutor = new PathExecutor(this.bot, this);
-      this.waypointPlanner = new SmartWaypointPlanner(this.bot, this);
 
+    this._visitedChunks = new Set();
+    this._searchController = {};
+    this._globalVirtual = new Map();
+
+    bot.on("spawn", () => {
+      this.#pathExecutor = new PathExecutor(bot, this);
+      this.waypointPlanner = new SmartWaypointPlanner(bot, this);
       this._visitedChunks = new Set();
-
-      // this.bot.on("chunkColumnLoad", (chunk) => {
-      //   // nothing to invalidate if we're idle
-      //   if (this.stopped || !this.#pathExecutor) return;
-
-      //   const cx = chunk.x >> 4;
-      //   const cz = chunk.z >> 4;
-
-      //   // check the 4 cardinal neighbours
-      //   if (
-      //     this._visitedChunks.has(`${cx - 1},${cz}`) ||
-      //     this._visitedChunks.has(`${cx + 1},${cz}`) ||
-      //     this._visitedChunks.has(`${cx},${cz - 1}`) ||
-      //     this._visitedChunks.has(`${cx},${cz + 1}`)
-      //   ) {
-      //     if (this.debug)
-      //       console.log(
-      //         `[AshFinder] chunkColumnLoad replan — new chunk ${cx},${cz} borders visited search`,
-      //       );
-      //     // clear stale visited set so we don't keep firing for the same chunk
-      //     this._visitedChunks = new Set();
-      //     this.#pathExecutor.triggerReplan();
-      //   }
-      // });
     });
 
-    this.bot.on("death", () => {
-      if (!this.stopped) return;
-      this.stop();
+    bot.on("death", () => {
+      // Only stop if we're actually moving
+      if (!this.stopped) this.stop();
     });
   }
 
   /**
-   * Generate a path to the specified goal.
-   * @param {Goal} goal Goal to reach
-   * @param {{excludedPositions: Vec3[]}} options Positions to exclude from the pathfinding
+   * @param {Goal} goal
+   * @param {{ excludedPositions?: Vec3[] }} [options={}]
+   * @returns {Promise<{ path: Cell[], status: string, visitedChunks: Set<string> }>}
    */
-  async generatePath(goal, options = { excludedPositions: [] }) {
+  async generatePath(goal, options = {}) {
     const endFunc = createEndFunc(goal);
-    const bot = this.bot;
     const position = goal.getPosition().clone();
 
-    // ensure controller exists for this run
-    this._searchController = this._searchController || {};
     this._searchController.debug = this.debug;
-    // console.log("he was onece a dogg", options);
 
     const result = await astar(
-      bot.entity.position.clone(),
+      this.bot.entity.position.clone(),
       position,
       goal,
-      bot,
+      this.bot,
       endFunc,
       this.config,
-      options,
+      { excludedPositions: [], ...options },
       this.debug,
       this._searchController,
     );
 
-    // once astar resolves, controller.active will be set to false by astar
-    this._searchController = this._searchController || {};
     this._searchController.active = false;
-
-    // keep the visited-chunks set alive so chunkColumnLoad can check against it
     this._visitedChunks = result.visitedChunks || new Set();
 
     return result;
   }
 
+  // -------------------------------------------------------------------------
+  // Config helpers
+  // -------------------------------------------------------------------------
+
+  /** Disable block breaking during pathfinding. */
   disableBreaking() {
     this.config.breakBlocks = false;
   }
-  disablePlacing() {
-    this.config.placeBlocks = false;
-  }
-
+  /** Enable block breaking during pathfinding. */
   enableBreaking() {
     this.config.breakBlocks = true;
   }
+
+  /** Disable block placing during pathfinding. */
+  disablePlacing() {
+    this.config.placeBlocks = false;
+  }
+  /** Enable block placing during pathfinding. */
   enablePlacing() {
     this.config.placeBlocks = true;
   }
 
+  /** Disable elytra flight mode. */
   disableFlight() {
     this.config.fly = false;
   }
-
+  /** Enable elytra flight mode. */
   enableFlight() {
     this.config.fly = true;
   }
 
+  /** Disable parkour moves. */
+  disableParkour() {
+    this.config.parkour = false;
+  }
+  /** Enable parkour moves. */
   enableParkour() {
     this.config.parkour = true;
   }
 
-  disableParkour() {
-    this.config.parkour = false;
-  }
-
   /**
+   * Build a path-result object directly from an array of positions (no A*).
    *
    * @param {Vec3[]} positions
-   * Creates a cell[] from given positions
+   * @returns {{ path: Cell[], status: "found" }}
    */
   createPathFromPositions(positions) {
-    let result = {};
-
-    result.path = [];
-    for (const pos of positions) {
-      const cell = new Cell(pos, 0);
-
-      result.path.push(cell);
-    }
-
-    result.status = "found";
-
-    return result;
+    return {
+      path: positions.map((pos) => new Cell(pos, 0)),
+      status: "found",
+    };
   }
 
   stop() {
     this.path = [];
     this.stopped = true;
-    this.following = false;
+    this.following = null;
     this.bot.clearControlStates();
-    this.#pathExecutor.stop("pathfinder stopping");
+    this.#pathExecutor?.stop("pathfinder stopping");
     this.emit("stopped");
   }
 
   /**
-   * Smart navigation that chooses between direct pathfinding and waypoints
-   * @param {Goal} goal - Target goal
-   * @param {Object} options - Navigation options
-   * @param {number} options.waypointThreshold - Distance to trigger waypoints (default: 75)
-   * @param {boolean} options.forceWaypoints - Always use waypoints
-   * @param {boolean} options.forceAdaptive - Use smart waypoint system with failure handling
-   */
-  async gotoSmart(goal, options = {}) {
-    const {
-      waypointThreshold = 75,
-      forceWaypoints = false,
-      forceAdaptive = true,
-    } = options;
-
-    const start = this.bot.entity.position.clone();
-    const goalPos = goal.getPosition();
-    const distance = start.distanceTo(goalPos);
-
-    // Decide strategy based on distance
-    const shouldUseWaypoints = forceWaypoints || distance > waypointThreshold;
-
-    if (shouldUseWaypoints) {
-      console.log(`[AshFinder] Long distance: ${distance.toFixed(1)} blocks`);
-
-      if (forceAdaptive) {
-        // Use smart system with partial path handling
-        return await this.waypointPlanner.navigateWithSmartWaypoints(goal);
-      } else {
-        // Use basic waypoint system
-        return await this.waypointPlanner.navigateWithWaypoints(goal);
-      }
-    } else {
-      // Direct pathfinding for short distances
-      console.log(`[AshFinder] Direct path: ${distance.toFixed(1)} blocks`);
-      return await this.goto(goal);
-    }
-  }
-
-  /**
+   * Navigate to `goal`, replanning if the path is partial.
    *
    * @param {Goal} goal
-   * @param {{excludedPositions?: Vec3[]}} options
+   * @param {{ excludedPositions?: Vec3[] }} [options={}]
+   * @returns {Promise<{ status: "success" | "failed", error?: Error }>}
    */
-  async goto(goal, options = { excludedPositions: [] }) {
+  async goto(goal, options = {}) {
     if (!this.stopped) {
       throw new Error(
-        "Already going to a goal, please wait until the current path is completed.",
+        "Already navigating. Call stop() or await the current goto().",
       );
     }
 
     this.stopped = false;
     this.isPathing = true;
 
+    // If the goal chunk isn't loaded yet, shorten the search timeout so we
+    // don't wait 30 s for a path that can't exist yet.
+    const defaultTimeout = this.config.thinkTimeout;
     const isLoaded = this.bot.blockAt(goal.getPosition()) !== null;
-    let defaultTimeout = this.config.thinkTimeout;
-
     if (!isLoaded) {
-      console.log(
-        "[AshFinder]: Goal position is not loaded... changing think timeout to 1s",
-      );
-
+      if (this.debug)
+        console.log(
+          "[AshFinder] Goal chunk not loaded — using 1s think timeout",
+        );
       this.config.thinkTimeout = 1000;
     }
 
+    // Validate elytra if fly mode is on.
     if (this.config.fly) {
-      const elytraArmor =
-        this.bot.inventory.slots[this.bot.getEquipmentDestSlot("torso")];
-      if (!elytraArmor) {
-        const elytraInv = this.bot.inventory
+      const torsoSlot = this.bot.getEquipmentDestSlot("torso");
+      const wearing = this.bot.inventory.slots[torsoSlot];
+      if (!wearing?.name.includes("elytra")) {
+        const inInventory = this.bot.inventory
           .items()
           .find((i) => i.name.includes("elytra"));
-        if (!elytraInv) throw new Error("No elytra found!");
+        if (!inInventory)
+          throw new Error("Fly mode is enabled but no elytra found.");
       }
     }
 
@@ -250,7 +190,7 @@ class AshFinderPlugin extends EventEmitter {
               }) (Target: ${node.worldPos})`,
           ),
         );
-        console.log(status);
+        console.log("Path status:", status);
       }
 
       const executionPromise = this.#pathExecutor.setPath(path, {
@@ -263,11 +203,9 @@ class AshFinderPlugin extends EventEmitter {
       this.emit("pathStarted", { path, status, goal });
 
       await executionPromise;
-
       return { status: "success" };
     } catch (err) {
-      if (this.debug) console.error("Path execution failed:", err);
-
+      if (this.debug) console.error("[AshFinder] Path execution failed:", err);
       return { status: "failed", error: err };
     } finally {
       this.stopped = true;
@@ -277,11 +215,85 @@ class AshFinderPlugin extends EventEmitter {
   }
 
   /**
-   * Continuously follow an entity
-   * @param {Entity} entity - Entity to follow
-   * @param {Object} options
-   * @param {number} options.distance - Distance to maintain
-   * @param {number} options.updateInterval - How often to check position (ms)
+   * Choose between direct A* and waypoint navigation based on distance.
+   *
+   * @param {Goal} goal
+   * @param {{
+   *   waypointThreshold?: number,
+   *   forceWaypoints?: boolean,
+   *   forceAdaptive?: boolean,
+   * }} [options={}]
+   * @returns {Promise<{ status: string }>}
+   */
+  async gotoSmart(goal, options = {}) {
+    const {
+      waypointThreshold = 75,
+      forceWaypoints = false,
+      forceAdaptive = true,
+    } = options;
+
+    const distance = this.bot.entity.position.distanceTo(goal.getPosition());
+
+    if (forceWaypoints || distance > waypointThreshold) {
+      if (this.debug)
+        console.log(
+          `[AshFinder] Long-distance nav (${distance.toFixed(1)} blocks)`,
+        );
+
+      return forceAdaptive
+        ? this.waypointPlanner.navigateWithSmartWaypoints(goal)
+        : this.waypointPlanner.navigateWithWaypoints(goal);
+    }
+
+    if (this.debug)
+      console.log(`[AshFinder] Direct nav (${distance.toFixed(1)} blocks)`);
+
+    return this.goto(goal);
+  }
+
+  /**
+   * Navigate using the waypoint system for long distances.
+   * Prefer `gotoSmart` for new code; this exists for backward compatibility.
+   *
+   * @param {Goal} goal
+   * @param {number} [waypointThreshold=75]
+   * @returns {Promise<{ status: string }>}
+   */
+  async gotoWithWaypoints(goal, waypointThreshold = 75) {
+    return this.gotoSmart(goal, { waypointThreshold, forceAdaptive: false });
+  }
+
+  /**
+   * Execute a pre-computed path result (e.g. from `generatePath`).
+   *
+   * @param {{ path: Cell[], status: "found" | "partial" }} object
+   * @param {Goal} goal
+   * @returns {Promise<{ status: "success" | "failed", error?: Error }>}
+   */
+  async gotoWithPath(object, goal) {
+    const { path, status } = object;
+
+    const executionPromise = this.#pathExecutor.setPath(path, {
+      partial: status === "partial",
+      targetGoal: goal,
+    });
+
+    this.emit("pathStarted", { path, status, goal });
+
+    try {
+      await executionPromise;
+      return { status: "success" };
+    } catch (err) {
+      if (this.debug) console.error("[AshFinder] Path execution failed:", err);
+      return { status: "failed", error: err };
+    }
+  }
+
+  /**
+   * Continuously follow an entity, replanning whenever it moves significantly.
+   *
+   * @param {{ position: Vec3, isValid: boolean }} entity
+   * @param {{ distance?: number, updateInterval?: number }} [options={}]
    */
   async followEntity(entity, options = {}) {
     const { distance = 2, updateInterval = 500 } = options;
@@ -294,7 +306,7 @@ class AshFinderPlugin extends EventEmitter {
     };
 
     const followLoop = async () => {
-      if (!this.following.active || !entity.isValid) {
+      if (!this.following?.active || !entity.isValid) {
         this.following = null;
         return;
       }
@@ -302,26 +314,15 @@ class AshFinderPlugin extends EventEmitter {
       const botPos = this.bot.entity.position;
       const entityPos = entity.position;
       const currentDist = botPos.distanceTo(entityPos);
-
-      // Check if entity moved significantly
       const movedDist = entityPos.distanceTo(this.following.lastTargetPos);
 
       if (movedDist > 3 || currentDist > distance + 3) {
         this.following.lastTargetPos = entityPos.clone();
 
-        // Use GoalNear for following
-        const { GoalNear } = require("./goal");
-        const goal = new GoalNear(entityPos, distance);
-
-        try {
-          // Don't await - let it run, we'll replan as needed
-          this.goto(goal).catch(() => {});
-        } catch (err) {
-          // Already pathfinding, that's fine
-        }
+        const followGoal = new GoalNear(entityPos, distance);
+        this.goto(followGoal).catch(() => {});
       }
 
-      // Schedule next check
       setTimeout(followLoop, updateInterval);
     };
 
@@ -329,7 +330,7 @@ class AshFinderPlugin extends EventEmitter {
   }
 
   /**
-   * Stop following entity
+   * Stop following the current entity.
    */
   stopFollowing() {
     if (this.following) {
@@ -340,115 +341,50 @@ class AshFinderPlugin extends EventEmitter {
   }
 
   /**
-   * Navigate to goal using waypoint system for long distances
-   * @param {Goal} goal - Target goal
-   * @param {number} waypointThreshold - Distance threshold to use waypoints (default: 75)
-   * @returns {Promise<{status: string}>}
+   * @param {Vec3} pos
+   * @returns {string}
    */
-  async gotoWithWaypoints(goal, waypointThreshold = 75) {
-    const bot = this.bot;
-    const start = bot.entity.position.clone();
-    const goalPos = goal.getPosition();
-    const distance = start.distanceTo(goalPos);
-
-    // Use waypoints for long distances
-    if (distance > waypointThreshold) {
-      console.log(
-        `Long distance detected (${distance.toFixed(
-          1,
-        )} blocks), using waypoint system`,
-      );
-
-      const planner = new WaypointPlanner(bot, this);
-      return await planner.navigateWithWaypoints(goal);
-    } else {
-      // Use regular pathfinding for short distances
-      console.log(
-        `Short distance (${distance.toFixed(
-          1,
-        )} blocks), using direct pathfinding`,
-      );
-      return await this.goto(goal);
-    }
-  }
-
-  /**
-   *
-   * @param {{
-   * path: Cell[],
-   * status: "found" | "partial"
-   * }} object
-   *
-   * @param {Goal} goal
-   */
-  async gotoWithPath(object, goal) {
-    // console.log(object);
-
-    const { path, status } = object;
-
-    const executionPromise = this.#pathExecutor.setPath(path, {
-      partial: status === "partial",
-      targetGoal: goal,
-    });
-
-    this.emit("pathStarted", {
-      path,
-      status,
-      goal,
-    });
-
-    // Wait for the path to complete
-    try {
-      await executionPromise;
-      return { status: "success" };
-    } catch (err) {
-      if (this.debug) console.error("Path execution failed:", err);
-      return { status: "failed", error: err };
-    }
-  }
-
-  // helper to produce the same key format used by DirectionalVec3.toString
   posKey(pos) {
-    // pos might be Vec3 or BlockPosition; ensure consistent formatting
     const p = pos.floored ? pos.floored() : pos;
     return `${p.x},${p.y},${p.z}`;
   }
 
-  // apply a virtual state and prune if search running
+  /**
+   * @param {Vec3} pos
+   * @param {string} state - e.g. "air" or "placed"
+   */
   applyVirtualToSearch(pos, state) {
     const key = this.posKey(pos);
-    this._globalVirtual = this._globalVirtual || new Map();
     this._globalVirtual.set(key, state);
 
-    if (this._searchController && this._searchController.active) {
+    if (this._searchController?.active) {
       this._searchController.applyVirtual(key, state);
 
       const { pruneOpenSet } = require("./utils");
-      const { moveClasses } = require("./movement");
       pruneOpenSet(this._searchController, this.bot, this.config);
     }
   }
 
-  // notify external break
+  /**
+   * @param {Vec3} pos
+   */
   notifyBlockBroken(pos) {
     const p = pos.floored ? pos.floored() : pos;
-    if (this.debug)
-      console.log(`[AshFinder] notifyBlockBroken ${p.toString()}`);
-    // mark node manager as well (keeps areaMarked semantics if used)
-    // NOTE: we still prefer overlay for branch-local state, nodemanager used only for areaMarked
+    if (this.debug) console.log(`[AshFinder] notifyBlockBroken ${p}`);
+
     if (this._searchController?.nodemanager) {
       this._searchController.nodemanager.markNode(p, "broken");
     }
-
-    // apply overlay + prune
     this.applyVirtualToSearch(p, "air");
   }
 
-  // notify external place
+  /**
+   * @param {Vec3} pos
+   */
   notifyBlockPlaced(pos) {
     const p = pos.floored ? pos.floored() : pos;
-    if (this.debug)
-      console.log(`[AshFinder] notifyBlockPlaced ${p.toString()}`);
+    if (this.debug) console.log(`[AshFinder] notifyBlockPlaced ${p}`);
+
     if (this._searchController?.nodemanager) {
       this._searchController.nodemanager.markNode(p, "placed");
     }
@@ -456,175 +392,120 @@ class AshFinderPlugin extends EventEmitter {
   }
 }
 
+const DEFAULT_CONFIG = {
+  blocksToAvoid: ["crafting_table", "chest", "furnace"],
+  blocksToStayAway: ["cactus", "cobweb", "lava", "gravel"],
+  avoidDistance: 8,
+  swimming: true,
+  placeBlocks: false,
+  breakBlocks: false,
+  parkour: true,
+  checkBreakUpNodes: true,
+  proParkour: false,
+  fly: false,
+  maxFallDist: 3,
+  maxWaterDist: 256,
+  disposableBlocks: [
+    "dirt",
+    "cobblestone",
+    "stone",
+    "andesite",
+    "coarse_dirt",
+    "blackstone",
+    "end_stone",
+    "basalt",
+    "sandstone",
+    "diorite",
+    "granite",
+    "tuff",
+    "cobbled_deepslate",
+    "deepslate",
+    "calcite",
+  ],
+  interactableBlocks: [
+    "oak_door",
+    "spruce_door",
+    "birch_door",
+    "jungle_door",
+    "acacia_door",
+    "dark_oak_door",
+    "mangrove_door",
+    "warped_door",
+    "crimson_door",
+    "oak_fence_gate",
+    "spruce_fence_gate",
+    "birch_fence_gate",
+    "jungle_fence_gate",
+    "acacia_fence_gate",
+    "dark_oak_fence_gate",
+    "mangrove_fence_gate",
+    "warped_fence_gate",
+    "crimson_fence_gate",
+  ],
+  climbableBlocks: ["vine", "ladder", "scaffolding"],
+  closeInteractables: true,
+  unbreakableBlocks: [
+    "bedrock",
+    "barrier",
+    "command_block",
+    "chain_command_block",
+    "repeating_command_block",
+    "structure_block",
+    "jigsaw",
+    "end_portal_frame",
+    "end_portal",
+    "nether_portal",
+    "spawner",
+    "end_gateway",
+    "structure_void",
+    "moving_piston",
+    "piston_head",
+  ],
+  thinkTimeout: 30000,
+  stuckTimeout: 5000,
+  maxPartialPaths: 5,
+  debugMoves: false,
+};
+
 class AshFinderConfig {
   constructor() {
-    // blocks to avoid breaking
-    this.blocksToAvoid = ["crafting_table", "chest", "furnace"];
-    this.blocksToStayAway = ["cactus", "cobweb", "lava", "gravel"];
-    this.avoidDistance = 8;
-    this.swimming = true;
-    this.placeBlocks = false;
-    this.breakBlocks = false;
-    this.parkour = true;
-    this.checkBreakUpNodes = true;
-    this.proParkour = false;
-    this.fly = false;
-    this.maxFallDist = 3;
-    this.maxWaterDist = 256;
-    this.disposableBlocks = [
-      "dirt",
-      "cobblestone",
-      "stone",
-      "andesite",
-      "coarse_dirt",
-      "blackstone",
-      "end_stone",
-      "basalt",
-    ];
-    this.interactableBlocks = [
-      "oak_door",
-      "spruce_door",
-      "birch_door",
-      "jungle_door",
-      "acacia_door",
-      "dark_oak_door",
-      "mangrove_door",
-      "warped_door",
-      "crimson_door",
-      // gates
-      "oak_fence_gate",
-      "spruce_fence_gate",
-      "birch_fence_gate",
-      "jungle_fence_gate",
-      "acacia_fence_gate",
-      "dark_oak_fence_gate",
-      "mangrove_fence_gate",
-      "warped_fence_gate",
-      "crimson_fence_gate",
-    ];
-    this.climbableBlocks = ["vine", "ladder"];
-    this.closeInteractables = true;
-
-    // Blocks that cannot be broken under any circumstances
-    this.unbreakableBlocks = [
-      "bedrock",
-      "barrier",
-      "command_block",
-      "chain_command_block",
-      "repeating_command_block",
-      "structure_block",
-      "jigsaw",
-      "end_portal_frame",
-      "end_portal",
-      "nether_portal",
-      "spawner",
-      "end_gateway",
-      "structure_void",
-      "moving_piston",
-      "piston_head",
-    ];
-
-    this.thinkTimeout = 30000;
-    this.stuckTimeout = 5000;
-    this.maxPartialPaths = 5;
-    this.debugMoves = false;
+    this.reset();
   }
 
   /**
-   * Resets the configuration to default values.
+   * Restore all settings to their default values.
    */
   reset() {
-    this.blocksToAvoid = ["crafting_table", "chest", "furnace", "gravel"];
-    this.blocksToStayAway = ["cactus", "cobweb", "lava", "gravel"];
-    this.avoidDistance = 8;
-    this.swimming = true;
-    this.placeBlocks = false;
-    this.breakBlocks = false;
-    this.parkour = true;
-    this.checkBreakUpNodes = true;
-    this.proParkour = false;
-    this.fly = false;
-    this.maxFallDist = 3;
-    this.maxWaterDist = 256;
-    this.disposableBlocks = [
-      "dirt",
-      "cobblestone",
-      "stone",
-      "andesite",
-      "coarse_dirt",
-      "blackstone",
-      "end_stone",
-      "basalt",
-      "sandstone",
-      "diorite",
-      "granite",
-      "tuff",
-      "cobbled_deepslate",
-      "deepslate",
-      "calcite",
-    ];
-    this.interactableBlocks = [
-      "oak_door",
-      "spruce_door",
-      "birch_door",
-      "jungle_door",
-      "acacia_door",
-      "dark_oak_door",
-      "mangrove_door",
-      "warped_door",
-      "crimson_door",
-      // gates
-      "oak_fence_gate",
-      "spruce_fence_gate",
-      "birch_fence_gate",
-      "jungle_fence_gate",
-      "acacia_fence_gate",
-      "dark_oak_fence_gate",
-      "mangrove_fence_gate",
-      "warped_fence_gate",
-      "crimson_fence_gate",
-    ];
-    this.climbableBlocks = ["vine", "ladder", "scaffolding"];
-    this.closeInteractables = true;
-
-    // Blocks that cannot be broken under any circumstances
-    this.unbreakableBlocks = [
-      "bedrock",
-      "barrier",
-      "command_block",
-      "chain_command_block",
-      "repeating_command_block",
-      "structure_block",
-      "jigsaw",
-      "end_portal_frame",
-      "end_portal",
-      "nether_portal",
-      "spawner",
-      "end_gateway",
-      "structure_void",
-      "moving_piston",
-      "piston_head",
-    ];
-
-    this.thinkTimeout = 30000;
-    this.stuckTimeout = 5000;
-    this.debugMoves = false;
+    // Deep-copy arrays so mutations on one instance don't affect the defaults.
+    for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
+      this[key] = Array.isArray(value) ? [...value] : value;
+    }
   }
 
+  /**
+   * Set a single configuration value.
+   *
+   * @param {string} key
+   * @param {*} value
+   */
   set(key, value) {
-    if (this.hasOwnProperty(key)) {
-      this[key] = value;
-    } else {
-      throw new Error(`Invalid configuration key: ${key}`);
+    if (!Object.hasOwn(this, key)) {
+      throw new Error(`Unknown configuration key: "${key}"`);
     }
+    this[key] = value;
   }
 
+  /**
+   * Get a single configuration value.
+   *
+   * @param {string} key
+   * @returns {*}
+   */
   get(key) {
-    if (this.hasOwnProperty(key)) {
-      return this[key];
-    } else {
-      throw new Error(`Invalid configuration key: ${key}`);
+    if (!Object.hasOwn(this, key)) {
+      throw new Error(`Unknown configuration key: "${key}"`);
     }
+    return this[key];
   }
 }
 

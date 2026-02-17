@@ -355,7 +355,8 @@ class Move {
       !this.isLava(node) &&
       !this.isClimbable(below) &&
       !this.isCarpetLike(below) &&
-      !this.isClimbable(below)
+      !this.isClimbable(below) &&
+      !this.isLeaf(below)
     );
   }
 
@@ -462,6 +463,10 @@ class Move {
 
   isLava(node) {
     return this.getBlock(node)?.name === "lava";
+  }
+
+  isLeaf(node) {
+    return this.getBlock(node)?.name.includes("leaves");
   }
 
   isClimbable(node) {

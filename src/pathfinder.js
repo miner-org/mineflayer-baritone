@@ -1,28 +1,13 @@
 const { Vec3 } = require("vec3");
-const { getNeighbors2, DirectionalVec3, Vec3WithAttr } = require("./movement");
-const { BinarySearchTree, MinHeap, BinaryHeapOpenSet } = require("./heap");
-const blockMapCost = require("./blockmap");
+const { getNeighbors2 } = require("./movement");
+const { MinHeap } = require("./heap");
 
-const PUSH_FACTOR = 0.5;
+const H_TIE_EPSILON = 0.01;
 
-// const sleep = (ms = 2000) => {
-//   return new Promise((r) => {
-//     setTimeout(r, ms);
-//   });
-// };
-
-const compare = (a, b) => {
-  let aPriority = a.fCost;
-  let bPriority = b.fCost;
-
-  // Tie-breaker toward goal progress
-  if (Math.abs(aPriority - bPriority) < 0.01) {
-    return a.hCost - b.hCost; // Prefer closer to goal
-  }
-
-  return aPriority - bPriority;
-};
-
+/**
+ * @param {{ x: number, y: number, z: number }} node
+ * @returns {string}
+ */
 function posHash(node) {
   const x = Math.round(node.x * 2) / 2;
   const y = Math.round(node.y);
@@ -31,9 +16,8 @@ function posHash(node) {
 }
 
 /**
- * Generates a unique number-based hash for a Vec3WithAttr.
- * @param {Vec3WithAttr} node
- * @returns {string} Hash key (as string)
+ * @param {{ x: number, y: number, z: number, dir?: { x: number, z: number } }} node
+ * @returns {string}
  */
 function defaultHash(node) {
   const x = node.x | 0;
@@ -41,87 +25,95 @@ function defaultHash(node) {
   const z = node.z | 0;
   const dx = node.dir?.x ?? 0;
   const dz = node.dir?.z ?? 0;
-
-  // dir component mapped to 0..8
-  const dirKey = (dx + 1) * 3 + (dz + 1); // -1,-1 → 0 | 0,0 → 4 | 1,1 → 8
-
-  // Combine into a string key: "x,y,z,d"
+  // Map dir component (-1..1) to 0..2, then encode as a single digit 0..8
+  const dirKey = (dx + 1) * 3 + (dz + 1);
   return `${x},${y},${z},${dirKey}`;
 }
 
 class NodeManager {
   constructor() {
-    this.markedNodes = new Map(); // posHash -> attribute
+    /** @type {Map<string, string>} posHash → attribute */
+    this.markedNodes = new Map();
   }
 
+  /** @param {{ x:number, y:number, z:number }} node @param {string} attribute */
   markNode(node, attribute) {
     this.markedNodes.set(posHash(node), attribute);
   }
 
+  /** @param {Array<{ x:number, y:number, z:number }>} nodes @param {string} attribute */
   markNodes(nodes, attribute) {
-    for (const node of nodes) {
-      this.markNode(node, attribute);
-    }
+    for (const node of nodes) this.markNode(node, attribute);
   }
 
+  /** @param {{ x:number, y:number, z:number }} node */
   unmarkNode(node) {
     this.markedNodes.delete(posHash(node));
   }
 
+  /** @param {{ x:number, y:number, z:number }} node @returns {boolean} */
   isNodeMarked(node) {
     return this.markedNodes.has(posHash(node));
   }
 
+  /** @param {{ x:number, y:number, z:number }} node @returns {string | undefined} */
   getNodeAttribute(node) {
     return this.markedNodes.get(posHash(node));
   }
 
+  /** @param {{ x:number, y:number, z:number }} node @returns {boolean} */
   isNodeBroken(node) {
     return this.getNodeAttribute(node) === "broken";
   }
 
+  /** @param {{ x:number, y:number, z:number }} node @returns {boolean} */
   isNodePlaced(node) {
     return this.getNodeAttribute(node) === "placed";
   }
 
+  /** @param {{ x:number, y:number, z:number }} node @returns {boolean} */
   isAreaMarkedNode(node) {
     return this.getNodeAttribute(node) === "areaMarked";
   }
 }
 
 class Cell {
-  constructor(worldPos, cost) {
-    /**
-     * @type {Vec3}
-     */
-    this.worldPos = worldPos || null;
+  /**
+   * @param {Vec3 | null} [worldPos]
+   * @param {number} [cost=0]
+   */
+  constructor(worldPos, cost = 0) {
+    /** @type {Vec3 | null} */
+    this.worldPos = worldPos ?? null;
     this.direction = { x: 0, z: 0 };
     this.gCost = 0;
     this.hCost = 0;
     this.fCost = 0;
-    /**
-     * @type {number}
-     */
-    this.cost = cost || 0;
-    /**
-     * @type {Cell}
-     */
+    /** @type {number} */
+    this.cost = cost;
+    /** @type {Cell | null} */
     this.parent = null;
-    /**
-     * @type {Object}
-     */
+    /** @type {Object} */
     this.attributes = {};
     /**
+     * Name of the move class that produced this node.
      * @type {string}
-     * The name of the move class that is node is associdiated with
      */
     this.moveName = "";
   }
 
+  /**
+   * @param {Vec3} offset
+   * @returns {Cell}
+   */
   add(offset) {
     return new Cell(this.worldPos.add(offset), this.cost);
   }
 
+  /**
+   * @param {Cell} other
+   * @returns {boolean}
+   */
   equals(other) {
     if (!(other instanceof Cell)) return false;
     if (!this.worldPos || !other.worldPos) return false;
@@ -133,6 +125,85 @@ class Cell {
   }
 }
 
+/**
+ * @param {{ x:number, y:number, z:number }} a
+ * @param {{ x:number, y:number, z:number }} b
+ * @returns {number}
+ */
+function manhattanDistance(a, b) {
+  const dx = Math.abs(a.x - b.x);
+  const dy = Math.abs(a.y - b.y);
+  const dz = Math.abs(a.z - b.z);
+  return dx + dz + dy * 0.95;
+}
+
+/**
+ * @param {{ x:number, y:number, z:number }} a
+ * @param {{ x:number, y:number, z:number }} b
+ * @returns {number}
+ */
+function euclideanDistance(a, b) {
+  const dx = Math.abs(a.x - b.x);
+  const dy = Math.abs(a.y - b.y);
+  const dz = Math.abs(a.z - b.z);
+  return Math.sqrt(dx * dx + dz * dz) + dy;
+}
+
+/**
+ * @param {{ x:number, y:number, z:number }} a
+ * @param {{ x:number, y:number, z:number }} b
+ * @returns {number}
+ */
+function hCost(a, b) {
+  return manhattanDistance(a, b);
+}
+
+/**
+ * @param {Cell} a
+ * @param {Cell} b
+ * @returns {number}
+ */
+function compare(a, b) {
+  if (Math.abs(a.fCost - b.fCost) < H_TIE_EPSILON) {
+    return a.hCost - b.hCost;
+  }
+  return a.fCost - b.fCost;
+}
+
+/**
+ * @param {Cell} node
+ * @returns {Cell[]}
+ */
+function reconstructPath(node) {
+  const path = [];
+  while (node) {
+    path.push(node);
+    node = node.parent;
+  }
+  path.reverse();
+  return path;
+}
+
+/**
+ * @param {Vec3} start - Bot's current world position
+ * @param {Vec3} endPos - Resolved goal position (used for heuristic)
+ * @param {import("./goal").Goal} goal - Goal object
+ * @param {import("mineflayer").Bot} bot
+ * @param {(pos: Vec3) => boolean} endFunc - Returns true when a position satisfies the goal
+ * @param {object} config - AshFinderConfig instance
+ * @param {{ excludedPositions?: Vec3[] }} [options={}]
+ * @param {boolean} [debug=false]
+ * @param {object | null} [searchController=null]
+ * @returns {Promise<{
+ *   path: Cell[],
+ *   status: "found" | "partial" | "no path",
+ *   cost: number,
+ *   visitedChunks: Set<string>,
+ *   iterations: number,
+ *   exploredNodes?: number,
+ *   remainingNodes?: number,
+ * }>}
+ */
 async function Astar(
   start,
   endPos,
@@ -144,51 +215,51 @@ async function Astar(
   debug = false,
   searchController = null,
 ) {
-  const getEnd = () => goal.getPosition();
-
   let startPos = start.floored().offset(0.5, 0, 0.5);
 
-  if (
-    bot.blockAt(startPos).name === "farmland" ||
-    bot.blockAt(startPos).name.includes("chest")
-  )
+  const startBlock = bot.blockAt(startPos);
+  if (startBlock?.name === "farmland" || startBlock?.name.includes("chest")) {
     startPos = startPos.offset(0, 1, 0);
+  }
 
-  let excludedPositions =
-    options && options.excludedPositions !== null
-      ? options.excludedPositions.map((pos) =>
-          pos.floored().offset(0.5, 0, 0.5),
-        )
-      : [];
+  const excludedPositions = (options?.excludedPositions ?? []).map((pos) =>
+    pos.floored().offset(0.5, 0, 0.5),
+  );
 
-  const openMap = new Map(); // posHash -> Cell
-  const closedSet = new Set(); // posHash
+  /** @type {Map<string, Cell>} posHash → Cell */
+  const openMap = new Map();
+  /** @type {Set<string>} */
+  const closedSet = new Set();
   const nodemanager = new NodeManager();
 
-  // Mark excluded positions early
   nodemanager.markNodes(excludedPositions, "areaMarked");
 
   const startNode = new Cell(startPos);
   startNode.gCost = 0;
-  startNode.hCost = hCost1(startPos, getEnd());
+  startNode.hCost = hCost(startPos, endPos);
   startNode.fCost = startNode.gCost + startNode.hCost;
   startNode.virtualBlocks = new Map();
   startNode.scaffoldingUsed = 0;
 
-  openMap.set(posHash(startPos), startNode);
+  const startHash = posHash(startPos);
+  openMap.set(startHash, startNode);
 
   const openHeap = new MinHeap(compare);
   openHeap.push(startNode);
 
+  /** Best node encountered so far (smallest hCost), used for partial paths. */
   let bestNode = null;
   let bestScore = Infinity;
+
   let iteration = 0;
-  const visitedChunks = new Set(); // "cx,cz" of every chunk expanded
+  /** "cx,cz" keys for every chunk that was expanded during this search. */
+  const visitedChunks = new Set();
 
   if (searchController) {
     searchController.openMap = openMap;
     searchController.nodemanager = nodemanager;
     searchController.active = true;
+    searchController.prunedHashes = new Set();
 
     searchController.applyVirtual = (posKey, state) => {
       for (const cell of openMap.values()) {
@@ -197,7 +268,6 @@ async function Astar(
       }
     };
 
-    searchController.prunedHashes = new Set();
     searchController.prune = (positions) => {
       for (const pos of positions) {
         searchController.prunedHashes.add(posHash(pos));
@@ -205,41 +275,35 @@ async function Astar(
     };
   }
 
-  const end = getEnd();
+  const startTime = performance.now();
+  let lastYield = performance.now();
 
   return new Promise(async (resolve) => {
-    let startTime = performance.now();
-    let lastSleep = performance.now();
-
     while (openHeap.size() > 0) {
       iteration++;
 
-      if (performance.now() - lastSleep >= 30) {
+      // Yield to the event loop every 30 ms to keep the bot responsive.
+      if (performance.now() - lastYield >= 30) {
         await new Promise((r) => setTimeout(r, 0));
-        lastSleep = performance.now();
+        lastYield = performance.now();
       }
 
+      // Pop the lowest-f node, discarding stale heap entries.
       let currentNode = null;
       while (true) {
         const popped = openHeap.pop();
         if (!popped) break;
         const poppedHash = posHash(popped.worldPos);
-        // If the popped node is still present in openMap and matches the same object,
-        // it's valid. Otherwise it's stale (either already processed or replaced).
-        const mapNode = openMap.get(poppedHash);
-        if (mapNode && mapNode === popped) {
+        if (openMap.get(poppedHash) === popped) {
           currentNode = popped;
           break;
         }
-        // else, stale entry — continue popping
+        // Stale entry — skip.
       }
 
       if (!currentNode) break;
 
-      // console.log(currentNode);
-
       const currentHash = posHash(currentNode.worldPos);
-      // remove from open set and move to closed
       openMap.delete(currentHash);
       closedSet.add(currentHash);
       visitedChunks.add(
@@ -249,11 +313,7 @@ async function Astar(
       if (debug) {
         const distToGoal = currentNode.worldPos.distanceTo(endPos);
         const focusPhase = Math.min(1, Math.max(0, 1 - distToGoal / 15));
-
-        const color =
-          focusPhase < 0.5
-            ? "0.0,0.6,1.0" // blue = exploring
-            : "0.6,1.0,0.0"; // green = focusing
+        const color = focusPhase < 0.5 ? "0.0,0.6,1.0" : "0.6,1.0,0.0";
 
         bot.chat(
           `/particle dust{color:[${color}],scale:1} ` +
@@ -261,97 +321,71 @@ async function Astar(
         );
       }
 
-      // Check if reached destination
       if (endFunc(currentNode.worldPos)) {
-        if (searchController) {
-          searchController.active = false;
-        }
-
+        if (searchController) searchController.active = false;
         return resolve({
           path: reconstructPath(currentNode),
           cost: currentNode.fCost,
           status: "found",
-          openMap: openMap,
+          openMap,
           visitedChunks,
           iterations: iteration,
         });
       }
 
-      let neighbors = getNeighbors2(
-        currentNode,
-        config,
-        nodemanager,
-        bot,
-        getEnd(),
-      );
-
-      // console.log(neighbors)
-      const distFromStart = currentNode.worldPos.distanceTo(startPos);
-
-      const h = hCost1(currentNode.worldPos, getEnd());
-      if (
-        h < bestScore ||
-        (h === bestScore &&
-          distFromStart > bestNode?.worldPos.distanceTo(startPos))
-      ) {
+      // Track best partial candidate.
+      const h = hCost(currentNode.worldPos, endPos);
+      if (h < bestScore) {
         bestNode = currentNode;
         bestScore = h;
       }
 
-      if (debug)
-        bot.chat(
-          `/particle dust{color:[0.38,0.21,0.51],scale:1} ${currentNode.worldPos.x} ${currentNode.worldPos.y} ${currentNode.worldPos.z} 0.1 0.1 0.1 1 4 force`,
-        );
+      const neighbors = getNeighbors2(
+        currentNode,
+        config,
+        nodemanager,
+        bot,
+        endPos,
+      );
 
       for (const n of neighbors) {
         const nHash = posHash(n);
-
-        if (closedSet.has(nHash)) {
-          continue;
-        }
-        processNeighbor(currentNode, n);
+        if (closedSet.has(nHash)) continue;
+        _processNeighbor(currentNode, n, openMap, openHeap, endPos, startPos);
       }
 
-      let currentTime = performance.now();
-      if (currentTime - startTime >= config.thinkTimeout) {
+      if (performance.now() - startTime >= config.thinkTimeout) {
+        if (searchController) searchController.active = false;
+
         if (bestNode) {
-          if (searchController) {
-            searchController.active = false;
-          }
           return resolve({
             path: reconstructPath(bestNode),
             status: "partial",
             cost: bestNode.fCost,
-            bestNode: bestNode,
+            bestNode,
             exploredNodes: closedSet.size,
             remainingNodes: openMap.size,
-            openMap: openMap,
-            visitedChunks,
-            iterations: iteration,
-          });
-        } else {
-          if (searchController) {
-            searchController.active = false;
-          }
-          return resolve({
-            path: [],
-            status: "no path",
-            exploredNodes: closedSet.size,
-            remainingNodes: openMap.size,
+            openMap,
             visitedChunks,
             iterations: iteration,
           });
         }
+
+        return resolve({
+          path: [],
+          status: "no path",
+          exploredNodes: closedSet.size,
+          remainingNodes: openMap.size,
+          visitedChunks,
+          iterations: iteration,
+        });
       }
     }
 
-    if (searchController) {
-      searchController.active = false;
-    }
+    if (searchController) searchController.active = false;
 
-    // No path found
     return resolve({
-      path: bestNode !== null ? reconstructPath(bestNode) : [],
+      path: bestNode ? reconstructPath(bestNode) : [],
       status: "no path",
       exploredNodes: closedSet.size,
       remainingNodes: openMap.size,
@@ -359,167 +393,75 @@ async function Astar(
       iterations: iteration,
     });
   });
-
-  function processNeighbor(currentNode, neighborData) {
-    const hash = posHash(neighborData);
-
-    const placesInMove = neighborData.attributes?.place?.length || 0;
-    const totalScaffoldingUsed = currentNode.scaffoldingUsed + placesInMove;
-
-    let neighborCost = neighborData.cost;
-
-    // const distToGoal = neighborData.worldPos
-    //   ? neighborData.worldPos.distanceTo(end)
-    //   : new Vec3(neighborData.x, neighborData.y, neighborData.z).distanceTo(
-    //       end
-    //     );
-
-    // const BIAS_RADIUS = 10;
-    // if (distToGoal < BIAS_RADIUS) {
-    //   const t = distToGoal / BIAS_RADIUS;
-    //   const biasMultiplier = 0.5 + 0.5 * t; // ranges [0.5 .. 1]
-    //   neighborCost *= biasMultiplier;
-    // }
-
-    const tempG = currentNode.gCost + neighborCost;
-
-    let neighbor = openMap.get(hash);
-
-    if (!neighbor) {
-      neighbor = new Cell();
-      neighbor.worldPos = new Vec3(
-        neighborData.x,
-        neighborData.y,
-        neighborData.z,
-      );
-      neighbor.direction = neighborData.dir;
-      neighbor.gCost = tempG;
-      neighbor.hCost = hCost1(neighbor.worldPos, end);
-      neighbor.fCost = computeScore(neighbor, end, startPos);
-      neighbor.parent = currentNode;
-      neighbor.moveName = neighborData.attributes.name;
-      neighbor.attributes = neighborData.attributes;
-      neighbor.virtualBlocks = neighborData.virtualBlocks;
-      neighbor.scaffoldingUsed = totalScaffoldingUsed;
-
-      openMap.set(hash, neighbor);
-      openHeap.push(neighbor);
-    } else if (tempG < neighbor.gCost) {
-      neighbor.gCost = tempG;
-      neighbor.hCost = hCost1(neighbor.worldPos, end);
-      neighbor.fCost = computeScore(neighbor, end, startPos);
-      neighbor.parent = currentNode;
-      neighbor.moveName = neighborData.attributes.name;
-      neighbor.attributes = neighborData.attributes;
-      neighbor.virtualBlocks = neighborData.virtualBlocks;
-      neighbor.scaffoldingUsed = totalScaffoldingUsed;
-
-      openHeap.push(neighbor);
-    }
-  }
 }
 
 /**
- *
- * @param {Cell} node
- * @param {Vec3} goal
+ * @param {Cell} currentNode
+ * @param {object} neighborData - Raw neighbour data from getNeighbors2
+ * @param {Map<string, Cell>} openMap
+ * @param {MinHeap} openHeap
+ * @param {Vec3} end - Goal position (for heuristic)
  * @param {Vec3} startPos
- * @returns
  */
-function computeScore(node, goal, startPos) {
-  const g = node.gCost;
-  const h = node.hCost;
+function _processNeighbor(
+  currentNode,
+  neighborData,
+  openMap,
+  openHeap,
+  end,
+  startPos,
+) {
+  const hash = posHash(neighborData);
 
-  return g + h;
-}
+  const placesInMove = neighborData.attributes?.place?.length ?? 0;
+  const totalScaffoldingUsed = currentNode.scaffoldingUsed + placesInMove;
 
-function hCost1(a, b) {
-  // const dx = Math.abs(b.x - a.x);
-  // const dz = Math.abs(b.z - a.z);
-  // const dy = Math.abs(b.y - a.y);
+  const tempG = currentNode.gCost + neighborData.cost;
 
-  // const diag = Math.min(dx, dz);
-  // const straight = Math.max(dx, dz) - diag;
-  // const horizontalCost = diag * Math.SQRT2 + straight;
+  let neighbor = openMap.get(hash);
 
-  // const base = horizontalCost + dy;
+  if (!neighbor) {
+    neighbor = new Cell();
+    neighbor.worldPos = new Vec3(
+      neighborData.x,
+      neighborData.y,
+      neighborData.z,
+    );
+    neighbor.direction = neighborData.dir;
+    neighbor.gCost = tempG;
+    neighbor.hCost = hCost(neighbor.worldPos, end);
+    neighbor.fCost = neighbor.gCost + neighbor.hCost;
+    neighbor.parent = currentNode;
+    neighbor.moveName = neighborData.attributes.name;
+    neighbor.attributes = neighborData.attributes;
+    neighbor.virtualBlocks = neighborData.virtualBlocks;
+    neighbor.scaffoldingUsed = totalScaffoldingUsed;
 
-  return manhattanDistance(a, b);
-}
+    openMap.set(hash, neighbor);
+    openHeap.push(neighbor);
+  } else if (tempG < neighbor.gCost) {
+    // Cheaper route found
+    neighbor.gCost = tempG;
+    neighbor.hCost = hCost(neighbor.worldPos, end);
+    neighbor.fCost = neighbor.gCost + neighbor.hCost;
+    neighbor.parent = currentNode;
+    neighbor.moveName = neighborData.attributes.name;
+    neighbor.attributes = neighborData.attributes;
+    neighbor.virtualBlocks = neighborData.virtualBlocks;
+    neighbor.scaffoldingUsed = totalScaffoldingUsed;
 
-function chebyshev(a, b) {
-  const dx = Math.abs(b.x - a.x);
-  const dy = Math.abs(b.y - a.y);
-  const dz = Math.abs(b.z - a.z);
-
-  // sort differences to easily pick min/mid/max
-  const [dmin, dmid, dmax] = [dx, dy, dz].sort((x, y) => x - y);
-
-  const cost1 = 1; // straight move
-  const cost2 = Math.SQRT2; // 2-axis diagonal
-  const cost3 = Math.sqrt(3); // 3-axis diagonal
-
-  return (
-    cost3 * dmin + // moves that go diagonally in x,y,z
-    cost2 * (dmid - dmin) + // moves that go diagonally in 2 axes
-    cost1 * (dmax - dmid) // moves that go straight
-  );
-}
-
-function manhattanDistance(node, goal) {
-  const dx = Math.abs(node.x - goal.x);
-  const dy = Math.abs(node.y - goal.y);
-  const dz = Math.abs(node.z - goal.z);
-  return dx + dz + dy * 0.95;
-}
-
-function octileDistance(node, goal) {
-  const dx = Math.abs(goal.x - node.x);
-  const dy = Math.abs(goal.y - node.y);
-  const dz = Math.abs(goal.z - node.z);
-
-  const sorted = [dx, dy, dz].sort((a, b) => a - b);
-  const min = sorted[0];
-  const mid = sorted[1];
-  const max = sorted[2];
-
-  return 1.41 * min + 1.41 * (mid - min) + (max - mid);
-}
-
-function clamp(val, min, max) {
-  return Math.max(min, Math.min(max, val));
-}
-
-function euclideanDistance(node, goal) {
-  const dx = Math.abs(goal.x - node.x);
-  const dy = Math.abs(goal.y - node.y);
-  const dz = Math.abs(goal.z - node.z);
-
-  const horizontalDistance = Math.sqrt(dx * dx + dz * dz);
-  const verticalDistance = dy;
-
-  return horizontalDistance + verticalDistance;
-}
-
-function reconstructPath(node) {
-  const path = [];
-
-  // Traverse back to the starting node using parent pointers
-  while (node) {
-    path.push(node);
-    node = node.parent;
+    openHeap.push(neighbor);
   }
-
-  // The path is currently in reverse order, so reverse it to get the correct order
-  path.reverse();
-
-  return path;
 }
+
 module.exports = {
   Astar,
   Cell,
+  NodeManager,
   defaultHash,
+  posHash,
   reconstructPath,
   manhattanDistance,
   euclideanDistance,
+  hCost,
 };

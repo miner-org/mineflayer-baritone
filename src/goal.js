@@ -5,22 +5,33 @@ const Vec3 = require("vec3").Vec3;
  */
 
 class Goal {
+  /**
+   * @param {Vec3} position
+   */
   constructor(position) {
     this._position = new Vec3(position.x, position.y, position.z).floor();
   }
 
+  /** @returns {Vec3} */
   getPosition() {
     return this._position;
   }
 
-  isReached(otherPosition) {
+  /**
+   * @param {Vec3} _otherPosition
+   * @returns {boolean}
+   */
+  isReached(_otherPosition) {
     return false;
   }
 }
 
 class GoalDynamic extends Goal {
+  /**
+   * @param {() => Vec3} getTargetFn - Function returning the current target
+   */
   constructor(getTargetFn) {
-    super(new Vec3(0, 0, 0)); // dummy init
+    super(new Vec3(0, 0, 0));
     this.getTargetFn = getTargetFn;
   }
 
@@ -29,15 +40,15 @@ class GoalDynamic extends Goal {
   }
 
   isReached(otherPosition) {
-    // by default, reached if within 1 block
     return otherPosition.distanceTo(this.getPosition()) < 1.5;
   }
 }
 
-/**
- * This goal is used to reach a position within a certain distance, considering Y.
- */
 class GoalNear extends Goal {
+  /**
+   * @param {Vec3} position
+   * @param {number} distance
+   */
   constructor(position, distance) {
     super(position);
     this.distance = distance;
@@ -47,18 +58,40 @@ class GoalNear extends Goal {
     if (!otherPosition) return false;
 
     const position = this.getPosition().offset(0.5, 0, 0.5);
+    const dx = position.x - otherPosition.x;
+    const dy = position.y - otherPosition.y;
+    const dz = position.z - otherPosition.z;
 
-    const dx = Math.abs(position.x - otherPosition.x);
-    const dy = Math.abs(position.y - otherPosition.y);
-    const dz = Math.abs(position.z - otherPosition.z);
+    return dx * dx + dy * dy + dz * dz <= this.distance * this.distance;
+  }
+}
 
-    const dist = dx + dz + dy;
+class GoalNearXZ extends Goal {
+  /**
+   * @param {Vec3} position
+   * @param {number} distance
+   */
+  constructor(position, distance) {
+    super(position);
+    this.distance = distance;
+  }
 
-    return dist <= this.distance;
+  isReached(otherPosition) {
+    if (!otherPosition) return false;
+
+    const position = this.getPosition().offset(0.5, 0, 0.5);
+    const dx = position.x - otherPosition.x;
+    const dz = position.z - otherPosition.z;
+
+    return dx * dx + dz * dz <= this.distance * this.distance;
   }
 }
 
 class GoalFollowEntity extends Goal {
+  /**
+   * @param {{ position: Vec3 }} entity
+   * @param {number} [distance=2]
+   */
   constructor(entity, distance = 2) {
     super(entity.position);
     this.entity = entity;
@@ -71,15 +104,11 @@ class GoalFollowEntity extends Goal {
 
   isReached(otherPosition) {
     if (!otherPosition || !this.entity) return false;
-    const dist = otherPosition.distanceTo(this.entity.position);
-    return dist <= this.distance;
+    return otherPosition.distanceTo(this.entity.position) <= this.distance;
   }
 }
 
 class GoalExact extends Goal {
-  /***
-   * @param {Vec3} otherPosition
-   */
   isReached(otherPosition) {
     if (!otherPosition) return false;
     const floored = otherPosition.floored();
@@ -92,21 +121,19 @@ class GoalExact extends Goal {
     );
   }
 }
-/**
- * This goal is used to reach a specific Y level
- */
 
 class GoalYLevel extends Goal {
   isReached(otherPosition) {
     if (!otherPosition) return false;
-    return this.getPosition().y === otherPosition.y;
+    return this.getPosition().y === Math.floor(otherPosition.y);
   }
 }
 
-/**
- * This goal is used to reach a region
- */
 class GoalRegion extends Goal {
+  /**
+   * @param {Vec3} position1
+   * @param {Vec3} position2
+   */
   constructor(position1, position2) {
     super(position1);
     this.minX = Math.min(position1.x, position2.x);
@@ -131,62 +158,74 @@ class GoalRegion extends Goal {
   }
 }
 
-/**
- * This goal is used to avoid a position
- */
+/** @param {Vec3} v @returns {number} */
+function vecLen3D(v) {
+  return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+}
+
+/** @param {Vec3} v @returns {number} */
+function vecLenXZ(v) {
+  return Math.sqrt(v.x * v.x + v.z * v.z);
+}
+
+const CARDINAL_8 = [
+  new Vec3(1, 0, 0),
+  new Vec3(-1, 0, 0),
+  new Vec3(0, 0, 1),
+  new Vec3(0, 0, -1),
+  new Vec3(1, 0, 1),
+  new Vec3(1, 0, -1),
+  new Vec3(-1, 0, 1),
+  new Vec3(-1, 0, -1),
+];
+
 class GoalAvoid extends Goal {
   /**
-   * @param {Vec3} avoidPos - position to avoid
-   * @param {number} minDistance - how far to stay away
-   * @param {Bot} bot - so we can calculate a safe target away from avoidPos
+   * @param {Vec3} avoidPos
+   * @param {number} minDistance
+   * @param {{ entity: { position: Vec3 } }} bot
    */
   constructor(avoidPos, minDistance, bot) {
     super(avoidPos);
     this.avoidPos = avoidPos;
     this.minDistance = minDistance;
-
-    // sample multiple directions & pick best
-    this.safeTarget = this.findBestSafeTarget(bot);
+    this._safeTarget = GoalAvoid._findSafeTarget(
+      avoidPos,
+      minDistance,
+      bot.entity.position.floored(),
+      /* xzOnly */ false,
+    );
   }
 
-  vecLength(v) {
-    return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-  }
-
-  normalize(v) {
-    const len = this.vecLength(v);
-    if (len === 0) return new Vec3(1, 0, 0); // fallback
-    return new Vec3(v.x / len, v.y / len, v.z / len);
-  }
-
-  // sample safe spots around the danger zone
-  findBestSafeTarget(bot) {
-    const playerPos = bot.entity.position.floored();
-
-    // try 8 directions (N, NE, E, SE, S, SW, W, NW)
-    const directions = [
-      new Vec3(1, 0, 0),
-      new Vec3(-1, 0, 0),
-      new Vec3(0, 0, 1),
-      new Vec3(0, 0, -1),
-      new Vec3(1, 0, 1),
-      new Vec3(1, 0, -1),
-      new Vec3(-1, 0, 1),
-      new Vec3(-1, 0, -1),
-    ];
-
+  /**
+   * Shared safe-target finder.
+   * @param {Vec3} avoidPos
+   * @param {number} minDistance
+   * @param {Vec3} playerPos
+   * @param {boolean} xzOnly
+   * @returns {Vec3}
+   */
+  static _findSafeTarget(avoidPos, minDistance, playerPos, xzOnly) {
     let bestTarget = null;
     let bestScore = -Infinity;
 
-    for (const dir of directions) {
-      const norm = this.normalize(dir);
-      const candidate = this.avoidPos.plus(norm.scaled(this.minDistance + 2));
+    for (const dir of CARDINAL_8) {
+      const len = xzOnly ? vecLenXZ(dir) : vecLen3D(dir);
+      const norm =
+        len === 0
+          ? new Vec3(1, 0, 0)
+          : new Vec3(dir.x / len, xzOnly ? 0 : dir.y / len, dir.z / len);
 
-      // scoring system: prefer points further from danger & closer to player
-      const distFromDanger = candidate.distanceTo(this.avoidPos);
-      const distFromPlayer = -candidate.distanceTo(playerPos); // closer is better
+      const candidate = avoidPos.plus(norm.scaled(minDistance + 2));
 
-      const score = distFromDanger + distFromPlayer * 0.5;
+      const distFromDanger = xzOnly
+        ? candidate.xzDistanceTo(avoidPos)
+        : candidate.distanceTo(avoidPos);
+      const distFromPlayer = xzOnly
+        ? candidate.xzDistanceTo(playerPos)
+        : candidate.distanceTo(playerPos);
+
+      const score = distFromDanger - distFromPlayer * 0.5;
 
       if (score > bestScore) {
         bestScore = score;
@@ -198,98 +237,51 @@ class GoalAvoid extends Goal {
   }
 
   getPosition() {
-    return this.safeTarget;
+    return this._safeTarget;
   }
 
   isReached(otherPosition) {
     if (!otherPosition) return false;
-    const dist = otherPosition.distanceTo(this.avoidPos);
-    return dist > this.minDistance;
+    return otherPosition.distanceTo(this.avoidPos) > this.minDistance;
   }
 }
 
 class GoalAvoidXZ extends Goal {
   /**
-   * @param {Vec3} avoidPos - position to avoid
-   * @param {number} minDistance - how far to stay away
-   * @param {Bot} bot - so we can calculate a safe target away from avoidPos
+   * @param {Vec3} avoidPos
+   * @param {number} minDistance
+   * @param {{ entity: { position: Vec3 } }} bot
    */
   constructor(avoidPos, minDistance, bot) {
     super(avoidPos);
     this.avoidPos = avoidPos;
     this.minDistance = minDistance;
-
-    // sample multiple directions & pick best
-    this.safeTarget = this.findBestSafeTarget(bot);
-  }
-
-  vecLength(v) {
-    return Math.sqrt(v.x * v.x + v.z * v.z);
-  }
-
-  normalize(v) {
-    const len = this.vecLength(v);
-    if (len === 0) return new Vec3(1, 0, 0); // fallback
-    return new Vec3(v.x / len, 0, v.z / len);
-  }
-
-  // sample safe spots around the danger zone
-  findBestSafeTarget(bot) {
-    const playerPos = bot.entity.position.floored();
-
-    // try 8 directions (N, NE, E, SE, S, SW, W, NW)
-    const directions = [
-      new Vec3(1, 0, 0),
-      new Vec3(-1, 0, 0),
-      new Vec3(0, 0, 1),
-      new Vec3(0, 0, -1),
-      new Vec3(1, 0, 1),
-      new Vec3(1, 0, -1),
-      new Vec3(-1, 0, 1),
-      new Vec3(-1, 0, -1),
-    ];
-
-    let bestTarget = null;
-    let bestScore = -Infinity;
-
-    for (const dir of directions) {
-      const norm = this.normalize(dir);
-      const candidate = this.avoidPos.plus(norm.scaled(this.minDistance + 2));
-
-      // scoring system: prefer points further from danger & closer to player
-      const distFromDanger = candidate.xzDistanceTo(this.avoidPos);
-      const distFromPlayer = -candidate.xzDistanceTo(playerPos); // closer is better
-
-      const score = distFromDanger + distFromPlayer * 0.5;
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestTarget = candidate;
-      }
-    }
-
-    return bestTarget.floored().offset(0.5, 0, 0.5);
+    this._safeTarget = GoalAvoid._findSafeTarget(
+      avoidPos,
+      minDistance,
+      bot.entity.position.floored(),
+      /* xzOnly */ true,
+    );
   }
 
   getPosition() {
-    return this.safeTarget;
+    return this._safeTarget;
   }
 
   isReached(otherPosition) {
     if (!otherPosition) return false;
-    const dist = otherPosition.xzDistanceTo(this.avoidPos);
-    return dist > this.minDistance;
+    return otherPosition.xzDistanceTo(this.avoidPos) > this.minDistance;
   }
 }
-
-/**
- * This goal is used to combine multiple goals
- */
 class GoalComposite extends Goal {
+  /**
+   * @param {Goal[]} goals
+   * @param {"all" | "any"} [mode="all"]
+   */
   constructor(goals, mode = "all") {
-    super(goals[0].getPosition()); // Default position from the first goal
+    super(goals[0].getPosition());
     this.goals = goals;
-    this.mode = mode; // 'all' or 'any'
+    this.mode = mode;
   }
 
   isReached(otherPosition) {
@@ -300,13 +292,17 @@ class GoalComposite extends Goal {
   }
 }
 
-/**
- * This goal is used to compare the inverse of another goal
- */
 class GoalInvert extends Goal {
+  /**
+   * @param {Goal} goal
+   */
   constructor(goal) {
-    super(goal.position);
+    super(goal.getPosition());
     this.goal = goal;
+  }
+
+  getPosition() {
+    return this.goal.getPosition();
   }
 
   isReached(otherPosition) {
@@ -314,10 +310,8 @@ class GoalInvert extends Goal {
   }
 }
 
-/**
- * This goal is used to compare only the X and Z coordinates
- */
 class GoalXZ extends Goal {
+  /** @param {Vec3} position */
   constructor(position) {
     super(position);
   }
@@ -325,15 +319,18 @@ class GoalXZ extends Goal {
   isReached(otherPosition) {
     if (!otherPosition) return false;
     const position = this.getPosition().offset(0.5, 0, 0.5);
-
-    return position.x === otherPosition.x && position.z === otherPosition.z;
+    // Use floor comparison to avoid floating-point drift
+    return (
+      Math.floor(position.x) === Math.floor(otherPosition.x) &&
+      Math.floor(position.z) === Math.floor(otherPosition.z)
+    );
   }
 }
-
-/**
- * This goal is used to reach a position within a certain distance on the XZ plane.
- */
 class GoalXZNear extends Goal {
+  /**
+   * @param {Vec3} position
+   * @param {number} distance
+   */
   constructor(position, distance) {
     super(position);
     this.distance = distance;
@@ -343,15 +340,20 @@ class GoalXZNear extends Goal {
     if (!otherPosition) return false;
 
     const position = this.getPosition().offset(0.5, 0, 0.5);
-
     const dx = Math.abs(position.x - otherPosition.x);
     const dz = Math.abs(position.z - otherPosition.z);
 
-    return dx <= this.distance && dz <= this.distance;
+    // Use circular (Euclidean) distance, not square — more intuitive
+    return dx * dx + dz * dz <= this.distance * this.distance;
   }
 }
 
 class GoalLookAtBlock extends Goal {
+  /**
+   * @param {Vec3} position
+   * @param {object} world
+   * @param {{ reach?: number, entityHeight?: number }} [options={}]
+   */
   constructor(position, world, options = {}) {
     super(position);
     this.world = world;
@@ -363,12 +365,11 @@ class GoalLookAtBlock extends Goal {
     const node = nodePos.offset(0, this.entityHeight, 0);
     const position = this.getPosition().offset(0.5, 0.5, 0.5);
 
-    if (node.distanceTo(position.offset(0, this.entityHeight, 0)) > this.reach)
-      return false;
+    if (node.distanceTo(position) > this.reach) return false;
 
-    const dx = node.x - (position.x + 0.5);
-    const dy = node.y - (position.y + 0.5);
-    const dz = node.z - (position.z + 0.5);
+    const dx = node.x - position.x;
+    const dy = node.y - position.y;
+    const dz = node.z - position.z;
 
     const visible = {
       y: Math.sign(Math.abs(dy) > 0.5 ? dy : 0),
@@ -398,69 +399,64 @@ class GoalLookAtBlock extends Goal {
   }
 }
 
+const FACE_DIRS = {
+  up: new Vec3(0, 1, 0),
+  down: new Vec3(0, -1, 0),
+  north: new Vec3(0, 0, -1),
+  south: new Vec3(0, 0, 1),
+  west: new Vec3(-1, 0, 0),
+  east: new Vec3(1, 0, 0),
+};
+
+const FACE_NUM_TO_DIR = {
+  0: new Vec3(0, -1, 0), // down
+  1: new Vec3(0, 1, 0), // up
+  2: new Vec3(0, 0, -1), // north
+  3: new Vec3(0, 0, 1), // south
+  4: new Vec3(-1, 0, 0), // west
+  5: new Vec3(1, 0, 0), // east
+};
+
 class GoalLookAtBlockFace extends Goal {
+  /**
+   * @param {Vec3} position
+   * @param {object} world
+   * @param {{ reach?: number, entityHeight?: number, face?: FaceDirection }} [options={}]
+   */
   constructor(position, world, options = {}) {
     super(position);
     this.world = world;
-
     this.reach = options.reach ?? 4.5;
     this.entityHeight = options.entityHeight ?? 1.6;
-
-    // face must be one of: "north", "south", "east", "west", "up", "down"
     this.face = options.face;
   }
 
   isReached(nodePos) {
+    const dir = FACE_DIRS[this.face];
+    if (!dir) return false;
+
     const node = nodePos.offset(0, this.entityHeight, 0);
     const blockCenter = this.getPosition().offset(0.5, 0.5, 0.5);
 
     if (node.distanceTo(blockCenter) > this.reach) return false;
 
-    // Direction vectors for each face
-    const faceDirs = {
-      up: new Vec3(0, 1, 0),
-      down: new Vec3(0, -1, 0),
-      north: new Vec3(0, 0, -1),
-      south: new Vec3(0, 0, 1),
-      west: new Vec3(-1, 0, 0),
-      east: new Vec3(1, 0, 0),
-    };
-
-    const faceNumDir = {
-      0: new Vec3(0, -1, 0), // down
-      1: new Vec3(0, 1, 0), // up
-      2: new Vec3(0, 0, -1), // north
-      3: new Vec3(0, 0, 1), // south
-      4: new Vec3(-1, 0, 0), // west
-      5: new Vec3(1, 0, 0), // east
-    };
-
-    const dir = faceDirs[this.face];
-    if (!dir) return false;
-
-    // Compute the exact face center
     const faceTarget = blockCenter.plus(dir.scaled(0.5));
-
-    // Direction from bot head → the face center
     const rayDir = faceTarget.minus(node).normalize();
 
-    // Try raycast
     const hit = this.world.raycast(node, rayDir, this.reach);
-
-    // console.log(hit);
-
-    // Must hit exactly this block AND that face
     if (!hit) return false;
 
+    const blockPos = this.getPosition();
     const sameBlock =
-      hit.position.x === this.getPosition().x &&
-      hit.position.y === this.getPosition().y &&
-      hit.position.z === this.getPosition().z;
+      hit.position.x === blockPos.x &&
+      hit.position.y === blockPos.y &&
+      hit.position.z === blockPos.z;
 
-    const hitFace = faceNumDir[hit.face] ?? new Vec3(0, 1, 0);
-
+    const hitFaceDir = FACE_NUM_TO_DIR[hit.face] ?? new Vec3(0, 1, 0);
     const sameFace =
-      hitFace.x === dir.x && hitFace.y === dir.y && hitFace.z === dir.z;
+      hitFaceDir.x === dir.x &&
+      hitFaceDir.y === dir.y &&
+      hitFaceDir.z === dir.z;
 
     return sameBlock && sameFace;
   }
@@ -468,11 +464,14 @@ class GoalLookAtBlockFace extends Goal {
 
 module.exports = {
   Goal,
+  GoalDynamic,
   GoalNear,
+  GoalNearXZ,
   GoalExact,
   GoalYLevel,
   GoalRegion,
   GoalAvoid,
+  GoalAvoidXZ,
   GoalComposite,
   GoalInvert,
   GoalXZ,
@@ -480,5 +479,4 @@ module.exports = {
   GoalLookAtBlock,
   GoalLookAtBlockFace,
   GoalFollowEntity,
-  GoalAvoidXZ,
 };

@@ -22,14 +22,14 @@ declare module "@miner-org/mineflayer-baritone" {
     isReached(otherPosition: Vec3): boolean;
   }
 
-  export class GoalNear extends Goal {
+   class GoalNear extends Goal {
     distance: number;
 
     constructor(position: Vec3, distance: number);
     isReached(otherPosition: Vec3): boolean;
   }
 
-  export class GoalExact extends Goal {
+   class GoalExact extends Goal {
     constructor(position: Vec3);
     isReached(otherPosition: Vec3): boolean;
   }
@@ -39,7 +39,7 @@ declare module "@miner-org/mineflayer-baritone" {
     isReached(otherPosition: Vec3): boolean;
   }
 
-  export class GoalRegion extends Goal {
+   class GoalRegion extends Goal {
     minX: number;
     maxX: number;
     minY: number;
@@ -51,14 +51,14 @@ declare module "@miner-org/mineflayer-baritone" {
     isReached(otherPosition: Vec3): boolean;
   }
 
-  export class GoalAvoid extends Goal {
+   class GoalAvoid extends Goal {
     minDistance: number;
 
     constructor(position: Vec3, minDistance: number);
     isReached(otherPosition: Vec3): boolean;
   }
 
-  export class GoalComposite extends Goal {
+   class GoalComposite extends Goal {
     goals: Goal[];
     mode: "all" | "any";
 
@@ -66,19 +66,19 @@ declare module "@miner-org/mineflayer-baritone" {
     isReached(otherPosition: Vec3): boolean;
   }
 
-  export class GoalInvert extends Goal {
+   class GoalInvert extends Goal {
     goal: Goal;
 
     constructor(goal: Goal);
     isReached(otherPosition: Vec3): boolean;
   }
 
-  export class GoalXZ extends Goal {
+   class GoalXZ extends Goal {
     constructor(position: Vec3);
     isReached(otherPosition: Vec3): boolean;
   }
 
-  export class GoalXZNear extends Goal {
+   class GoalXZNear extends Goal {
     distance: number;
 
     constructor(position: Vec3, distance: number);
