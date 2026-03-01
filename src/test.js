@@ -1,5 +1,5 @@
 const mineflayer = require("mineflayer");
-const genMineflayer = require("gen-mineflayer");
+// const genMineflayer = require("gen-mineflayer");
 const inject = require("./loader");
 const Vec3 = require("vec3").Vec3;
 const { argv } = require("process");
@@ -18,10 +18,11 @@ const bot = mineflayer.createBot({
   username: "Frisk",
   port: parseInt(argv[3]) || 39065,
   viewDistance: "tiny",
-  version: "1.21.1",
+  version: "1.18.2",
 });
 
-bot.loadPlugin(inject);
+// bot.loadPlugin(inject);
+inject(bot, { useCustomPhysics: true });
 // bot.loadPlugin(elytrafly);
 
 let endPos;
@@ -30,10 +31,11 @@ bot.once("spawn", async () => {
   await bot.waitForChunksToLoad();
   bot.chat("hi");
   bot.ashfinder.debug = true;
+  bot.ashfinder.config.expertimentalMoves = true;
   // bot.ashfinder.enableBreaking();
   pathExecutor = new PathExecutor(bot);
 
-  // bot.ashfinder.enableBreaking();
+  bot.ashfinder.enableBreaking();
   // bot.ashfinder.enablePlacing();
   // bot.ashfinder.enableFlight();
   bot.ashfinder.config.debugMoves = true;
@@ -81,7 +83,11 @@ bot.once("spawn", async () => {
 
       const goal = new GoalNear(pos, radius);
 
+      bot.chat("/gamerule send_command_feedback false");
+
       await bot.ashfinder.goto(goal);
+
+      bot.chat("/gamerule send_command_feedback true");
       bot.clearControlStates();
       bot.setControlState("forward", false);
       bot.setControlState("sprint", false);
@@ -147,7 +153,7 @@ bot.once("spawn", async () => {
         .offset(
           Math.floor(Math.random() * (50 - 20) + 20),
           1,
-          Math.floor(Math.random() * (50 - 20) + 20)
+          Math.floor(Math.random() * (50 - 20) + 20),
         );
 
       if (!isGood(location)) {
@@ -193,14 +199,14 @@ bot.once("spawn", async () => {
           if (block.name === "air") {
             // Get the block below the air block which will probably be the sugarcane idk
             const sugarcaneBelowAir = bot.blockAt(
-              block.position.offset(0, -1, 0)
+              block.position.offset(0, -1, 0),
             );
 
             // store the position in the map if it isnt already there
             if (!uniquePositions.has(hash(sugarcaneBelowAir.position))) {
               uniquePositions.set(
                 hash(sugarcaneBelowAir.position),
-                sugarcaneBelowAir
+                sugarcaneBelowAir,
               );
             }
             break;
@@ -325,7 +331,11 @@ bot.once("spawn", async () => {
 
       const goal = new GoalNear(pos, radius);
 
+      bot.chat("/gamerule send_command_feedback false");
+
       await bot.ashfinder.goto(goal);
+
+      bot.chat("/gamerule send_command_feedback true");
 
       bot.clearControlStates();
       bot.setControlState("forward", false);

@@ -5,7 +5,6 @@
 An **advanced pathfinding plugin** for [Mineflayer](https://github.com/PrismarineJS/mineflayer) that includes:
 
 - ✅ **Smart Pathfinding** with A\* algorithm
-- ✅ **Waypoint System** for long-distance navigation
 - ✅ **Parkour Moves** (jumps, gaps, angled jumps)
 - ✅ **Breaking Blocks** (intelligent block breaking)
 - ✅ **Placing Blocks** (scaffolding and towering)
@@ -39,6 +38,10 @@ const bot = mineflayer.createBot({ username: "PathfinderBot" });
 
 bot.loadPlugin(pathfinder);
 
+// for custom physics use
+// pathfinder(bot, {useCustomPhysics: true})
+// DO NOT USE bot.loadPlugin if you do want custom physics
+
 bot.once("spawn", async () => {
   await bot.waitForChunksToLoad();
 
@@ -59,24 +62,6 @@ bot.once("spawn", async () => {
 ```js
 // Direct pathfinding (best for short distances < 75 blocks)
 await bot.ashfinder.goto(goal);
-```
-
-### Smart Navigation (Recommended)
-
-```js
-// Automatically chooses between direct pathfinding and waypoints
-await bot.ashfinder.gotoSmart(goal, {
-  waypointThreshold: 75, // Use waypoints for distances > 75 blocks
-  forceWaypoints: false, // Force waypoint usage
-  forceAdaptive: true, // Use smart waypoint system with failure handling
-});
-```
-
-### Waypoint Navigation
-
-```js
-// Explicitly use waypoint system for long distances
-await bot.ashfinder.gotoWithWaypoints(goal, 75);
 ```
 
 ---
@@ -113,7 +98,7 @@ const composite = new goals.GoalComposite(
     new goals.GoalExact(new Vec3(100, 65, 100)),
     new goals.GoalExact(new Vec3(120, 65, 120)),
   ],
-  "any"
+  "any",
 );
 await bot.ashfinder.goto(composite);
 
@@ -133,7 +118,7 @@ await bot.ashfinder.goto(lookAtBlock);
 
 // Avoid a specific goal
 const notThatBlock = new goals.GoalInvert(
-  new goals.GoalExact(new Vec3(200, 64, 200))
+  new goals.GoalExact(new Vec3(200, 64, 200)),
 );
 await bot.ashfinder.goto(notThatBlock);
 ```
@@ -272,9 +257,6 @@ bot.ashfinder.debug = true;
 // Reduce complexity
 bot.ashfinder.config.parkour = false;
 bot.ashfinder.config.breakBlocks = false;
-
-// Use waypoints for long distances
-await bot.ashfinder.gotoSmart(goal);
 ```
 
 ### Path not found
@@ -298,8 +280,6 @@ const nearGoal = new goals.GoalNear(targetPos, 5);
 ### Methods
 
 - `goto(goal)` - Navigate to a goal using direct pathfinding
-- `gotoSmart(goal, options)` - Smart navigation with automatic waypoint selection
-- `gotoWithWaypoints(goal, threshold)` - Explicitly use waypoint navigation
 - `generatePath(goal, excludedPositions)` - Generate a path without executing it
 - `stop()` - Stop current pathfinding
 - `enableBreaking()` / `disableBreaking()` - Toggle block breaking
@@ -312,6 +292,10 @@ const nearGoal = new goals.GoalNear(targetPos, 5);
 - `bot.ashfinder.stopped` - Check if pathfinding is stopped
 
 ---
+
+## EXTRA
+
+- if you want to use custom physics DO NOT USE `bot.loadPlugin()` instead just use `inject(bot, {useCustomPhysics: true})`
 
 ## 🤝 Contributing
 
@@ -334,4 +318,4 @@ ISC License
 
 ## 🙏 Credits
 
-Built on top of [Mineflayer](https://github.com/PrismarineJS/mineflayer) and inspired by [Baritone](https://github.com/cabaletta/baritone).
+Built on top of [Mineflayer](https://github.com/PrismarineJS/mineflayer) and inspired by [Baritone](https://github.com/cabaletta/baritone) & [OrginalMineflayerBaritone](https://github.com/antisynth/mineflayer-baritone).

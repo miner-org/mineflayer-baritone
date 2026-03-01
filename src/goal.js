@@ -400,8 +400,8 @@ class GoalLookAtBlock extends Goal {
 }
 
 const FACE_DIRS = {
-  up: new Vec3(0, 1, 0),
   down: new Vec3(0, -1, 0),
+  up: new Vec3(0, 1, 0),
   north: new Vec3(0, 0, -1),
   south: new Vec3(0, 0, 1),
   west: new Vec3(-1, 0, 0),
@@ -409,13 +409,20 @@ const FACE_DIRS = {
 };
 
 const FACE_NUM_TO_DIR = {
-  0: new Vec3(0, -1, 0), // down
-  1: new Vec3(0, 1, 0), // up
-  2: new Vec3(0, 0, -1), // north
-  3: new Vec3(0, 0, 1), // south
-  4: new Vec3(-1, 0, 0), // west
-  5: new Vec3(1, 0, 0), // east
+  0: FACE_DIRS.down,
+  1: FACE_DIRS.up,
+  2: FACE_DIRS.north,
+  3: FACE_DIRS.south,
+  4: FACE_DIRS.west,
+  5: FACE_DIRS.east,
 };
+
+function normalizeVertical(face) {
+  if (face === "top") {
+    return "up";
+  } else if (face === "bottom") return "down";
+  return face;
+}
 
 class GoalLookAtBlockFace extends Goal {
   /**
@@ -428,7 +435,7 @@ class GoalLookAtBlockFace extends Goal {
     this.world = world;
     this.reach = options.reach ?? 4.5;
     this.entityHeight = options.entityHeight ?? 1.6;
-    this.face = options.face;
+    this.face = normalizeVertical(options.face);
   }
 
   isReached(nodePos) {
@@ -452,7 +459,9 @@ class GoalLookAtBlockFace extends Goal {
       hit.position.y === blockPos.y &&
       hit.position.z === blockPos.z;
 
-    const hitFaceDir = FACE_NUM_TO_DIR[hit.face] ?? new Vec3(0, 1, 0);
+    const hitFaceDir = FACE_NUM_TO_DIR[hit.face];
+    if (!hitFaceDir) return false;
+
     const sameFace =
       hitFaceDir.x === dir.x &&
       hitFaceDir.y === dir.y &&

@@ -2,6 +2,8 @@ import { Goal } from "./src/goal";
 import { Vec3 } from "vec3";
 import { Cell } from "./src/pathfinder";
 import { AshFinderPlugin } from "./src/AshFinder";
+import { Bot } from "mineflayer";
+import { Vec3 } from "vec3";
 declare module "mineflayer" {
   interface Bot {
     ashfinder: AshFinderPlugin;
@@ -9,9 +11,6 @@ declare module "mineflayer" {
 }
 
 declare module "@miner-org/mineflayer-baritone" {
-  import { Bot } from "mineflayer";
-  import { Vec3 } from "vec3";
-
   export class Goal {
     position: Vec3;
     x: number;
@@ -22,14 +21,14 @@ declare module "@miner-org/mineflayer-baritone" {
     isReached(otherPosition: Vec3): boolean;
   }
 
-   class GoalNear extends Goal {
+  class GoalNear extends Goal {
     distance: number;
 
     constructor(position: Vec3, distance: number);
     isReached(otherPosition: Vec3): boolean;
   }
 
-   class GoalExact extends Goal {
+  class GoalExact extends Goal {
     constructor(position: Vec3);
     isReached(otherPosition: Vec3): boolean;
   }
@@ -39,7 +38,7 @@ declare module "@miner-org/mineflayer-baritone" {
     isReached(otherPosition: Vec3): boolean;
   }
 
-   class GoalRegion extends Goal {
+  class GoalRegion extends Goal {
     minX: number;
     maxX: number;
     minY: number;
@@ -51,14 +50,14 @@ declare module "@miner-org/mineflayer-baritone" {
     isReached(otherPosition: Vec3): boolean;
   }
 
-   class GoalAvoid extends Goal {
+  class GoalAvoid extends Goal {
     minDistance: number;
 
     constructor(position: Vec3, minDistance: number);
     isReached(otherPosition: Vec3): boolean;
   }
 
-   class GoalComposite extends Goal {
+  class GoalComposite extends Goal {
     goals: Goal[];
     mode: "all" | "any";
 
@@ -66,19 +65,19 @@ declare module "@miner-org/mineflayer-baritone" {
     isReached(otherPosition: Vec3): boolean;
   }
 
-   class GoalInvert extends Goal {
+  class GoalInvert extends Goal {
     goal: Goal;
 
     constructor(goal: Goal);
     isReached(otherPosition: Vec3): boolean;
   }
 
-   class GoalXZ extends Goal {
+  class GoalXZ extends Goal {
     constructor(position: Vec3);
     isReached(otherPosition: Vec3): boolean;
   }
 
-   class GoalXZNear extends Goal {
+  class GoalXZNear extends Goal {
     distance: number;
 
     constructor(position: Vec3, distance: number);

@@ -9,7 +9,7 @@ class MoveForwardParkour extends Move {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       // console.log(originVec);
 
-      if (this.isWater(originVec)) return;
+      if (this.isWater(originVec)) continue;
 
       // console.log("d")
 
@@ -86,7 +86,7 @@ class MoveForwardParkour extends Move {
       const parkourNode = landingNode.clone();
       parkourNode.attributes = {
         name: this.name,
-        cost: this.COST_PARKOUR + distance,
+        cost: this.COST_PARKOUR * distance,
         nJump: distance === 1,
         sJump: distance >= 2,
         dist: distance,
@@ -96,10 +96,10 @@ class MoveForwardParkour extends Move {
 
       if (this.isAir(landingNode.down(1))) {
         parkourNode.attributes.place = [landingNode.clone().down(1)];
-        parkourNode.attributes.cost * 2;
+        parkourNode.attributes.cost *= 2;
       }
       neighbors.push(
-        this.makeMovement(parkourNode, parkourNode.attributes.cost)
+        this.makeMovement(parkourNode, parkourNode.attributes.cost),
       );
 
       break; // only add the shortest valid parkour move
@@ -132,7 +132,23 @@ class MoveForwardParkourUp extends Move {
       const landingNode = start.forward(distance).up(1); // step up 1
       const standingNode = landingNode.down(1); // block under feet
 
-      if (!this.isStandable(landingNode)) continue;
+      if (!this.isStandable(landingNode)  ) {
+        if(!this.isWalkable(landingNode))continue;
+        const canPlace =
+          this.config.placeBlocks &&
+          this.hasScaffoldingBlocks() &&
+          this.canAffordPlacement(1);
+
+        const down = landingNode.down(1);
+
+        const canScaffold =
+          this.isAir(down) &&
+          canPlace &&
+          this.canPlaceBlock(down) &&
+          !this.manager.isAreaMarkedNode(down);
+
+        if (!canScaffold) continue;
+      }
 
       const bodyClear = [];
       const feetGap = [];
@@ -154,7 +170,7 @@ class MoveForwardParkourUp extends Move {
       const parkourNode = landingNode.clone();
       parkourNode.attributes = {
         name: this.name,
-        cost: this.COST_PARKOUR + distance,
+        cost: this.COST_PARKOUR * distance + this.COST_UP,
         nJump: distance === 1,
         sJump: distance >= 2,
         dist: distance,
@@ -163,8 +179,14 @@ class MoveForwardParkourUp extends Move {
         originVec,
       };
 
+      if (!this.isStandable(landingNode)) {
+        parkourNode.attributes.place = [landingNode.clone().down(1)];
+        parkourNode.attributes.cost += this.COST_PLACE;
+        parkourNode.attributes.cost *= 0.8;
+      }
+
       neighbors.push(
-        this.makeMovement(parkourNode, parkourNode.attributes.cost)
+        this.makeMovement(parkourNode, parkourNode.attributes.cost),
       );
       break; // only add shortest valid jump
     }
@@ -218,9 +240,8 @@ class MoveForwardParkourDown extends Move {
       const parkourNode = landingNode.clone();
       parkourNode.attributes = {
         name: this.name,
-        cost: this.COST_PARKOUR + distance,
-        nJump: distance <= 2,
-        sJump: distance >= 3,
+        cost: this.COST_PARKOUR * distance + this.COST_FALL,
+        nJump: true,
         dist: distance,
         down: true, // mark as downward jump
         parkour: true, // mark as parkour
@@ -228,117 +249,10 @@ class MoveForwardParkourDown extends Move {
       };
 
       neighbors.push(
-        this.makeMovement(parkourNode, parkourNode.attributes.cost)
+        this.makeMovement(parkourNode, parkourNode.attributes.cost),
       );
       break; // only add shortest valid jump
     }
-  }
-}
-
-class MoveAngledParkour extends Move {
-  generate(cardinalDirections, origin, neighbors) {
-    if (!this.config.parkour) return;
-    if (this.config.fly) return;
-    const diagonalDirections = [
-      { x: 1, z: 1 },
-      { x: 1, z: -1 },
-      { x: -1, z: 1 },
-      { x: -1, z: -1 },
-    ];
-
-    // Loop over all possible diagonal-ish offsets
-    const maxDist = 3;
-
-    for (const dir of diagonalDirections) {
-      for (let fx = 1; fx <= maxDist; fx++) {
-        for (let rz = 1; rz <= maxDist; rz++) {
-          // Skip pure straight lines (those are handled by forward parkour)
-          if (fx === 0 || rz === 0) continue;
-          // Skip perfect diagonals if you already handle them
-          // if (fx === rz) continue;
-
-          const originVec = new DirectionalVec3(
-            origin.x,
-            origin.y,
-            origin.z,
-            dir
-          );
-
-          if (this.isWater(originVec)) continue;
-          this.addNeighbors(neighbors, originVec, fx, rz);
-        }
-      }
-    }
-  }
-
-  /**
-   * @param {Array} neighbors
-   * @param {DirectionalVec3} originVec
-   * @param {number} fx - forward steps
-   * @param {number} rz - right steps
-   */
-  addNeighbors(neighbors, originVec, fx, rz) {
-    const landingNode = originVec.forward(fx).right(rz);
-    const standingNode = landingNode.down(1);
-
-    // Must land at same height
-    if (landingNode.y !== originVec.y) return;
-    if (standingNode.y !== originVec.y - 1) return;
-
-    if (!this.isStandable(landingNode)) return;
-
-    // --- Collect gap + clearance along the jump path ---
-    const pathNodes = this.interpolatePath(originVec, fx, rz);
-
-    const feetGap = pathNodes.map((p) => p.down(1));
-    const bodyClear = pathNodes.map((p) => p.up(1));
-
-    if (!feetGap.every((n) => this.isAir(n) || this.isWater(n))) return;
-    if (!bodyClear.every((n) => this.isWalkable(n))) return;
-
-    // --- Valid angled parkour ---
-    const dist = Math.max(fx, rz);
-    landingNode.attributes = {
-      name: this.name,
-      cost: this.COST_PARKOUR * dist,
-      nJump: dist === 1,
-      sJump: dist >= 2,
-      parkour: true, // mark as parkour
-      dist,
-    };
-
-    neighbors.push(this.makeMovement(landingNode, landingNode.attributes.cost));
-  }
-
-  /**
-   * Bresenham-style interpolation from (0,0) to (fx,rz)
-   */
-  interpolatePath(originVec, fx, rz) {
-    const nodes = [];
-    let x = 0,
-      z = 0;
-    let dx = Math.abs(fx),
-      dz = Math.abs(rz);
-    let sx = Math.sign(fx),
-      sz = Math.sign(rz);
-    let err = dx - dz;
-
-    while (x !== fx || z !== rz) {
-      const pos = originVec.forward(x).right(z);
-      nodes.push(pos);
-
-      const e2 = 2 * err;
-      if (e2 > -dz) {
-        err -= dz;
-        x += sx;
-      }
-      if (e2 < dx) {
-        err += dx;
-        z += sz;
-      }
-    }
-
-    return nodes;
   }
 }
 
@@ -346,6 +260,7 @@ class MoveDiagonalParkour extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.parkour) return;
     if (this.config.fly) return;
+
     const diagonalDirections = [
       { x: 1, z: 1 },
       { x: 1, z: -1 },
@@ -356,67 +271,255 @@ class MoveDiagonalParkour extends Move {
     for (const dir of diagonalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
+      if (!this.isWalkable(originVec)) continue;
       if (this.isWater(originVec)) continue;
+
       this.addNeighbors(neighbors, originVec);
     }
   }
 
-  /**
-   * @param {Array} neighbors
-   * @param {DirectionalVec3} originVec
-   */
   addNeighbors(neighbors, originVec) {
-    const minDist = 1;
-    const maxDist = 3;
+    if (!this.isStandable(originVec)) return;
 
-    for (let distance = minDist; distance <= maxDist; distance++) {
-      // diagonal landing (distance steps forward + sideways)
-      const landingNode = originVec.forward(distance);
-      const standingNode = landingNode.down(1);
+    const distance = 1;
+    const start = originVec.forward(1);
+    const landingNode = start.forward(distance);
 
-      // must land at same Y level
-      if (landingNode.y !== originVec.y) continue;
-      if (standingNode.y !== originVec.y - 1) continue;
+    if (!this.isStandable(landingNode)) return;
 
-      // landing must be standable
+    // Validate full diagonal sweep (same logic as ParkourUp)
+    for (let i = 1; i <= distance; i++) {
+      const t = i / distance;
+
+      const x = originVec.x + landingNode.dir.x * t;
+      const z = originVec.z + landingNode.dir.z * t;
+
+      const base = new DirectionalVec3(
+        Math.floor(x),
+        originVec.y,
+        Math.floor(z),
+        landingNode.dir,
+      );
+
+      const feet = base;
+      const feet2 = base.down(1);
+      const head = base.up(1);
+      const aboveHead = base.up(2);
+
+      // Feet must be air/water (must jump over gap)
+      if (!this.isAir(feet) && !this.isWater(feet)) return;
+
+      if (!this.isAir(feet2) && !this.isWater(feet2)) return;
+
+      // Full 2-block clearance
+      if (!this.isWalkable(head) || !this.isWalkable(aboveHead)) return;
+
+      // Strict diagonal corner prevention
+      const sideA = base.offset(landingNode.dir.x, 0, 0);
+      const sideB = base.offset(0, 0, landingNode.dir.z);
+
+      if (!this.isWalkable(sideA) && !this.isWalkable(sideB)) return;
+    }
+
+    const parkourNode = landingNode.clone();
+    parkourNode.attributes = {
+      name: this.name,
+      cost: this.COST_PARKOUR * distance + this.COST_DIAGONAL,
+      sJump: true,
+      diagonal: true,
+      parkour: true,
+      dist: distance,
+      originVec,
+    };
+
+    neighbors.push(this.makeMovement(parkourNode, parkourNode.attributes.cost));
+  }
+}
+
+class MoveDiagonalParkourUp extends Move {
+  generate(cardinalDirections, origin, neighbors) {
+    if (!this.config.parkour) return;
+    if (this.config.fly) return;
+
+    const diagonalDirections = [
+      { x: 1, z: 1 },
+      { x: 1, z: -1 },
+      { x: -1, z: 1 },
+      { x: -1, z: -1 },
+    ];
+
+    for (const dir of diagonalDirections) {
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+
+      if (!this.isWalkable(originVec)) continue;
+      if (this.isWater(originVec)) continue;
+
+      this.addNeighbors(neighbors, originVec);
+    }
+  }
+
+  addNeighbors(neighbors, originVec) {
+    if (!this.isStandable(originVec)) return;
+
+    const minDistance = 1;
+    const maxDistance = 1; // allow small diagonal parkour
+    const start = originVec.forward(1);
+
+    for (let distance = minDistance; distance <= maxDistance; distance++) {
+      const landingNode = start.forward(distance).up(1);
+
       if (!this.isStandable(landingNode)) continue;
 
-      // collect clearance + gap nodes
+      const sideA = landingNode.offset(landingNode.dir.x, 0, 0);
+      const sideB = landingNode.offset(0, 0, landingNode.dir.z);
+
+      if (!this.isWalkable(sideA) && !this.isWalkable(sideB)) continue;
+
       const bodyClear = [];
       const feetGap = [];
-
       let last = originVec;
-      for (let i = 1; i <= distance; i++) {
-        const forward = originVec.forward(i).right(i);
-        if (forward.y !== originVec.y) break;
 
-        bodyClear.push(forward.up(1)); // body clearance
-        feetGap.push(forward.down(1)); // gap should be air/water
-        last = forward;
+      // Validate full diagonal sweep
+      for (let i = 1; i <= distance; i++) {
+        const t = i / distance;
+
+        // True diagonal interpolation
+        const x = originVec.x + landingNode.dir.x * t;
+        const z = originVec.z + landingNode.dir.z * t;
+
+        const base = new DirectionalVec3(
+          Math.floor(x),
+          originVec.y,
+          Math.floor(z),
+          landingNode.dir,
+        );
+
+        const feet = base;
+        const head = base.up(1);
+        const aboveHead = base.up(2);
+
+        // Feet must not collide with solid block
+        if (!this.isAir(feet) && !this.isWater(feet)) {
+          return; // blocked path
+        }
+
+        // Body clearance (2 block tall entity)
+        if (!this.isWalkable(head) || !this.isWalkable(aboveHead)) {
+          return; // blocked head
+        }
+
+        // Prevent diagonal corner clipping strictly
+        const sideA = base.offset(landingNode.dir.x, 0, 0);
+        const sideB = base.offset(0, 0, landingNode.dir.z);
+
+        if (!this.isWalkable(sideA) && !this.isWalkable(sideB)) {
+          return; // hard blocked corner
+        }
       }
 
-      // gap must be fully air/water
-      if (!feetGap.every((node) => this.isAir(node) || this.isWater(node)))
-        continue;
+      // Must actually jump over air
+      if (!feetGap.every((n) => this.isAir(n) || this.isWater(n))) continue;
 
-      // clearance must be walkable
-      if (!bodyClear.every((node) => this.isWalkable(node))) continue;
+      // Must have head clearance
+      if (!bodyClear.every((n) => this.isWalkable(n))) continue;
 
-      // ✅ valid diagonal parkour move
-      landingNode.attributes = {
+      // Valid diagonal parkour up
+      const parkourNode = landingNode.clone();
+      parkourNode.attributes = {
         name: this.name,
-        cost: this.COST_PARKOUR * distance,
-        nJump: distance === 1,
-        sJump: distance >= 2,
-        parkour: true, // mark as parkour
+        cost: this.COST_PARKOUR * distance + this.COST_UP + this.COST_DIAGONAL,
+        sJump: true,
+        diagonal: true,
+        up: true,
+        parkour: true,
         dist: distance,
+        originVec,
       };
 
       neighbors.push(
-        this.makeMovement(landingNode, landingNode.attributes.cost)
+        this.makeMovement(parkourNode, parkourNode.attributes.cost),
       );
-      break; // only shortest valid jump
+
+      break; // shortest valid only
     }
+  }
+}
+
+class MoveDiagonalParkourDown extends Move {
+  generate(cardinalDirections, origin, neighbors) {
+    if (!this.config.parkour) return;
+    if (this.config.fly) return;
+
+    const diagonalDirections = [
+      { x: 1, z: 1 },
+      { x: 1, z: -1 },
+      { x: -1, z: 1 },
+      { x: -1, z: -1 },
+    ];
+
+    for (const dir of diagonalDirections) {
+      const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
+
+      if (!this.isWalkable(originVec)) continue;
+      if (this.isWater(originVec)) continue;
+
+      this.addNeighbors(neighbors, originVec);
+    }
+  }
+
+  addNeighbors(neighbors, originVec) {
+    if (!this.isStandable(originVec)) return;
+
+    const distance = 1;
+    const start = originVec.forward(1);
+    const landingNode = start.forward(distance).down(1);
+
+    if (!this.isStandable(landingNode)) return;
+
+    // Validate full diagonal sweep BEFORE drop
+    for (let i = 1; i <= distance; i++) {
+      const t = i / distance;
+
+      const x = originVec.x + landingNode.dir.x * t;
+      const z = originVec.z + landingNode.dir.z * t;
+
+      const base = new DirectionalVec3(
+        Math.floor(x),
+        originVec.y,
+        Math.floor(z),
+        landingNode.dir,
+      );
+
+      const feet = base;
+      const head = base.up(1);
+      const aboveHead = base.up(2);
+
+      // Must jump over air before falling
+      if (!this.isAir(feet) && !this.isWater(feet)) return;
+
+      // Full body clearance
+      if (!this.isWalkable(head) || !this.isWalkable(aboveHead)) return;
+
+      // Strict diagonal corner prevention
+      const sideA = base.offset(landingNode.dir.x, 0, 0);
+      const sideB = base.offset(0, 0, landingNode.dir.z);
+
+      if (!this.isWalkable(sideA) && !this.isWalkable(sideB)) return;
+    }
+
+    const parkourNode = landingNode.clone();
+    parkourNode.attributes = {
+      name: this.name,
+      cost: this.COST_PARKOUR * distance + this.COST_FALL + this.COST_DIAGONAL,
+      nJump: true,
+      diagonal: true,
+      down: true,
+      parkour: true,
+      dist: distance,
+      originVec,
+    };
+
+    neighbors.push(this.makeMovement(parkourNode, parkourNode.attributes.cost));
   }
 }
 
@@ -442,18 +545,13 @@ registerMoves([
     description: "Forward parkour jumping down across gaps",
     testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
   }),
-  // new MoveAngledParkour(25, {
-  //   // Was 60
-  //   category: "parkour",
-  //   tags: ["diagonal", "jumping", "gap", "angled"],
-  //   description: "Angled parkour jumping at various angles",
-  //   testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
-  // }),
-  // new MoveDiagonalParkour(25, {
-  //   // Was 60
-  //   category: "parkour",
-  //   tags: ["diagonal", "jumping", "gap"],
-  //   description: "Diagonal parkour jumping across gaps",
-  //   testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
-  // }),
+  new MoveDiagonalParkour(25, {
+    // Was 60
+    category: "parkour",
+    tags: ["diagonal", "jumping", "gap"],
+    description: "Diagonal parkour jumping across gaps",
+    testConfig: { parkour: true, breakBlocks: false, placeBlocks: false },
+  }),
+  new MoveDiagonalParkourUp(25),
+  new MoveDiagonalParkourDown(25),
 ]);

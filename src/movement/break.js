@@ -6,7 +6,7 @@ class MoveForwardDownBreak extends Move {
 
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
-      const node = originVec.offset(dir.x, -1, dir.z); 
+      const node = originVec.offset(dir.x, -1, dir.z);
       this.addNeighbors(neighbors, node, originVec);
     }
   }
@@ -27,6 +27,7 @@ class MoveForwardDownBreak extends Move {
     node.attributes = {
       name: this.name,
       break: [],
+      down: true
     };
 
     const checkNodes = [node, head, top];
@@ -54,7 +55,7 @@ class MoveForwardDownBreak extends Move {
     }
 
     // === Cost ===
-    let cost = this.COST_BREAK * 2.5 * node.attributes.break.length;
+    let cost = this.COST_BREAK * node.attributes.break.length + this.COST_FALL;
 
     node.attributes.cost = cost;
     node.attributes.fallDistance = 1;
@@ -72,7 +73,7 @@ class MoveBreakDown extends Move {
       z: 0,
     });
 
-    const down = this.origin.offset(0, -1, 0); 
+    const down = this.origin.offset(0, -1, 0);
     this.addNeighbors(neighbors, down);
   }
 
@@ -92,10 +93,11 @@ class MoveBreakDown extends Move {
 
     let landing = target.down(1);
 
+    let fallDistance = 0;
+
     if (!this.isSolid(landing)) {
       const maxFall = this.config.maxFallDist - 1 ?? 2;
 
-      let fallDistance = 0;
       let below = landing;
 
       while (fallDistance < maxFall && this.isAir(below)) {
@@ -107,16 +109,14 @@ class MoveBreakDown extends Move {
 
       landing = below;
     }
-    
+
     const moveNode = landing.up(1);
 
     moveNode.attributes = {
       name: this.name,
       break: [target.clone()],
-      cost: this.COST_BREAK,
+      cost: this.COST_BREAK + (this.COST_FALL * fallDistance),
     };
-
-    // console.log(this.COST_BREAK );
 
     neighbors.push(this.makeMovement(moveNode, moveNode.attributes.cost));
   }

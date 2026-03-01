@@ -51,7 +51,8 @@ class PathExecutor {
     this.swimmingState = { active: false, sinking: false, floating: false };
     /** @type {false | { phase: string, target: Vec3 }} */
     this.climbingState = false;
-    this.interactingState = false;
+    this.interactingDoorState = false;
+    this.interactingTrapdoorState = false;
     this.elytraFlyingState = { active: false, gliding: false, liftoff: false };
     this.bridgingState = { active: false, positioning: false, placing: false };
     this.stuckState = { stuck: false, lastNodeTime: Date.now() };
@@ -166,6 +167,7 @@ class PathExecutor {
     this.handlingEnd = false;
     this.handlingStuck = false;
     this.stuckState = { stuck: false, lastNodeTime: Date.now() };
+    this.placedNodes.clear();
 
     if (this.ashfinder.debug) {
       console.log(
@@ -181,6 +183,13 @@ class PathExecutor {
     if (this.handlingEnd) return;
     if (this.handlingStuck) return;
     if (this.closingDoorState) return;
+
+    //some how is is true???
+    if (!this.path) {
+      this.handlingEnd = true;
+      this._onPathEnd();
+      return;
+    }
 
     if (this.currentIndex >= this.path.length) {
       this.handlingEnd = true;
@@ -207,6 +216,8 @@ class PathExecutor {
       this.toweringState.active = false;
       this.comingFromSJ = false;
       this._clearAllControls();
+      this.interactingDoorState = false;
+      this.interactingState = { active: false, block: null, oppened: false };
 
       // Close doors/gates we just passed through.
       if (
@@ -268,6 +279,7 @@ class PathExecutor {
 
   async handleStuck() {
     try {
+      this._clearAllControls();
       const newPath = await this._generateNextPath();
       if (!newPath.success === false) {
         // _generateNextPath returns { success: false } only on "no path"
@@ -380,7 +392,7 @@ class PathExecutor {
     this.stuckState = { stuck: false, stuckTimer: 0, lastNodeTime: 0 };
     this.climbingState = {};
     this.climbingTarget = null;
-    this.interactingState = false;
+    this.interactingState = { active: false, block: null, openned: false };
     this.jumpState = null;
   }
 
@@ -413,6 +425,13 @@ class PathExecutor {
     }
 
     if (attr.sJump) {
+      if (
+        attr.place?.length > 0 &&
+        !this.placedNodes.has(node.worldPos.toString())
+      ) {
+        await this._placeBlock(node);
+        this.placedNodes.add(node.worldPos.toString());
+      }
       await this._sprintJump(node);
     } else if (attr.nJump) {
       if (
@@ -424,12 +443,19 @@ class PathExecutor {
       }
       if (attr.break?.length > 0) await this._handleBreakingBlocks(node);
       if (this.breakingState?.active) return;
-      await this._simpleJump(node);
+
+      if (attr.stair) this._walkTo(node.worldPos);
+      else await this._simpleJump(node);
     } else if (attr.ladder) {
       if (attr.descend) this._startClimbDown(node);
       else if (attr.enter) this._walkTo(node.worldPos);
       else this._startClimb(node);
-    } else if (attr.interact && !this.interactingState && attr.interactBlock) {
+    } else if (
+      attr.interact &&
+      !this.interactingTrapdoorState &&
+      attr.interactBlock &&
+      attr.isCrawling
+    ) {
       await this._handleInteract(node);
     } else if (attr.ascend) {
       if (
@@ -442,16 +468,31 @@ class PathExecutor {
     } else if (attr.isFlying) {
       if (!this.isFlying) await this._startPacketFly();
       await this._flyTo(node);
+    } else if (attr.scaffoldingEnter) {
+      await this._enterScaffolding(node);
     } else if (attr.scaffoldingUp) {
-      if (!this._isCentered(node.worldPos)) return;
-      const distY = Math.abs(this.bot.entity.position.y - node.worldPos.y);
-      if (distY < 1) return;
-      this.bot.setControlState("jump", true);
+      if (!this._isCenteredTight(node.worldPos)) {
+        this._setControlState("jump", false);
+        this._setControlState("sneak", false);
+        this._walkTo(node.worldPos);
+        return;
+      }
+
+      this._setControlState("forward", false);
+      this._setControlState("sneak", false);
+      this._setControlState("jump", true);
+      this.jumpState = true;
     } else if (attr.scaffoldingDown) {
-      if (!this._hasReachedNode(node, true)) return;
-      if (!this._isCentered(node.worldPos)) return;
-      this._clearAllControls();
-      this.bot.setControlState("sneak", true);
+      if (!this._isCenteredTight(node.worldPos)) {
+        this._setControlState("sneak", false);
+        this._walkTo(node.worldPos);
+        return;
+      }
+
+      this._setControlState("forward", false);
+      this._setControlState("sprint", false);
+      this._setControlState("jump", false);
+      this._setControlState("sneak", true);
     } else {
       if (
         attr.place?.length > 0 &&
@@ -465,8 +506,23 @@ class PathExecutor {
         this.placedNodes.add(node.worldPos.toString());
       }
 
-      if (attr.break?.length > 0) await this._handleBreakingBlocks(node);
-      if (attr.crouch) this.bot.setControlState("sneak", true);
+      if (attr.interact && !this.interactingDoorState && attr.interactBlock) {
+        // await this._handleInteract(node);
+        const block = this.bot.blockAt(node.attributes.interactBlock);
+        this.interactingDoorState = true;
+
+        await this.bot.lookAt(block.position, true);
+        await this.bot.waitForTicks(1);
+
+        await this.bot.activateBlock(block);
+        await this.bot.waitForTicks(2);
+      }
+
+      if (attr.break?.length > 0) {
+        await this._handleBreakingBlocks(node);
+        if (attr.down) return;
+      }
+      if (attr.crouch) this._setControlState("sneak", true);
       if (this.breakingState?.active) return;
       if (this.isFlying) this._stopPacketFly();
 
@@ -480,7 +536,7 @@ class PathExecutor {
    */
   async _handleInteract(node) {
     const block = this.bot.blockAt(node.attributes.interactBlock);
-    this.interactingState = true;
+    this.interactingTrapdoorState = true;
 
     try {
       await this.bot.lookAt(block.position, true);
@@ -507,16 +563,42 @@ class PathExecutor {
       if (this.ashfinder.debug)
         console.warn("[PathExecutor] Interact failed:", err);
     } finally {
-      this.interactingState = false;
+      this.interactingTrapdoorState = false;
     }
   }
 
   /** @param {Vec3} pos @returns {boolean} */
   _isCentered(pos) {
     const { x, z } = this.bot.entity.position;
-    return (
-      Math.abs(x - (pos.x + 0.5)) <= 0.6 && Math.abs(z - (pos.z + 0.5)) <= 0.6
-    );
+    return Math.abs(x - pos.x) <= 0.6 && Math.abs(z - pos.z) <= 0.6;
+  }
+
+  /**
+   * @param {Vec3} pos @returns {boolean}
+   */
+  _isCenteredTight(pos) {
+    const { x, z } = this.bot.entity.position;
+    return Math.abs(x - pos.x) <= 0.3 && Math.abs(z - pos.z) <= 0.3;
+  }
+
+  /**
+   * @param {Cell} node
+   */
+  async _enterScaffolding(node) {
+    const bot = this.bot;
+    const target = node.worldPos;
+
+    if (this._isCenteredTight(target)) {
+      this._clearAllControls();
+      return;
+    }
+
+    bot.lookAt(target.offset(0, 1.6, 0), true);
+
+    this._setControlState("sprint", false);
+    this._setControlState("sneak", false);
+    this._setControlState("jump", false);
+    this._setControlState("forward", true);
   }
 
   _isActionBusy() {
@@ -531,7 +613,7 @@ class PathExecutor {
       this.breakingState?.active ||
       this.digging ||
       this.toweringState.active ||
-      this.interactingState
+      this.interactingTrapdoorState
     );
   }
 
@@ -571,9 +653,9 @@ class PathExecutor {
           p.z < block.position.z + 1;
 
         if (inTarget) {
-          bot.setControlState("back", true);
+          this._setControlState("back", true);
           await bot.waitForTicks(2);
-          bot.setControlState("back", false);
+          this._setControlState("back", false);
         }
 
         await equipBlockIfNeeded(bot, blockPlace);
@@ -636,7 +718,7 @@ class PathExecutor {
         if (!targetBlock) break;
 
         // Sneak while placing to avoid falling.
-        bot.setControlState("sneak", true);
+        this._setControlState("sneak", true);
         await bot.waitForTicks(2);
 
         // Pick best face toward parent.
@@ -677,15 +759,15 @@ class PathExecutor {
           );
         }
 
-        bot.setControlState("forward", true);
+        this._setControlState("forward", true);
         await bot.waitForTicks(3);
-        bot.setControlState("forward", false);
+        this._setControlState("forward", false);
       }
 
-      bot.setControlState("sneak", false);
+      this._setControlState("sneak", false);
     } finally {
       this.placingState = false;
-      bot.setControlState("sneak", false);
+      this._setControlState("sneak", false);
     }
   }
 
@@ -699,8 +781,8 @@ class PathExecutor {
 
     await bot.lookAt(targetBlock.offset(0, 1.5, 0));
 
-    bot.setControlState("sneak", true);
-    bot.setControlState("forward", true);
+    this._setControlState("sneak", true);
+    this._setControlState("forward", true);
 
     let blockAtFeet;
     do {
@@ -780,43 +862,43 @@ class PathExecutor {
 
     if (hDist > 0.3) {
       bot.lookAt(target, true);
-      bot.setControlState("forward", true);
+      this._setControlState("forward", true);
     } else {
-      bot.setControlState("forward", false);
+      this._setControlState("forward", false);
     }
 
-    bot.setControlState("jump", false);
-    bot.setControlState("sneak", false);
+    this._setControlState("jump", false);
+    this._setControlState("sneak", false);
 
     const headBlock = bot.blockAt(pos.offset(0, 1, 0));
     const bodyBlock = bot.blockAt(pos);
     const atSurface = headBlock?.name === "air" && bodyBlock?.name === "water";
 
     if (attr.up || yDiff > 0.3) {
-      bot.setControlState("jump", true);
+      this._setControlState("jump", true);
       this.swimmingState.floating = true;
       this.swimmingState.sinking = false;
     } else if (attr.down || yDiff < -0.3) {
-      bot.setControlState("sneak", true);
+      this._setControlState("sneak", true);
       this.swimmingState.sinking = true;
       this.swimmingState.floating = false;
     } else if (!atSurface) {
       const vy = bot.entity.velocity.y;
-      if (vy < -0.01) bot.setControlState("jump", true);
-      else if (vy > 0.05) bot.setControlState("sneak", true);
+      if (vy < -0.01) this._setControlState("jump", true);
+      else if (vy > 0.05) this._setControlState("sneak", true);
     }
 
     if (attr.exitWater) {
-      bot.setControlState("forward", true);
-      if (attr.climbOut) bot.setControlState("jump", true);
+      this._setControlState("forward", true);
+      if (attr.climbOut) this._setControlState("jump", true);
     }
   }
 
   /** @param {Vec3} target */
   _walkTo(target) {
     this.bot.lookAt(target.offset(0, 1.6, 0), true);
-    this.bot.setControlState("sprint", true);
-    this.bot.setControlState("forward", true);
+    if (this.config.allowSprinting) this._setControlState("sprint", true);
+    this._setControlState("forward", true);
   }
 
   /** @param {Cell} node */
@@ -829,7 +911,7 @@ class PathExecutor {
     const { yaw } = getLookAngles(eyePos, to.offset(0, 1.5, 0));
     await bot.look(yaw, 0, true);
 
-    if (Math.abs(angleDiff(bot.entity.yaw, yaw)) > 0.05) return;
+    if (Math.abs(angleDiff(bot.entity.yaw, yaw)) > 0.01) return;
 
     if (!this.jumpState) {
       this._clearAllControls();
@@ -841,8 +923,8 @@ class PathExecutor {
       };
     }
 
-    bot.setControlState("sprint", false);
-    bot.setControlState("forward", true);
+    this._setControlState("sprint", false);
+    this._setControlState("forward", true);
     this.jumpState.forwardTicks++;
 
     if (node.attributes.up && this.jumpState.forwardTicks < 8) return;
@@ -852,28 +934,29 @@ class PathExecutor {
         from.floored(),
         to.floored(),
         bot,
-        node.attributes?.up ?? false,
+        node.attributes?.up ?? node.attributes?.down ?? false,
       );
       const shouldAutoJump = this._shouldAutoJump(to, bot);
 
       if (shouldJump || shouldAutoJump) {
-        bot.setControlState("jump", true);
+        this._setControlState("jump", true);
         this.jumpState.jumped = true;
         this.jumpState.timer = 0;
         this.jumpState.isAutoJump = shouldAutoJump;
 
         if (this.ashfinder.debug)
           console.log(
-            `[PathExecutor] Simple jump (auto:${shouldAutoJump}, pos:${shouldJump})`,
+            `[PathExecutor] Simple jump (auto:${shouldAutoJump}, shouldJumpNow:${shouldJump})`,
           );
       }
     }
 
     if (this.jumpState.jumped) {
       this.jumpState.timer++;
+
       const maxTimer = this.jumpState.isAutoJump ? 3 : 10;
       if (this.jumpState.timer > maxTimer) {
-        bot.setControlState("jump", false);
+        this._setControlState("jump", false);
         this.jumpState = null;
       }
     }
@@ -886,17 +969,21 @@ class PathExecutor {
     const to = node.worldPos;
 
     const eyePos = bot.entity.position.offset(0, bot.entity.eyeHeight, 0);
-    const { yaw } = getLookAngles(eyePos, to.offset(0, 1.6, 0));
-    await bot.look(yaw, 0, true);
+    const { yaw } = getLookAngles(eyePos, to.offset(0, 1.5, 0));
+    bot.look(yaw, 0, true);
 
-    if (Math.abs(angleDiff(bot.entity.yaw, yaw)) > 0.08) return;
+    if (Math.abs(angleDiff(bot.entity.yaw, yaw)) > 0.01) {
+      this._clearAllControls();
+      bot.look(yaw, 0, true);
+      return;
+    }
+
     if (this.jumpState?.jumped && this.jumpState?.done) return;
 
     if (!this.jumpState) {
       if (this.ashfinder.debug && !this._canReachJumpTarget(from, to, true)) {
-        console.warn(
-          "[PathExecutor] Sprint jump sim failed — attempting anyway",
-        );
+        console.warn("[PathExecutor] Sprint jump sim failed — we do not ball");
+        return;
       }
 
       this._clearAllControls();
@@ -908,13 +995,11 @@ class PathExecutor {
         done: false,
       };
 
-      bot.setControlState("sprint", true);
-      bot.setControlState("forward", true);
+      this._setControlState("sprint", true);
+      this._setControlState("forward", true);
     }
 
-    this.jumpState.forwardTicks++;
-
-    if (node.attributes?.up && this.jumpState.forwardTicks < 6) return;
+    // if (node.attributes?.up && this.jumpState.forwardTicks < 6) return;
 
     if (!this.jumpState.jumped) {
       if (
@@ -923,11 +1008,12 @@ class PathExecutor {
           to.floored(),
           bot,
           node.attributes?.up ?? false,
+          node.attributes?.diagonal ?? false,
         )
       ) {
         this.jumpState.jumped = true;
         this.jumpState.timer = 0;
-        bot.setControlState("jump", true);
+        this._setControlState("jump", true);
 
         if (this.ashfinder.debug)
           console.log("[PathExecutor] Sprint jump triggered");
@@ -937,16 +1023,13 @@ class PathExecutor {
     if (this.jumpState.jumped) {
       this.jumpState.timer++;
 
-      const dx = to.x - from.x;
-      const dz = to.z - from.z;
-      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
-      const maxTimer = horizontalDist >= 4 ? 20 : 5;
+      const maxTimer = 7;
 
       if (this.jumpState.timer === 5 && node.attributes?.place) {
         await this._placeBlock(node, false);
       }
 
-      if (this.jumpState.timer > maxTimer) {
+      if (this.jumpState.timer >= maxTimer) {
         this._clearAllControls();
         this.jumpState = null;
         this.comingFromSJ = true;
@@ -963,7 +1046,7 @@ class PathExecutor {
 
     bot.lookAt(target.offset(0, 1, 0), true);
     await bot.waitForTicks(5);
-    bot.setControlState("forward", true);
+    this._setControlState("forward", true);
   }
 
   /** @param {Cell} node @returns {Vec3} */
@@ -999,11 +1082,11 @@ class PathExecutor {
     if (this.climbingState.phase === "positioning") {
       if (dx > 0.25 || dz > 0.25) {
         bot.lookAt(target, true);
-        bot.setControlState("forward", true);
+        this._setControlState("forward", true);
         return;
       }
 
-      bot.setControlState("forward", false);
+      this._setControlState("forward", false);
       this.climbingState.phase = "descending";
     }
 
@@ -1087,19 +1170,19 @@ class PathExecutor {
 
     if (this.ashfinder.debug) console.log("[PathExecutor] Elytra liftoff…");
 
-    bot.setControlState("jump", true);
+    this._setControlState("jump", true);
 
     let attempts = 0;
     while (bot.entity.onGround && attempts++ < 40) await bot.waitForTicks(1);
 
     if (bot.entity.onGround) {
-      bot.setControlState("jump", false);
+      this._setControlState("jump", false);
       this.isFlying = false;
       throw new Error("Elytra liftoff failed");
     }
 
     await bot.waitForTicks(3);
-    bot.setControlState("jump", false);
+    this._setControlState("jump", false);
 
     // Wait for downward velocity before deploying.
     let fallTicks = 0;
@@ -1176,7 +1259,7 @@ class PathExecutor {
       await equipBlockIfNeeded(bot, blockPlace);
 
       await bot.waitForTicks(1);
-      bot.setControlState("jump", true);
+      this._setControlState("jump", true);
       await bot.waitForTicks(1);
 
       let lifted = false;
@@ -1207,7 +1290,7 @@ class PathExecutor {
         await bot.waitForTicks(1);
       }
     } finally {
-      bot.setControlState("jump", false);
+      this._setControlState("jump", false);
       this._clearAllControls();
       this.toweringState.active = false;
       this.toweringState.phase = 0;
@@ -1233,9 +1316,11 @@ class PathExecutor {
         new Vec3(targetPos.x, bot.entity.position.y, targetPos.z),
         true,
       );
-      bot.setControlState("forward", dist >= 0.3);
+      this._setControlState("forward", dist >= 0.3);
       await bot.waitForTicks(1);
     }
+
+    this._clearAllControls();
   }
 
   /**
@@ -1262,26 +1347,37 @@ class PathExecutor {
 
   /**
    * Returns true when the bot is close enough to the edge to jump.
-   * @param {Vec3} from @param {Vec3} to @param {object} bot @param {boolean} [up=false]
+   * @param {Vec3} from @param {Vec3} to @param {object} bot @param {boolean} [up=false] @param {boolean} [diagonal=false]
    * @returns {boolean}
    */
-  _shouldJumpNow(from, to, bot, up = false) {
+  _shouldJumpNow(from, to, bot, up = false, diagonal = false) {
     const pos = bot.entity.position;
-    const center = from.offset(0.5, 0, 0.5);
+
+    // Direction from current block to next block
     const dir = to.clone().subtract(from);
     dir.y = 0;
-
-    if (dir.x === 0 && dir.z === 0) return pos.distanceTo(center) <= 0.35;
-
     dir.normalize();
 
-    let edgeDist = up ? 0.55 : 0.3;
-    if (Math.abs(to.x - from.x) >= 3 || Math.abs(to.z - from.z) >= 3) {
-      edgeDist = 0.25;
-    }
+    // How close to the edge before jumping
+    let edgeThreshold = 0.15;
+    if (up) edgeThreshold = 0.1;
+    if (diagonal) edgeThreshold = 0.4;
 
-    const jumpPoint = center.clone().add(dir.clone().scaled(edgeDist));
-    return pos.distanceTo(jumpPoint) <= 0.25;
+    // Get block min/max bounds
+    const minX = from.x;
+    const maxX = from.x + 1;
+    const minZ = from.z;
+    const maxZ = from.z + 1;
+
+    let distanceToEdge = 0;
+
+    // Determine which edge we're moving toward
+    if (dir.x > 0) distanceToEdge = maxX - pos.x;
+    else if (dir.x < 0) distanceToEdge = pos.x - minX;
+    else if (dir.z > 0) distanceToEdge = maxZ - pos.z;
+    else if (dir.z < 0) distanceToEdge = pos.z - minZ;
+
+    return distanceToEdge <= edgeThreshold;
   }
 
   /**
@@ -1412,11 +1508,14 @@ class PathExecutor {
     const dx = Math.abs(pos.x - target.x);
     const dy = Math.abs(pos.y - topOfBlockY);
     const dz = Math.abs(pos.z - target.z);
+    const jump = node.attributes?.parkour ?? false;
 
-    let hThresh = this.comingFromSJ ? 0.45 : 0.35;
+    let hThresh = jump ? 0.8 : 0.35;
     if (node.attributes.scaffolding) hThresh = 0.7;
+    // Enter nodes must be tight-centred so the next Up/Down phase starts clean.
+    if (node.attributes.scaffoldingEnter) hThresh = 0.3;
 
-    const yThresh = node.attributes.nJump || node.attributes.sJump ? 1 : 0.67;
+    const yThresh = jump ? 1 : 0.67;
 
     const isCloseEnough = dx < hThresh && dy <= yThresh && dz < hThresh;
     const isOnGround =
@@ -1431,8 +1530,13 @@ class PathExecutor {
 
   _clearAllControls() {
     for (const state of ALL_CONTROLS) {
-      this.bot.setControlState(state, false);
+      this._setControlState(state, false);
     }
+  }
+
+  _setControlState(control, state) {
+    if (this.bot.ashPhysics) this.bot.ashSetControlState(control, state);
+    else this.bot.setControlState(control, state);
   }
 
   /** @param {string} [reason="death"] */

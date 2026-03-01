@@ -2,6 +2,7 @@ const { Move, registerMoves, DirectionalVec3 } = require("./");
 
 class MoveScaffoldingEnter extends Move {
   generate(cardinalDirections, origin, neighbors, end) {
+        if (!this.config.experimentalMoves) return;
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       const node = originVec.forward(1);
@@ -24,6 +25,7 @@ class MoveScaffoldingEnter extends Move {
     node.attributes = {
       name: this.name,
       cost: this.COST_NORMAL,
+      scaffoldingEnter: true,
     };
 
     neighbors.push(this.makeMovement(node, node.attributes.cost));
@@ -32,6 +34,7 @@ class MoveScaffoldingEnter extends Move {
 
 class MoveScaffoldingForward extends Move {
   generate(cardinalDirections, origin, neighbors, end) {
+        if (!this.config.experimentalMoves) return;
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       const node = originVec.forward(1);
@@ -66,6 +69,7 @@ class MoveScaffoldingForward extends Move {
 
 class MoveScaffoldingUp extends Move {
   generate(cardinalDirections, origin, neighbors, end) {
+        if (!this.config.experimentalMoves) return;
     const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
       x: 0,
       z: 0,
@@ -100,6 +104,7 @@ class MoveScaffoldingUp extends Move {
 
 class MoveScaffoldingDown extends Move {
   generate(cardinalDirections, origin, neighbors, end) {
+        if (!this.config.experimentalMoves) return;
     const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
       x: 0,
       z: 0,

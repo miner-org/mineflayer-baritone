@@ -24,16 +24,8 @@ class MovePlaceUp extends Move {
     const breakChain = [];
 
     // handle breaking if node is not air
-    if (!this.isAir(node) && this.config.breakBlocks) {
-      if (this.isBreakable(node, this.config)) breakChain.push(node.clone());
-      const above = node.up(1);
-      if (
-        this.isBreakable(node, this.config) &&
-        this.isBreakable(above, this.config)
-      )
-        breakChain.push(above.clone());
-
-      if (breakChain.length === 0) return; // nothing breakable
+    if (!this.isAir(node.up(1)) && this.config.breakBlocks) {
+      if (this.isBreakable(node.up(1))) breakChain.push(node.up(1).clone());
     }
 
     // handle placing at originVec
@@ -51,7 +43,9 @@ class MovePlaceUp extends Move {
       break: breakChain.length > 0 ? breakChain : undefined,
       place: [originVec.clone()],
       cost:
-        (breakChain.length * this.COST_BREAK + this.COST_PLACE + this.COST_UP) * 0.8,
+        this.COST_PLACE + this.COST_UP + breakChain.length > 0
+          ? this.COST_BREAK
+          : 0,
       ascend: true,
       originVec,
     };

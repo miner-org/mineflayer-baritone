@@ -166,16 +166,17 @@ class Move {
 
     // Movement costs
     this.COST_NORMAL = 1;
-    this.COST_UP = 1;
-    this.COST_FALL = 1;
-    this.COST_BREAK = this.COST_NORMAL + 0.12;
-    this.COST_PLACE = this.COST_NORMAL + 0.12;
+    this.COST_UP = 1.5;
+    this.COST_FALL = 1.5;
+    this.COST_BREAK = 1.2;
+    this.COST_PLACE = 1.2;
     this.COST_SWIM = 1;
     this.COST_SWIM_START = 1.1;
     this.COST_SWIM_EXIT = 1.1;
     this.COST_CLIMB = 1;
+    this.COST_CRAWL = 1.6;
     this.COST_LADDER = 2;
-    this.COST_PARKOUR = 3.5; // ian
+    this.COST_PARKOUR = 2.5; // ian
     this.COST_DIAGONAL = Math.SQRT2;
   }
 
@@ -249,6 +250,14 @@ class Move {
     return offsets.some(([dx, dy, dz]) => this.isSolid(pos.offset(dx, dy, dz)));
   }
 
+  getMaxY(node) {
+    const block = this.getBlock(node);
+    if (!block) return 1;
+
+    if (block.shapes[0].length === 0) return false;
+    return block.shapes[0]?.[4] ?? 1;
+  }
+
   isAir(pos) {
     const block = this.getBlock(pos);
     if (!block) return false;
@@ -285,6 +294,14 @@ class Move {
     if (!block) return false;
 
     return this.isTrapdoor(node) && block.getProperties().half === "top";
+  }
+
+  isBottomTrapdoor(node) {
+    const block = this.getBlock(node);
+
+    if (!block) return false;
+
+    return this.isTrapdoor(node) && block.getProperties().half === "bottom";
   }
 
   /**
@@ -356,7 +373,7 @@ class Move {
       !this.isClimbable(below) &&
       !this.isCarpetLike(below) &&
       !this.isClimbable(below) &&
-      !this.isLeaf(below)
+      !this.isSafeLeaf(below)
     );
   }
 
@@ -401,6 +418,13 @@ class Move {
     return block?.name.includes("stairs");
   }
 
+  isTopStair(node) {
+    const block = this.getBlock(node);
+    if (!this.isStair(node)) return false;
+
+    return block?.getProperties()?.half === "top";
+  }
+
   isSlab(node) {
     const block = this.getBlock(node);
     return block?.name.includes("slab");
@@ -440,7 +464,7 @@ class Move {
     if (block.name.includes("door")) return false;
     if (block.name.includes("stair")) return true;
     if (!block.shapes) return false;
-    if (block.shapes[0].length === 0) return false;
+    if (block.shapes[0]?.length === 0) return false;
     const maxY = block.shapes[0]?.[4];
 
     let yThreshhold = block.name.includes("slab") ? 0.5 : 1;
@@ -449,24 +473,25 @@ class Move {
 
   // === Liquids & Misc ===
 
-  // Add this to the Move class
-  isFlowingWater(node) {
-    const block = this.getBlock(node);
-    return block?.name === "water" || block?.name === "flowing_water";
-  }
-
-  // Update isWater to handle both
   isWater(node) {
     const block = this.getBlock(node);
     return block?.name === "water" || block?.name === "flowing_water";
   }
 
   isLava(node) {
-    return this.getBlock(node)?.name === "lava";
+    return this.getBlock(node)?.name.includes("lava");
   }
 
   isLeaf(node) {
     return this.getBlock(node)?.name.includes("leaves");
+  }
+
+  isSafeLeaf(node) {
+    const block = this.getBlock(node);
+
+    if (!block) return false;
+
+    return this.isLeaf(node) && block?.getProperties()?.persistent;
   }
 
   isClimbable(node) {
@@ -723,9 +748,8 @@ function getNeighbors2(node, config, manager, bot, end) {
       const key = `${neighbor.x},${neighbor.y},${neighbor.z}`;
       const existing = neighborMap.get(key);
 
-      if (!existing) {
+      if (!existing || neighbor.cost < existing.cost) {
         neighborMap.set(key, neighbor);
-        continue;
       }
     }
   }

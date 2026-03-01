@@ -2,19 +2,18 @@ const { Vec3 } = require("vec3");
 const { getNeighbors2 } = require("./movement");
 const { MinHeap } = require("./heap");
 
-const H_TIE_EPSILON = 0.01;
+const H_TIE_EPSILON = 0.1;
 
 /**
  * @param {{ x: number, y: number, z: number }} node
  * @returns {string}
  */
 function posHash(node) {
-  const x = Math.round(node.x * 2) / 2;
+  const x = Math.round(node.x * 2);
   const y = Math.round(node.y);
-  const z = Math.round(node.z * 2) / 2;
+  const z = Math.round(node.z * 2);
   return `${x},${y},${z}`;
 }
-
 /**
  * @param {{ x: number, y: number, z: number, dir?: { x: number, z: number } }} node
  * @returns {string}
@@ -146,7 +145,26 @@ function euclideanDistance(a, b) {
   const dx = Math.abs(a.x - b.x);
   const dy = Math.abs(a.y - b.y);
   const dz = Math.abs(a.z - b.z);
-  return Math.sqrt(dx * dx + dz * dz) + dy;
+  return Math.sqrt(dx * dx + dz * dz) + 1.5 * dy;
+}
+
+function someHcost(a, b) {
+  const dx = Math.abs(a.x - b.x);
+  const dv = Math.abs(a.y - b.y);
+  const dz = Math.abs(a.z - b.z);
+
+  const costXYZ = Math.sqrt(1 + 1 + 1.5 ** 2);
+  const costXZ = Math.SQRT2;
+  const costV = 1.5;
+
+  const flatDiag = Math.min(dx, dz);
+  const flatRem = Math.max(dx, dz) - flatDiag;
+
+  const combined = Math.min(flatDiag, dv);
+  const diagOnly = flatDiag - combined;
+  const vertRem = dv - combined;
+
+  return combined * costXYZ + diagOnly * costXZ + flatRem * 1 + vertRem * costV;
 }
 
 /**
@@ -155,7 +173,9 @@ function euclideanDistance(a, b) {
  * @returns {number}
  */
 function hCost(a, b) {
-  return manhattanDistance(a, b);
+  // return manhattanDistance(a, b);
+  return someHcost(a, b);
+  // return manhattanDistance(a, b) * 1.5;
 }
 
 /**
@@ -164,7 +184,7 @@ function hCost(a, b) {
  * @returns {number}
  */
 function compare(a, b) {
-  if (Math.abs(a.fCost - b.fCost) < H_TIE_EPSILON) {
+  if (Math.abs(a.fCost - b.fCost) <= H_TIE_EPSILON) {
     return a.hCost - b.hCost;
   }
   return a.fCost - b.fCost;
@@ -218,7 +238,11 @@ async function Astar(
   let startPos = start.floored().offset(0.5, 0, 0.5);
 
   const startBlock = bot.blockAt(startPos);
-  if (startBlock?.name === "farmland" || startBlock?.name.includes("chest")) {
+  if (
+    startBlock?.name === "farmland" ||
+    startBlock?.name.includes("chest") ||
+    startBlock?.name.includes("slab")
+  ) {
     startPos = startPos.offset(0, 1, 0);
   }
 
@@ -230,6 +254,7 @@ async function Astar(
   const openMap = new Map();
   /** @type {Set<string>} */
   const closedSet = new Set();
+  const closedNodes = new Map();
   const nodemanager = new NodeManager();
 
   nodemanager.markNodes(excludedPositions, "areaMarked");
@@ -275,6 +300,19 @@ async function Astar(
     };
   }
 
+  // if (options.warmNodes) {
+  //   for (const [hash, nodeData] of options.warmNodes) {
+  //     if (!closedSet.has(hash)) {
+  //       const cell = new Cell(nodeData.worldPos, nodeData.cost);
+  //       cell.gCost = nodeData.gCost;
+  //       cell.hCost = hCost(nodeData.worldPos, endPos);
+  //       cell.fCost = cell.gCost + cell.hCost;
+  //       openMap.set(hash, cell);
+  //       openHeap.push(cell);
+  //     }
+  //   }
+  // }
+
   const startTime = performance.now();
   let lastYield = performance.now();
 
@@ -282,8 +320,7 @@ async function Astar(
     while (openHeap.size() > 0) {
       iteration++;
 
-      // Yield to the event loop every 30 ms to keep the bot responsive.
-      if (performance.now() - lastYield >= 30) {
+      if (performance.now() - lastYield >= 5) {
         await new Promise((r) => setTimeout(r, 0));
         lastYield = performance.now();
       }
@@ -306,6 +343,7 @@ async function Astar(
       const currentHash = posHash(currentNode.worldPos);
       openMap.delete(currentHash);
       closedSet.add(currentHash);
+      closedNodes.set(currentHash, currentNode);
       visitedChunks.add(
         `${currentNode.worldPos.x >> 4},${currentNode.worldPos.z >> 4}`,
       );
@@ -329,6 +367,7 @@ async function Astar(
           status: "found",
           openMap,
           visitedChunks,
+          closedNodes,
           iterations: iteration,
         });
       }
@@ -416,7 +455,20 @@ function _processNeighbor(
   const placesInMove = neighborData.attributes?.place?.length ?? 0;
   const totalScaffoldingUsed = currentNode.scaffoldingUsed + placesInMove;
 
-  const tempG = currentNode.gCost + neighborData.cost;
+  const baseMoveCost = neighborData.cost;
+
+  // const currentH = currentNode.hCost;
+  // const nextH = hCost(
+  //   { x: neighborData.x, y: neighborData.y, z: neighborData.z },
+  //   end,
+  // );
+
+  // const lambda = 0.15;
+
+  // const awayPenalty = Math.max(0, nextH - currentH) * lambda;
+
+  // const tempG = currentNode.gCost + baseMoveCost + awayPenalty;
+  const tempG = currentNode.gCost + baseMoveCost;
 
   let neighbor = openMap.get(hash);
 

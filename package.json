@@ -4,9 +4,9 @@
   "description": "Minecraft pathfinder made in javascript using mineflayer and node js.",
   "main": "index.js",
   "scripts": {
-    "release:patch": "npm version patch && git push --tags && npm publish",
-    "release:minor": "npm version minor && git push --tags && npm publish",
-    "release:major": "npm version major && git push --tags && npm publish",
+    "release:patch": "npm version patch && npm publish && git push --tags",
+    "release:minor": "npm version minor && npm publish && git push --tags",
+    "release:major": "npm version major && npm publish && git push --tags",
     "test": "node ./src/test.js localhost 46803"
   },
   "keywords": [
@@ -18,9 +18,11 @@
   "author": "Ash",
   "license": "ISC",
   "dependencies": {
+    "@miner-org/mineflayer-physics-reworked": "^0.0.4",
     "@nxg-org/mineflayer-physics-util": "^1.7.11",
     "minecraft-data": "^3.94.0",
     "minecraft-protocol": "^1.57.0",
+    "mineflayer": "^4.35.0",
     "protodef": "^1.17.0",
     "require-dir": "^1.2.0"
   },
@@ -29,7 +31,6 @@
     "type": "git"
   },
   "devDependencies": {
-    "gen-mineflayer": "github:GenerelSchwerz/mineflayer",
-    "mineflayer": "^4.25.0"
+    "gen-mineflayer": "github:GenerelSchwerz/mineflayer"
   }
 }

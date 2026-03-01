@@ -25,11 +25,13 @@ class AshFinderPlugin extends EventEmitter {
     this.following = null;
     this.config = new AshFinderConfig();
     this.debug = false;
+    this.currentGoal = null;
 
     this.#pathExecutor = null;
     this.waypointPlanner = null;
 
     this._visitedChunks = new Set();
+    this._pathCache = new PathCache();
     this._searchController = {};
     this._globalVirtual = new Map();
 
@@ -42,6 +44,12 @@ class AshFinderPlugin extends EventEmitter {
     bot.on("death", () => {
       // Only stop if we're actually moving
       if (!this.stopped) this.stop();
+    });
+
+    bot.on("blockUpdate", (oldBlock, newBlock) => {
+      if (oldBlock?.name !== newBlock?.name) {
+        this._pathCache.invalidateBlock(newBlock.position);
+      }
     });
   }
 
@@ -56,6 +64,10 @@ class AshFinderPlugin extends EventEmitter {
 
     this._searchController.debug = this.debug;
 
+    const warmNodes = this._pathCache.getWarmNodes(
+      this.bot.entity.position.clone(),
+    );
+
     const result = await astar(
       this.bot.entity.position.clone(),
       position,
@@ -63,10 +75,14 @@ class AshFinderPlugin extends EventEmitter {
       this.bot,
       endFunc,
       this.config,
-      { excludedPositions: [], ...options },
+      { excludedPositions: [], warmNodes, ...options },
       this.debug,
       this._searchController,
     );
+
+    if (result.status === "found" && result.closedNodes) {
+      this._pathCache.store(result.visitedChunks, result.closedNodes);
+    }
 
     this._searchController.active = false;
     this._visitedChunks = result.visitedChunks || new Set();
@@ -130,6 +146,8 @@ class AshFinderPlugin extends EventEmitter {
   stop() {
     this.path = [];
     this.stopped = true;
+    this.currentGoal = null;
+    this.isPathing = false;
     this.following = null;
     this.bot.clearControlStates();
     this.#pathExecutor?.stop("pathfinder stopping");
@@ -152,6 +170,7 @@ class AshFinderPlugin extends EventEmitter {
 
     this.stopped = false;
     this.isPathing = true;
+    this.currentGoal = goal;
 
     // If the goal chunk isn't loaded yet, shorten the search timeout so we
     // don't wait 30 s for a path that can't exist yet.
@@ -210,6 +229,7 @@ class AshFinderPlugin extends EventEmitter {
     } finally {
       this.stopped = true;
       this.isPathing = false;
+      this.currentGoal = null;
       this.config.thinkTimeout = defaultTimeout;
     }
   }
@@ -396,6 +416,11 @@ const DEFAULT_CONFIG = {
   blocksToAvoid: ["crafting_table", "chest", "furnace"],
   blocksToStayAway: ["cactus", "cobweb", "lava", "gravel"],
   avoidDistance: 8,
+  experimentalMoves: false,
+  /**
+   * Will be bypassed by parkour moves tho
+   */
+  allowSprinting: true,
   swimming: true,
   placeBlocks: false,
   breakBlocks: false,
@@ -509,4 +534,44 @@ class AshFinderConfig {
   }
 }
 
-module.exports = { AshFinderConfig, AshFinderPlugin };
+class PathCache {
+  constructor() {
+    // chunkKey → Map<posHash, { gCost, worldPos, parent }>
+    this.chunkData = new Map();
+    this.maxAge = 30_000; // ms
+    this.timestamps = new Map();
+  }
+
+  store(visitedChunks, closedNodes) {
+    const now = Date.now();
+    for (const chunkKey of visitedChunks) {
+      this.chunkData.set(chunkKey, closedNodes);
+      this.timestamps.set(chunkKey, now);
+    }
+  }
+
+  getWarmNodes(startPos) {
+    const chunkKey = `${startPos.x >> 4},${startPos.z >> 4}`;
+    const cached = this.chunkData.get(chunkKey);
+    if (!cached) return null;
+
+    const age = Date.now() - (this.timestamps.get(chunkKey) ?? 0);
+    if (age > this.maxAge) {
+      this.invalidateChunk(chunkKey);
+      return null;
+    }
+    return cached;
+  }
+
+  invalidateChunk(chunkKey) {
+    this.chunkData.delete(chunkKey);
+    this.timestamps.delete(chunkKey);
+  }
+
+  invalidateBlock(blockPos) {
+    const chunkKey = `${blockPos.x >> 4},${blockPos.z >> 4}`;
+    this.invalidateChunk(chunkKey);
+  }
+}
+
+module.exports = { AshFinderConfig, AshFinderPlugin, PathCache };
