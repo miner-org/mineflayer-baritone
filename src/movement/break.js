@@ -27,7 +27,7 @@ class MoveForwardDownBreak extends Move {
     node.attributes = {
       name: this.name,
       break: [],
-      down: true
+      down: true,
     };
 
     const checkNodes = [node, head, top];
@@ -54,8 +54,22 @@ class MoveForwardDownBreak extends Move {
       return;
     }
 
+    /**@type {number} */
+    const totalDigTime = node.attributes.break
+      .map((vec) => {
+        const obj = this.bestHarvestTool(vec);
+
+        if (!obj) return 0;
+
+        return obj.digTime / 100;
+      })
+      .reduce((sum, digTime) => sum + digTime, 0);
+
     // === Cost ===
-    let cost = this.COST_BREAK * node.attributes.break.length + this.COST_FALL;
+    let cost =
+      this.COST_BREAK +
+      totalDigTime * node.attributes.break.length +
+      this.COST_FALL;
 
     node.attributes.cost = cost;
     node.attributes.fallDistance = 1;
@@ -112,10 +126,21 @@ class MoveBreakDown extends Move {
 
     const moveNode = landing.up(1);
 
+    /**@type {number} */
+    const totalDigTime = [target.clone()]
+      .map((vec) => {
+        const obj = this.bestHarvestTool(vec);
+
+        if (!obj) return 0;
+
+        return obj.digTime / 100;
+      })
+      .reduce((sum, digTime) => sum + digTime, 0);
+
     moveNode.attributes = {
       name: this.name,
       break: [target.clone()],
-      cost: this.COST_BREAK + (this.COST_FALL * fallDistance),
+      cost: this.COST_BREAK + totalDigTime + this.COST_FALL * fallDistance,
     };
 
     neighbors.push(this.makeMovement(moveNode, moveNode.attributes.cost));

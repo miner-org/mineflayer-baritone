@@ -7,7 +7,7 @@ class MovePlaceUp extends Move {
       x: 0,
       z: 0,
     });
-    const nodeAbove = originVec.up(1);
+    const nodeAbove = originVec.up(1); // node we are trying to reach
 
     this.addNeighbors(neighborArray, originVec, nodeAbove);
   }
@@ -35,12 +35,16 @@ class MovePlaceUp extends Move {
       this.canAffordPlacement(1);
     if (!canPlace) return;
     if (!this.canPlaceBlock(originVec)) return;
-    if (!this.isWalkable(originVec) || !this.isWalkable(node)) return;
+    if (
+      !this.isWalkable(originVec) ||
+      (breakChain.length === 0 && !this.isWalkable(node))
+    )
+      return;
 
     const moveNode = node.clone();
     moveNode.attributes = {
       name: this.name,
-      break: breakChain.length > 0 ? breakChain : undefined,
+      break: breakChain.length > 0 ? breakChain : [],
       place: [originVec.clone()],
       cost:
         this.COST_PLACE + this.COST_UP + breakChain.length > 0

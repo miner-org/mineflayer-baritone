@@ -18,7 +18,7 @@ const bot = mineflayer.createBot({
   username: "Frisk",
   port: parseInt(argv[3]) || 39065,
   viewDistance: "tiny",
-  version: "1.18.2",
+  version: "1.21.1",
 });
 
 // bot.loadPlugin(inject);
@@ -32,10 +32,9 @@ bot.once("spawn", async () => {
   bot.chat("hi");
   bot.ashfinder.debug = true;
   bot.ashfinder.config.expertimentalMoves = true;
-  // bot.ashfinder.enableBreaking();
   pathExecutor = new PathExecutor(bot);
 
-  bot.ashfinder.enableBreaking();
+  // bot.ashfinder.enableBreaking();
   // bot.ashfinder.enablePlacing();
   // bot.ashfinder.enableFlight();
   bot.ashfinder.config.debugMoves = true;
@@ -54,16 +53,23 @@ bot.once("spawn", async () => {
     }
 
     if (command === "f!test") {
-      const x = parseInt(args[0]);
-      const y = parseInt(args[1]);
-      const z = parseInt(args[2]);
-      endPos = new Vec3(x, y, z);
+      // const boat = bot.nearestEntity(ent => ent.name.includes("boat"))
+      // console.log(boat)
+      // await bot.activateEntity(boat)
+
+      bot.moveVehicle(0, 10)
+
+
+      // const x = parseInt(args[0]);
+      // const y = parseInt(args[1]);
+      // const z = parseInt(args[2]);
+      // endPos = new Vec3(x, y, z);
 
       // bot.creative.startFlying();
 
-      const goal = new GoalExact(endPos, 1);
+      // const goal = new GoalExact(endPos, 1);
 
-      await bot.ashfinder.gotoSmart(goal);
+      // await bot.ashfinder.gotoSmart(goal);
     }
 
     if (command === "f!find") {
@@ -242,180 +248,180 @@ bot.once("spawn", async () => {
     }
   });
 
-  bot.on("messagestr", async (username, pos, chatMessage) => {
-    if (!sussyVersions.includes(bot.version)) return;
+  // bot.on("messagestr", async (username, pos, chatMessage) => {
+  //   if (!sussyVersions.includes(bot.version)) return;
 
-    if (chatMessage.json.translate !== "chat.type.text") return;
+  //   if (chatMessage.json.translate !== "chat.type.text") return;
 
-    function removeBrackets(str) {
-      return str.replace(/[<>]/g, "");
-    }
+  //   function removeBrackets(str) {
+  //     return str.replace(/[<>]/g, "");
+  //   }
 
-    username = removeBrackets(username).trim();
+  //   username = removeBrackets(username).trim();
 
-    //MESSage in this case is the username ig rela pro pro gay men
+  //   //MESSage in this case is the username ig rela pro pro gay men
 
-    // console.log(message);
-    // console.log(pos);
-    // console.log(chatMessage.json);
+  //   // console.log(message);
+  //   // console.log(pos);
+  //   // console.log(chatMessage.json);
 
-    const realMessage =
-      chatMessage.json.translate === "chat.type.text"
-        ? `${username.trim()}:${Object.values(chatMessage.json.with[1])}`
-        : "nope";
+  //   const realMessage =
+  //     chatMessage.json.translate === "chat.type.text"
+  //       ? `${username.trim()}:${Object.values(chatMessage.json.with[1])}`
+  //       : "nope";
 
-    // console.log(realMessage);
+  //   // console.log(realMessage);
 
-    /**
-     * @type {string}
-     */
-    const usableMessage = Object.values(chatMessage.json.with[1])[0];
+  //   /**
+  //    * @type {string}
+  //    */
+  //   const usableMessage = Object.values(chatMessage.json.with[1])[0];
 
-    // console.log(usableMessage);
+  //   // console.log(usableMessage);
 
-    if (username === bot.username) return;
-    // console.log(jsonMsg.json.with[1])
+  //   if (username === bot.username) return;
+  //   // console.log(jsonMsg.json.with[1])
 
-    const args = usableMessage.split(" ");
-    const command = args.shift();
+  //   const args = usableMessage.split(" ");
+  //   const command = args.shift();
 
-    if (command === "f!stop") {
-      bot.clearControlStates();
-      bot.setControlState("forward", false);
-      bot.setControlState("sprint", false);
-      bot.ashfinder.stop();
-    }
+  //   if (command === "f!stop") {
+  //     bot.clearControlStates();
+  //     bot.setControlState("forward", false);
+  //     bot.setControlState("sprint", false);
+  //     bot.ashfinder.stop();
+  //   }
 
-    if (command === "f!binfo") {
-      const eyePos = bot.blockAtEntityCursor(bot.players[username].entity);
+  //   if (command === "f!binfo") {
+  //     const eyePos = bot.blockAtEntityCursor(bot.players[username].entity);
 
-      if (eyePos) {
-        console.log(eyePos);
-      } else bot.chat("too far");
-    }
+  //     if (eyePos) {
+  //       console.log(eyePos);
+  //     } else bot.chat("too far");
+  //   }
 
-    if (command === "f!test") {
-      const x = parseInt(args[0]);
-      const y = parseInt(args[1]);
-      const z = parseInt(args[2]);
-      endPos = new Vec3(x, y, z);
+  //   if (command === "f!test") {
+  //     const x = parseInt(args[0]);
+  //     const y = parseInt(args[1]);
+  //     const z = parseInt(args[2]);
+  //     endPos = new Vec3(x, y, z);
 
-      // bot.creative.startFlying();
+  //     // bot.creative.startFlying();
 
-      const goal = new GoalExact(endPos, 1);
+  //     const goal = new GoalExact(endPos, 1);
 
-      await bot.ashfinder.goto(goal);
-    }
+  //     await bot.ashfinder.goto(goal);
+  //   }
 
-    if (command === "f!disableOutput") {
-      bot.chat("/gamerule sendCommandFeedback false");
-    }
+  //   if (command === "f!disableOutput") {
+  //     bot.chat("/gamerule sendCommandFeedback false");
+  //   }
 
-    if (command === "f!sneakTest") {
-    }
+  //   if (command === "f!sneakTest") {
+  //   }
 
-    if (command === "f!find") {
-      const blockName = args[0];
-      const radius = parseInt(args[1]) || 1;
+  //   if (command === "f!find") {
+  //     const blockName = args[0];
+  //     const radius = parseInt(args[1]) || 1;
 
-      if (!blockName) return bot.chat("No");
+  //     if (!blockName) return bot.chat("No");
 
-      const block = bot.findBlock({
-        matching: (block) => block.name === blockName,
-        maxDistance: 64,
-      });
+  //     const block = bot.findBlock({
+  //       matching: (block) => block.name === blockName,
+  //       maxDistance: 64,
+  //     });
 
-      if (!block) return bot.chat(`no ${blockName} in 64 block radius`);
+  //     if (!block) return bot.chat(`no ${blockName} in 64 block radius`);
 
-      const pos = block.position.clone().floored();
+  //     const pos = block.position.clone().floored();
 
-      const goal = new GoalNear(pos, radius);
+  //     const goal = new GoalNear(pos, radius);
 
-      bot.chat("/gamerule send_command_feedback false");
+  //     bot.chat("/gamerule send_command_feedback false");
 
-      await bot.ashfinder.goto(goal);
+  //     await bot.ashfinder.goto(goal);
 
-      bot.chat("/gamerule send_command_feedback true");
+  //     bot.chat("/gamerule send_command_feedback true");
 
-      bot.clearControlStates();
-      bot.setControlState("forward", false);
-      bot.setControlState("sprint", false);
-    }
+  //     bot.clearControlStates();
+  //     bot.setControlState("forward", false);
+  //     bot.setControlState("sprint", false);
+  //   }
 
-    // if (command === "f!newtest") {
-    //   const x = parseInt(args[0]);
-    //   const y = parseInt(args[1]);
-    //   const z = parseInt(args[2]);
-    //   endPos = new Vec3(x, y, z);
+  //   // if (command === "f!newtest") {
+  //   //   const x = parseInt(args[0]);
+  //   //   const y = parseInt(args[1]);
+  //   //   const z = parseInt(args[2]);
+  //   //   endPos = new Vec3(x, y, z);
 
-    //   const { path } = await bot.ashfinder.generatePath(endPos);
+  //   //   const { path } = await bot.ashfinder.generatePath(endPos);
 
-    //   const pathExecutor = new PathExecutor(bot);
-    //   pathExecutor.setPath(path);
-    // }
+  //   //   const pathExecutor = new PathExecutor(bot);
+  //   //   pathExecutor.setPath(path);
+  //   // }
 
-    if (command === "f!newfindBlock") {
-      const blockName = args[0];
+  //   if (command === "f!newfindBlock") {
+  //     const blockName = args[0];
 
-      if (!blockName) return bot.chat("No");
+  //     if (!blockName) return bot.chat("No");
 
-      const block = bot.findBlock({
-        matching: (block) => block.name === blockName,
-        maxDistance: 64,
-      });
+  //     const block = bot.findBlock({
+  //       matching: (block) => block.name === blockName,
+  //       maxDistance: 64,
+  //     });
 
-      if (!block) return bot.chat(`no ${blockName} in 64 block radius`);
+  //     if (!block) return bot.chat(`no ${blockName} in 64 block radius`);
 
-      const pos = block.position.clone().floored();
+  //     const pos = block.position.clone().floored();
 
-      const goal = new GoalNear(pos, 1);
+  //     const goal = new GoalNear(pos, 1);
 
-      const result = await bot.ashfinder.generatePath(goal);
+  //     const result = await bot.ashfinder.generatePath(goal);
 
-      const { path, status } = result;
+  //     const { path, status } = result;
 
-      console.log(path.map((node) => node.attributes.name));
+  //     console.log(path.map((node) => node.attributes.name));
 
-      console.log(status);
+  //     console.log(status);
 
-      pathExecutor.setPath(path, {
-        partial: status === "partial",
-        targetGoal: goal,
-        bestNode: result.bestNode,
-      });
-    }
+  //     pathExecutor.setPath(path, {
+  //       partial: status === "partial",
+  //       targetGoal: goal,
+  //       bestNode: result.bestNode,
+  //     });
+  //   }
 
-    if (command === "f!avoid") {
-      //i think this goal works by finding a postion that is away from the target
+  //   if (command === "f!avoid") {
+  //     //i think this goal works by finding a postion that is away from the target
 
-      const goal = new GoalAvoid(bot.entity.position, 10, bot);
-      await bot.ashfinder.goto(goal);
-    }
+  //     const goal = new GoalAvoid(bot.entity.position, 10, bot);
+  //     await bot.ashfinder.goto(goal);
+  //   }
 
-    if (command === "f!goalFace") {
-      const player = bot.players[username];
+  //   if (command === "f!goalFace") {
+  //     const player = bot.players[username];
 
-      const entity = player.entity;
+  //     const entity = player.entity;
 
-      const block = bot.blockAtEntityCursor(entity);
+  //     const block = bot.blockAtEntityCursor(entity);
 
-      if (!block) return console.log("FIck");
+  //     if (!block) return console.log("FIck");
 
-      const face = args[0];
+  //     const face = args[0];
 
-      const goal = new GoalLookAtBlockFace(block.position, bot.world, { face });
-      await bot.ashfinder.goto(goal);
-    }
+  //     const goal = new GoalLookAtBlockFace(block.position, bot.world, { face });
+  //     await bot.ashfinder.goto(goal);
+  //   }
 
-    if (command === "f!pos") {
-      console.log(bot.entity.position, bot.entity.height, "bot");
-      const player = bot.players[username];
+  //   if (command === "f!pos") {
+  //     console.log(bot.entity.position, bot.entity.height, "bot");
+  //     const player = bot.players[username];
 
-      const entity = player.entity;
+  //     const entity = player.entity;
 
-      console.log(entity.position, entity.height, "player");
-    }
-  });
+  //     console.log(entity.position, entity.height, "player");
+  //   }
+  // });
 
   // bot.on("physicsTick", () => {
   //   //help us minotr bots velocirt

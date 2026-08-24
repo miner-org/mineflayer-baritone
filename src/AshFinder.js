@@ -63,7 +63,6 @@ class AshFinderPlugin extends EventEmitter {
     const position = goal.getPosition().clone();
 
     this._searchController.debug = this.debug;
-
     const warmNodes = this._pathCache.getWarmNodes(
       this.bot.entity.position.clone(),
     );
@@ -206,7 +205,7 @@ class AshFinderPlugin extends EventEmitter {
             (node) =>
               `${node.attributes.name} (origin:${
                 node.attributes.originVec ?? "none"
-              }) (Target: ${node.worldPos})`,
+              }) (Target: ${node.worldPos}) (cost: ${node.gCost})`,
           ),
         );
         console.log("Path status:", status);

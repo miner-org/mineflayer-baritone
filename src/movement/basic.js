@@ -19,7 +19,7 @@ class MoveForward extends Move {
 
     const isSolidBelow = this.isSolid(below) && !this.isClimbable(below);
     const interactable = this.isInteractable(node) && !this.isTrapdoor(node);
-    const isFeetAir = this.isAir(node);
+    const isFeetAir = this.isAir(node) || this.isCarpetLike(node);
     const isHeadAir = this.isAir(head);
 
     // Check if we're currently standing on a bottom trapdoor at origin
@@ -52,6 +52,7 @@ class MoveForward extends Move {
       return;
     }
 
+    //interactions
     if (isSolidBelow && interactable) {
       node.attributes = {
         name: this.name,
@@ -151,10 +152,22 @@ class MoveForward extends Move {
 
     if (!canBreak && !this.isStandable(node)) return;
 
+    /**@type {number} */
+    const totalDigTime = node.attributes.break
+      .map((vec) => {
+        const obj = this.bestHarvestTool(vec);
+
+        if (!obj) return 0;
+
+        return obj.digTime / 100;
+      })
+      .reduce((sum, digTime) => sum + digTime, 0);
+
     const breakCost =
       node.attributes.break.length > 0
-        ? this.COST_BREAK * node.attributes.break.length
+        ? this.COST_BREAK + totalDigTime * node.attributes.break.length
         : 0;
+
     const placeCost =
       node.attributes.place.length > 0
         ? this.COST_PLACE * node.attributes.place.length
@@ -319,9 +332,20 @@ class MoveForwardUp extends Move {
       if (!this.isSolid(below) && !willPlaceBelow) return;
     }
 
+    /**@type {number} */
+    const totalDigTime = node.attributes.break
+      .map((vec) => {
+        const obj = this.bestHarvestTool(vec);
+
+        if (!obj) return 0;
+
+        return obj.digTime / 100;
+      })
+      .reduce((sum, digTime) => sum + digTime, 0);
+
     const breakCost =
       node.attributes.break.length > 0
-        ? this.COST_BREAK * node.attributes.break.length
+        ? this.COST_BREAK + totalDigTime * node.attributes.break.length
         : 0;
     const placeCost =
       node.attributes.place.length > 0

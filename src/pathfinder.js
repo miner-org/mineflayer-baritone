@@ -1,8 +1,9 @@
 const { Vec3 } = require("vec3");
-const { getNeighbors2 } = require("./movement");
+const { getNeighbors2, digTimeCache } = require("./movement");
 const { MinHeap } = require("./heap");
+const { PathCache } = require("./pathCache");
 
-const H_TIE_EPSILON = 0.1;
+const H_TIE_EPSILON = 0.09;
 
 /**
  * @param {{ x: number, y: number, z: number }} node
@@ -202,6 +203,121 @@ function reconstructPath(node) {
   }
   path.reverse();
   return path;
+} /**
+ * Re-derive valid gCost values for a set of cached nodes relative to a new
+ * search start, without trusting their absolute gCost (which was computed
+ * relative to a different, old start position).
+ *
+ * Strategy: gCost *deltas* between a cached parent and its cached child are
+ * still valid (they're just the real move cost between two fixed positions).
+ * Only the root of each chain needs a fresh, real cost — found by checking
+ * which cached nodes are direct neighbors of the new startPos.
+ *
+ * @param {Map<string, Cell>} closedNodes - cached posHash -> Cell from a prior search
+ * @param {Vec3} startPos - new search's start position
+ * @param {object} config
+ * @param {NodeManager} nodemanager
+ * @param {import("mineflayer").Bot} bot
+ * @param {Vec3} endPos
+ * @returns {Map<string, Cell>} posHash -> Cell, with corrected gCost/hCost/fCost,
+ *          ready to seed into a fresh openMap/openHeap
+ */
+function reattachWarmNodes(
+  closedNodes,
+  startPos,
+  config,
+  nodemanager,
+  bot,
+  endPos,
+) {
+  const warmed = new Map();
+  if (!closedNodes || closedNodes.size === 0) return warmed;
+
+  // Find real neighbors of the new start among the cached nodes — these are
+  // the only nodes we can give a *trusted* absolute gCost to directly.
+  const startCell = new Cell(startPos, 0);
+  startCell.virtualBlocks = new Map();
+  startCell.scaffoldingUsed = 0;
+  const freshNeighbors = getNeighbors2(
+    startCell,
+    config,
+    nodemanager,
+    bot,
+    endPos,
+  );
+
+  /** @type {Map<string, number>} posHash -> real gCost from fresh expansion */
+  const entryCosts = new Map();
+  for (const n of freshNeighbors) {
+    const hash = posHash(n);
+    if (closedNodes.has(hash)) {
+      entryCosts.set(hash, n.cost);
+    }
+  }
+
+  if (entryCosts.size === 0) return warmed; // nothing in cache borders the new start
+
+  // For each entry point, walk its cached chain forward (via cached parent
+  // pointers reversed — actually we walk backward from every cached node to
+  // its cached ancestor, so instead we do this the other way: for every
+  // cached node, find its distance-in-gCost from its own ancestor chain back
+  // to whichever entry node it descends from).
+  for (const [entryHash, realCost] of entryCosts) {
+    const entryNode = closedNodes.get(entryHash);
+    const correctedEntry = new Cell(entryNode.worldPos, entryNode.cost);
+    correctedEntry.gCost = realCost;
+    correctedEntry.hCost = hCost(entryNode.worldPos, endPos);
+    correctedEntry.fCost = correctedEntry.gCost + correctedEntry.hCost;
+    correctedEntry.parent = null; // new root — actual parent is the new startNode, wired by caller
+    correctedEntry.moveName = entryNode.moveName;
+    correctedEntry.attributes = entryNode.attributes;
+    correctedEntry.direction = entryNode.direction;
+    warmed.set(entryHash, correctedEntry);
+  }
+
+  // Now propagate corrected gCost to descendants of each entry node, using
+  // the *old* search's parent links purely to compute cost deltas.
+  // Build a reverse index: old parent hash -> [child Cell, ...]
+  const childrenByParentHash = new Map();
+  for (const cell of closedNodes.values()) {
+    if (!cell.parent) continue;
+    const parentHash = posHash(cell.parent.worldPos);
+    if (!childrenByParentHash.has(parentHash))
+      childrenByParentHash.set(parentHash, []);
+    childrenByParentHash.get(parentHash).push(cell);
+  }
+
+  // BFS outward from each entry node through the old chain, applying deltas.
+  const queue = [...entryCosts.keys()];
+  const visited = new Set(queue);
+
+  while (queue.length > 0) {
+    const currentHash = queue.shift();
+    const correctedCurrent = warmed.get(currentHash);
+    const oldCurrent = closedNodes.get(currentHash);
+    const children = childrenByParentHash.get(currentHash) ?? [];
+
+    for (const oldChild of children) {
+      const childHash = posHash(oldChild.worldPos);
+      if (visited.has(childHash)) continue;
+      visited.add(childHash);
+
+      const delta = oldChild.gCost - oldCurrent.gCost; // real, position-independent move cost
+      const correctedChild = new Cell(oldChild.worldPos, oldChild.cost);
+      correctedChild.gCost = correctedCurrent.gCost + delta;
+      correctedChild.hCost = hCost(oldChild.worldPos, endPos);
+      correctedChild.fCost = correctedChild.gCost + correctedChild.hCost;
+      correctedChild.parent = correctedCurrent;
+      correctedChild.moveName = oldChild.moveName;
+      correctedChild.attributes = oldChild.attributes;
+      correctedChild.direction = oldChild.direction;
+
+      warmed.set(childHash, correctedChild);
+      queue.push(childHash);
+    }
+  }
+
+  return warmed;
 }
 
 /**
@@ -257,6 +373,8 @@ async function Astar(
   const closedNodes = new Map();
   const nodemanager = new NodeManager();
 
+  digTimeCache.clear();
+
   nodemanager.markNodes(excludedPositions, "areaMarked");
 
   const startNode = new Cell(startPos);
@@ -271,6 +389,22 @@ async function Astar(
 
   const openHeap = new MinHeap(compare);
   openHeap.push(startNode);
+
+  if (options.warmNodes) {
+    const warmed = reattachWarmNodes(
+      options.warmNodes,
+      startPos,
+      config,
+      nodemanager,
+      bot,
+      endPos,
+    );
+    for (const [hash, cell] of warmed) {
+      if (closedSet.has(hash)) continue;
+      openMap.set(hash, cell);
+      openHeap.push(cell);
+    }
+  }
 
   /** Best node encountered so far (smallest hCost), used for partial paths. */
   let bestNode = null;
@@ -299,19 +433,6 @@ async function Astar(
       }
     };
   }
-
-  // if (options.warmNodes) {
-  //   for (const [hash, nodeData] of options.warmNodes) {
-  //     if (!closedSet.has(hash)) {
-  //       const cell = new Cell(nodeData.worldPos, nodeData.cost);
-  //       cell.gCost = nodeData.gCost;
-  //       cell.hCost = hCost(nodeData.worldPos, endPos);
-  //       cell.fCost = cell.gCost + cell.hCost;
-  //       openMap.set(hash, cell);
-  //       openHeap.push(cell);
-  //     }
-  //   }
-  // }
 
   const startTime = performance.now();
   let lastYield = performance.now();
@@ -361,7 +482,7 @@ async function Astar(
 
       if (endFunc(currentNode.worldPos)) {
         if (searchController) searchController.active = false;
-        return resolve({
+        const result = {
           path: reconstructPath(currentNode),
           cost: currentNode.fCost,
           status: "found",
@@ -369,7 +490,8 @@ async function Astar(
           visitedChunks,
           closedNodes,
           iterations: iteration,
-        });
+        };
+        return resolve(result);
       }
 
       // Track best partial candidate.
@@ -516,4 +638,5 @@ module.exports = {
   manhattanDistance,
   euclideanDistance,
   hCost,
+  reattachWarmNodes,
 };

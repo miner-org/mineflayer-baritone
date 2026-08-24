@@ -140,6 +140,11 @@ const moveClasses = [];
 const moveRegistry = new Map();
 
 /**
+ * @type {Map<string, Record<import("prismarine-item").Item, number>>}
+ */
+const digTimeCache = new Map();
+
+/**
  * Move metadata for testing and introspection
  * @typedef {Object} MoveMetadata
  * @property {string} name - Move class name
@@ -168,8 +173,8 @@ class Move {
     this.COST_NORMAL = 1;
     this.COST_UP = 1.5;
     this.COST_FALL = 1.5;
-    this.COST_BREAK = 1.2;
-    this.COST_PLACE = 1.2;
+    this.COST_BREAK = 1.67;
+    this.COST_PLACE = 1.67;
     this.COST_SWIM = 1;
     this.COST_SWIM_START = 1.1;
     this.COST_SWIM_EXIT = 1.1;
@@ -198,6 +203,17 @@ class Move {
     this.virtualBlocks = new Map();
   }
 
+  bestHarvestTool(node) {
+    const block = this.getBlock(node);
+    if (!block) return null;
+    if (digTimeCache.has(block.name)) return digTimeCache.get(block.name);
+
+    const toolAndTime = bestHarvestTool(this.bot, block);
+    if (!toolAndTime) return null;
+    digTimeCache.set(block.name, toolAndTime);
+    return toolAndTime;
+  }
+
   // === Inventory / Block Checks ===
 
   hasScaffoldingBlocks() {
@@ -215,6 +231,12 @@ class Move {
         (sum, item) => sum + (blocks.includes(item.name) ? item.count : 0),
         0,
       );
+  }
+
+  hasPickaxe() {
+    return this.bot.inventory
+      .items()
+      .some((item) => item.name.includes("pickaxe"));
   }
 
   canAffordPlacement(placementCount = 1) {
@@ -407,6 +429,11 @@ class Move {
     // Check if block should be avoided breaking (chests, valuable blocks, etc.)
     if (this.config.blocksToAvoid?.includes(block.name)) return false;
 
+    //Check if the block is soft enough to break with fists if we dont have a pickaxe
+    //Most soft blocks have .harvestTools = undefined
+    //i feel like just adding breakTime to the cost would be better lwk
+    // if (!this.hasPickaxe() && block.harvestTools !== undefined) return false
+
     // breakable if block is solid and passed all other checks
     return this.isSolid(node);
   }
@@ -461,6 +488,7 @@ class Move {
     const block = this.getBlock(node);
     if (!block) return false;
     if (block.name.includes("farmland")) return true;
+    if (block.name.includes("path")) return true;
     if (block.name.includes("door")) return false;
     if (block.name.includes("stair")) return true;
     if (!block.shapes) return false;
@@ -610,6 +638,8 @@ class Move {
 }
 
 function bestHarvestTool(bot, block) {
+  if (!block?.digTime) return null;
+
   const availableTools = bot.inventory.items();
   const effects = bot.entity.effects;
 
@@ -632,7 +662,7 @@ function bestHarvestTool(bot, block) {
     }
   }
 
-  return bestTool;
+  return { bestTool, digTime: fastest };
 }
 
 /**
@@ -764,6 +794,7 @@ function clamp(value, min, max) {
 module.exports = {
   getNeighbors2,
   Move,
+  digTimeCache,
   registerMoves,
   DirectionalVec3,
   clamp,

@@ -458,6 +458,8 @@ class PathExecutor {
     ) {
       await this._handleInteract(node);
     } else if (attr.ascend) {
+      if (attr.break?.length > 0) await this._handleBreakingBlocks(node);
+
       if (
         !this.toweringState.active &&
         !this.placedNodes.has(node.worldPos.toString())
@@ -827,7 +829,7 @@ class PathExecutor {
 
         // Re-check after looking — block may have changed.
         if (bot.blockAt(pos)?.boundingBox === "block") {
-          await bot.dig(block, true);
+          await bot.ashDig(block, { faceMode: "auto", autoTool: false });
           this.breakingState.broken++;
         }
       }
@@ -903,6 +905,7 @@ class PathExecutor {
 
   /** @param {Cell} node */
   async _simpleJump(node) {
+    if (!node.parent?.worldPos) return;
     const bot = this.bot;
     const from = node.parent.worldPos;
     const to = node.worldPos;
@@ -1493,7 +1496,9 @@ class PathExecutor {
       yOffset = 0.9375;
     } else if (
       blockName.includes("fence") ||
-      (blockName.includes("wall") && !blockName.includes("sign"))
+      (blockName.includes("wall") &&
+        !blockName === "wall_torch" &&
+        !blockName.includes("sign"))
     ) {
       yOffset = 1.5;
     } else if (blockName === "soul_sand") {
