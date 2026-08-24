@@ -268,7 +268,7 @@ function reattachWarmNodes(
     correctedEntry.gCost = realCost;
     correctedEntry.hCost = hCost(entryNode.worldPos, endPos);
     correctedEntry.fCost = correctedEntry.gCost + correctedEntry.hCost;
-    correctedEntry.parent = null; // new root — actual parent is the new startNode, wired by caller
+    correctedEntry.parent = startCell; // new root — actual parent is the new startNode, wired by caller
     correctedEntry.moveName = entryNode.moveName;
     correctedEntry.attributes = entryNode.attributes;
     correctedEntry.direction = entryNode.direction;

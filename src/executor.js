@@ -442,6 +442,7 @@ class PathExecutor {
         this.placedNodes.add(node.worldPos.toString());
       }
       if (attr.break?.length > 0) await this._handleBreakingBlocks(node);
+
       if (this.breakingState?.active) return;
 
       if (attr.stair) this._walkTo(node.worldPos);
@@ -905,7 +906,9 @@ class PathExecutor {
 
   /** @param {Cell} node */
   async _simpleJump(node) {
-    if (!node.parent?.worldPos) return;
+    if (!node.parent?.worldPos) {
+      return;
+    }
     const bot = this.bot;
     const from = node.parent.worldPos;
     const to = node.worldPos;
