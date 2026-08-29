@@ -9,6 +9,8 @@ const {
   GoalExact,
   GoalAvoid,
   GoalLookAtBlockFace,
+  GoalNearBlockFace,
+  GoalNearAvoid,
 } = require("./goal");
 const PathExecutor = require("./executor");
 const sussyVersions = ["1.21", "1.21.1", "1.21.2", "1.21.3", "1.21.4"];
@@ -35,7 +37,7 @@ bot.once("spawn", async () => {
   pathExecutor = new PathExecutor(bot);
 
   // bot.ashfinder.enableBreaking();
-  // bot.ashfinder.enablePlacing();
+  bot.ashfinder.enablePlacing();
   // bot.ashfinder.enableFlight();
   bot.ashfinder.config.debugMoves = true;
 
@@ -56,9 +58,6 @@ bot.once("spawn", async () => {
       // const boat = bot.nearestEntity(ent => ent.name.includes("boat"))
       // console.log(boat)
       // await bot.activateEntity(boat)
-
-      bot.moveVehicle(0, 10)
-
 
       // const x = parseInt(args[0]);
       // const y = parseInt(args[1]);
@@ -179,54 +178,36 @@ bot.once("spawn", async () => {
       await bot.elytrafly.elytraFlyTo(endPos);
     }
 
-    if (command === "f!sugar") {
-      const sugarcanePositions = bot.findBlocks({
-        matching: (block) => block.name === "sugar_cane",
-        count: 6,
-        maxDistance: 6,
-        useExtraInfo: false,
+    if (command === "f!goalFace") {
+      const player = bot.players[username];
+
+      const entity = player.entity;
+
+      const block = bot.blockAtEntityCursor(entity);
+
+      if (!block) return console.log("FIck");
+
+      const face = args[0];
+
+      const goal = new GoalLookAtBlockFace(block.position, bot.world, {
+        face,
+        reach: 4.5,
+        minDistance: 3,
       });
+      await bot.ashfinder.goto(goal);
+    }
 
-      if (sugarcanePositions.length === 0) return console.log("nah im good");
-      let uniquePositions = new Map();
-      const hash = (pos) => {
-        return `${pos.x}-${pos.y}-${pos.z}`;
-      };
+    if (command === "f!goalNearAvoid") {
+      const player = bot.players[username];
 
-      for (const pos of sugarcanePositions) {
-        const blockAt = bot.blockAt(pos);
+      const entity = player.entity;
 
-        if (!blockAt) continue;
+      const block = bot.blockAtEntityCursor(entity);
 
-        for (let i = 0; i < 3; i++) {
-          const block = bot.blockAt(blockAt.position.offset(0, i, 0));
+      if (!block) return console.log("FIck");
 
-          // then we found a 2 tall sugarcane block
-          if (block.name === "air") {
-            // Get the block below the air block which will probably be the sugarcane idk
-            const sugarcaneBelowAir = bot.blockAt(
-              block.position.offset(0, -1, 0),
-            );
-
-            // store the position in the map if it isnt already there
-            if (!uniquePositions.has(hash(sugarcaneBelowAir.position))) {
-              uniquePositions.set(
-                hash(sugarcaneBelowAir.position),
-                sugarcaneBelowAir,
-              );
-            }
-            break;
-          }
-        }
-      }
-
-      if (uniquePositions.size === 0)
-        return console.log("didnt not find any bruh");
-
-      const uniqueBlocks = Array.from(uniquePositions.values());
-
-      console.log(`i found ${uniqueBlocks.length} sugarcane blocks!`);
-      console.log(uniqueBlocks);
+      const goal = new GoalNearAvoid(block.position, 1);
+      await bot.ashfinder.goto(goal);
     }
   });
 

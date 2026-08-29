@@ -3,7 +3,7 @@ const { getNeighbors2, digTimeCache } = require("./movement");
 const { MinHeap } = require("./heap");
 const { PathCache } = require("./pathCache");
 
-const H_TIE_EPSILON = 0.09;
+const H_TIE_EPSILON = 0.05;
 
 /**
  * @param {{ x: number, y: number, z: number }} node
@@ -195,15 +195,77 @@ function compare(a, b) {
  * @param {Cell} node
  * @returns {Cell[]}
  */
-function reconstructPath(node) {
+function reconstructPath(node, config, bot) {
   const path = [];
   while (node) {
     path.push(node);
     node = node.parent;
   }
   path.reverse();
-  return path;
-} /**
+
+  const smoothOrNah = smoothFlightPath(path, config, bot);
+  return smoothOrNah;
+}
+/**
+ * Collapse consecutive flying nodes into fewer waypoints when a straight
+ * line between them is unobstructed and the intermediate nodes were
+ * pure-flight transit (not landings/action nodes).
+ * @param {Cell[]} path
+ * @param {import("mineflayer").Bot} bot
+ * @returns {Cell[]}
+ */
+function smoothFlightPath(path, config, bot) {
+  if (!config.fly) return path;
+  if (path.length < 3) return path;
+
+  const result = [path[0]];
+  let anchor = 0;
+
+  for (let i = 1; i < path.length; i++) {
+    const anchorNode = path[anchor];
+    const candidate = path[i];
+
+    // Never skip past a node that isn't pure flight-transit — landings,
+    // block placements/breaks, direction changes, etc. must stay as hard stops.
+    const isPureFlight =
+      candidate.attributes.isFlying &&
+      !candidate.attributes.place?.length &&
+      !candidate.attributes.break?.length &&
+      candidate.attributes.canStandOnTop !== true; // keep landing nodes as stops
+
+    if (
+      !isPureFlight ||
+      !hasLineOfSight(bot, anchorNode.worldPos, candidate.worldPos)
+    ) {
+      // Can't extend further — commit the last good candidate and reset anchor.
+      result.push(path[i - 1] === anchorNode ? candidate : path[i - 1]);
+      anchor = i - 1;
+      if (result[result.length - 1] !== path[i - 1]) result.push(path[i - 1]);
+    }
+  }
+
+  if (result[result.length - 1] !== path[path.length - 1]) {
+    result.push(path[path.length - 1]);
+  }
+
+  return result;
+}
+
+function hasLineOfSight(bot, from, to) {
+  const dir = to.minus(from);
+  const dist = dir.norm();
+  if (dist === 0) return true;
+  const step = dir.scaled(1 / dist);
+
+  for (let d = 0.5; d < dist; d += 0.5) {
+    const p = from.plus(step.scaled(d));
+    const block = bot.blockAt(p.floored());
+    if (block && block.boundingBox === "block") return false;
+  }
+  return true;
+}
+
+/**
  * Re-derive valid gCost values for a set of cached nodes relative to a new
  * search start, without trusting their absolute gCost (which was computed
  * relative to a different, old start position).
@@ -238,6 +300,7 @@ function reattachWarmNodes(
   const startCell = new Cell(startPos, 0);
   startCell.virtualBlocks = new Map();
   startCell.scaffoldingUsed = 0;
+    startCell.canStandOnTop = true;
   const freshNeighbors = getNeighbors2(
     startCell,
     config,
@@ -268,7 +331,8 @@ function reattachWarmNodes(
     correctedEntry.gCost = realCost;
     correctedEntry.hCost = hCost(entryNode.worldPos, endPos);
     correctedEntry.fCost = correctedEntry.gCost + correctedEntry.hCost;
-    correctedEntry.parent = startCell; // new root — actual parent is the new startNode, wired by caller
+    correctedEntry.parent = startCell;
+    correctedEntry.canStandOnTop = entryNode.canStandOnTop;
     correctedEntry.moveName = entryNode.moveName;
     correctedEntry.attributes = entryNode.attributes;
     correctedEntry.direction = entryNode.direction;
@@ -309,6 +373,7 @@ function reattachWarmNodes(
       correctedChild.fCost = correctedChild.gCost + correctedChild.hCost;
       correctedChild.parent = correctedCurrent;
       correctedChild.moveName = oldChild.moveName;
+      correctedChild.canStandOnTop = oldChild.canStandOnTop;
       correctedChild.attributes = oldChild.attributes;
       correctedChild.direction = oldChild.direction;
 
@@ -383,6 +448,7 @@ async function Astar(
   startNode.fCost = startNode.gCost + startNode.hCost;
   startNode.virtualBlocks = new Map();
   startNode.scaffoldingUsed = 0;
+  startNode.canStandOnTop = true;
 
   const startHash = posHash(startPos);
   openMap.set(startHash, startNode);
@@ -390,21 +456,21 @@ async function Astar(
   const openHeap = new MinHeap(compare);
   openHeap.push(startNode);
 
-  if (options.warmNodes) {
-    const warmed = reattachWarmNodes(
-      options.warmNodes,
-      startPos,
-      config,
-      nodemanager,
-      bot,
-      endPos,
-    );
-    for (const [hash, cell] of warmed) {
-      if (closedSet.has(hash)) continue;
-      openMap.set(hash, cell);
-      openHeap.push(cell);
-    }
-  }
+  // if (options.warmNodes) {
+  //   const warmed = reattachWarmNodes(
+  //     options.warmNodes,
+  //     startPos,
+  //     config,
+  //     nodemanager,
+  //     bot,
+  //     endPos,
+  //   );
+  //   for (const [hash, cell] of warmed) {
+  //     if (closedSet.has(hash)) continue;
+  //     openMap.set(hash, cell);
+  //     openHeap.push(cell);
+  //   }
+  // }
 
   /** Best node encountered so far (smallest hCost), used for partial paths. */
   let bestNode = null;
@@ -480,10 +546,10 @@ async function Astar(
         );
       }
 
-      if (endFunc(currentNode.worldPos)) {
+      if (currentNode.canStandOnTop && endFunc(currentNode.worldPos)) {
         if (searchController) searchController.active = false;
         const result = {
-          path: reconstructPath(currentNode),
+          path: reconstructPath(currentNode, config, bot),
           cost: currentNode.fCost,
           status: "found",
           openMap,
@@ -495,10 +561,12 @@ async function Astar(
       }
 
       // Track best partial candidate.
-      const h = hCost(currentNode.worldPos, endPos);
-      if (h < bestScore) {
-        bestNode = currentNode;
-        bestScore = h;
+      if (currentNode.canStandOnTop) {
+        const h = hCost(currentNode.worldPos, endPos);
+        if (h < bestScore) {
+          bestNode = currentNode;
+          bestScore = h;
+        }
       }
 
       const neighbors = getNeighbors2(
@@ -512,7 +580,15 @@ async function Astar(
       for (const n of neighbors) {
         const nHash = posHash(n);
         if (closedSet.has(nHash)) continue;
-        _processNeighbor(currentNode, n, openMap, openHeap, endPos, startPos);
+        _processNeighbor(
+          currentNode,
+          n,
+          openMap,
+          openHeap,
+          endPos,
+          startPos,
+          config,
+        );
       }
 
       if (performance.now() - startTime >= config.thinkTimeout) {
@@ -520,7 +596,7 @@ async function Astar(
 
         if (bestNode) {
           return resolve({
-            path: reconstructPath(bestNode),
+            path: reconstructPath(bestNode, config, bot),
             status: "partial",
             cost: bestNode.fCost,
             bestNode,
@@ -546,7 +622,7 @@ async function Astar(
     if (searchController) searchController.active = false;
 
     return resolve({
-      path: bestNode ? reconstructPath(bestNode) : [],
+      path: bestNode ? reconstructPath(bestNode, config, bot) : [],
       status: "no path",
       exploredNodes: closedSet.size,
       remainingNodes: openMap.size,
@@ -571,6 +647,7 @@ function _processNeighbor(
   openHeap,
   end,
   startPos,
+  config,
 ) {
   const hash = posHash(neighborData);
 
@@ -579,20 +656,10 @@ function _processNeighbor(
 
   const baseMoveCost = neighborData.cost;
 
-  // const currentH = currentNode.hCost;
-  // const nextH = hCost(
-  //   { x: neighborData.x, y: neighborData.y, z: neighborData.z },
-  //   end,
-  // );
-
-  // const lambda = 0.15;
-
-  // const awayPenalty = Math.max(0, nextH - currentH) * lambda;
-
-  // const tempG = currentNode.gCost + baseMoveCost + awayPenalty;
   const tempG = currentNode.gCost + baseMoveCost;
 
   let neighbor = openMap.get(hash);
+  const hWeight = config.hWeight ?? 1.0;
 
   if (!neighbor) {
     neighbor = new Cell();
@@ -604,12 +671,13 @@ function _processNeighbor(
     neighbor.direction = neighborData.dir;
     neighbor.gCost = tempG;
     neighbor.hCost = hCost(neighbor.worldPos, end);
-    neighbor.fCost = neighbor.gCost + neighbor.hCost;
+    neighbor.fCost = neighbor.gCost + hWeight * neighbor.hCost;
     neighbor.parent = currentNode;
     neighbor.moveName = neighborData.attributes.name;
     neighbor.attributes = neighborData.attributes;
     neighbor.virtualBlocks = neighborData.virtualBlocks;
     neighbor.scaffoldingUsed = totalScaffoldingUsed;
+    neighbor.canStandOnTop = neighborData.attributes.canStandOnTop ?? true;
 
     openMap.set(hash, neighbor);
     openHeap.push(neighbor);
@@ -617,12 +685,13 @@ function _processNeighbor(
     // Cheaper route found
     neighbor.gCost = tempG;
     neighbor.hCost = hCost(neighbor.worldPos, end);
-    neighbor.fCost = neighbor.gCost + neighbor.hCost;
+    neighbor.fCost = neighbor.gCost + hWeight * neighbor.hCost;
     neighbor.parent = currentNode;
     neighbor.moveName = neighborData.attributes.name;
     neighbor.attributes = neighborData.attributes;
     neighbor.virtualBlocks = neighborData.virtualBlocks;
     neighbor.scaffoldingUsed = totalScaffoldingUsed;
+    neighbor.canStandOnTop = neighborData.attributes.canStandOnTop ?? true;
 
     openHeap.push(neighbor);
   }

@@ -22,10 +22,12 @@ class MoveLadderEnter extends Move {
       node.attributes["name"] = this.name;
       node.attributes["ladder"] = true;
       node.attributes["enter"] = true;
+      node.attributes["canStandOnTop"] = false;
+
       // console.log("Adding ladder enter movement", node);
       node.attributes["cost"] = this.COST_LADDER ?? this.COST_NORMAL + 1;
       neighbors.push(
-        this.makeMovement(node, this.COST_LADDER ?? this.COST_NORMAL + 1)
+        this.makeMovement(node, this.COST_LADDER ?? this.COST_NORMAL + 1),
       );
     }
   }
@@ -43,6 +45,7 @@ class MoveLadderExit extends Move {
         node.attributes["name"] = this.name + "_up";
         node.attributes["cost"] =
           (this.COST_LADDER_EXIT ?? this.COST_NORMAL + 1) + 0.5;
+        node.attributes["canStandOnTop"] = true;
         neighbors.push(this.makeMovement(node, node.attributes["cost"]));
         break;
       }
@@ -52,15 +55,15 @@ class MoveLadderExit extends Move {
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       const node = originVec.offset(dir.x, 0, dir.z);
-      this.addNeighbors(neighbors, node);
+      this.addNeighbors(neighbors, node, originVec);
     }
   }
 
-  addNeighbors(neighbors, node) {
+  addNeighbors(neighbors, node, originVec) {
     const below = node.down(1);
     const head = node.up(1);
 
-    const fromLadder = this.isClimbable(node);
+    const fromLadder = this.isClimbable(originVec);
     const toStandable = this.isStandable(node);
     const blockBelow = this.isSolid(below);
     const headClear = this.isAir(head);
@@ -69,6 +72,7 @@ class MoveLadderExit extends Move {
       node.attributes["name"] = this.name;
       node.attributes["ladder"] = false;
       node.attributes["cost"] = this.COST_LADDER_EXIT ?? this.COST_NORMAL;
+      node.attributes["canStandOnTop"] = true;
       neighbors.push(this.makeMovement(node, node.attributes["cost"]));
     }
   }
@@ -97,6 +101,7 @@ class MoveLadderClimb extends Move {
     up.attributes.name = this.name;
     up.attributes.ladder = true;
     up.attributes.cost = this.COST_LADDER ?? this.COST_NORMAL + 1;
+    up.attributes.canStandOnTop = false;
     // console.log("da")
 
     neighbors.push(this.makeMovement(up, up.attributes.cost));
@@ -137,8 +142,9 @@ class MoveLadderDescend extends Move {
     lastValid.attributes["ladder"] = true;
     lastValid.attributes["descend"] = true;
     lastValid.attributes["cost"] = this.COST_LADDER;
+    lastValid.attributes["canStandOnTop"] = false;
     neighbors.push(
-      this.makeMovement(lastValid, this.COST_LADDER ?? this.COST_NORMAL + 1)
+      this.makeMovement(lastValid, this.COST_LADDER ?? this.COST_NORMAL + 1),
     );
   }
 }
@@ -165,14 +171,14 @@ class MoveLadderEnterDescend extends Move {
     if (!this.isClimbable(below)) return;
 
     const target = node.clone();
-
     target.attributes["name"] = this.name;
     target.attributes["ladder"] = true;
     target.attributes["descend"] = true;
     target.attributes["enterTarget"] = node.clone();
+    target.attributes["canStandOnTop"] = false;
     target.attributes["cost"] = this.COST_LADDER ?? this.COST_NORMAL + 1;
     neighbors.push(
-      this.makeMovement(target, this.COST_LADDER ?? this.COST_NORMAL + 1)
+      this.makeMovement(target, this.COST_LADDER ?? this.COST_NORMAL + 1),
     );
   }
 }

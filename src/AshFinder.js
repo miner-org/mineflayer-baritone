@@ -63,9 +63,9 @@ class AshFinderPlugin extends EventEmitter {
     const position = goal.getPosition().clone();
 
     this._searchController.debug = this.debug;
-    const warmNodes = this._pathCache.getWarmNodes(
-      this.bot.entity.position.clone(),
-    );
+    // const warmNodes = this._pathCache.getWarmNodes(
+    //   this.bot.entity.position.clone(),
+    // );
 
     const result = await astar(
       this.bot.entity.position.clone(),
@@ -74,7 +74,7 @@ class AshFinderPlugin extends EventEmitter {
       this.bot,
       endFunc,
       this.config,
-      { excludedPositions: [], warmNodes, ...options },
+      { excludedPositions: [], ...options },
       this.debug,
       this._searchController,
     );
@@ -423,6 +423,7 @@ const DEFAULT_CONFIG = {
   swimming: true,
   placeBlocks: false,
   breakBlocks: false,
+  hWeight: 1.67,
   parkour: true,
   checkBreakUpNodes: true,
   proParkour: false,

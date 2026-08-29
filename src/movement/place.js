@@ -41,18 +41,21 @@ class MovePlaceUp extends Move {
     )
       return;
 
+    const cost =
+      this.COST_PLACE +
+      this.COST_UP +
+      (breakChain.length > 0 ? this.COST_BREAK : 0);
+
     const moveNode = node.clone();
     moveNode.attributes = {
       name: this.name,
       break: breakChain.length > 0 ? breakChain : [],
       place: [originVec.clone()],
-      cost:
-        this.COST_PLACE + this.COST_UP + breakChain.length > 0
-          ? this.COST_BREAK
-          : 0,
+      cost,
       ascend: true,
       originVec,
     };
+    moveNode.attributes.canStandOnTop = true;
 
     neighbors.push(this.makeMovement(moveNode, moveNode.attributes.cost));
   }

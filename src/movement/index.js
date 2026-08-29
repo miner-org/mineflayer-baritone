@@ -171,6 +171,7 @@ class Move {
 
     // Movement costs
     this.COST_NORMAL = 1;
+    this.COST_FLY = 2;
     this.COST_UP = 1.5;
     this.COST_FALL = 1.5;
     this.COST_BREAK = 1.67;
@@ -272,12 +273,17 @@ class Move {
     return offsets.some(([dx, dy, dz]) => this.isSolid(pos.offset(dx, dy, dz)));
   }
 
+  // this is for slabs mostly
   getMaxY(node) {
     const block = this.getBlock(node);
-    if (!block) return 1;
+    if (!block) return 0;
 
-    if (block.shapes[0].length === 0) return false;
-    return block.shapes[0]?.[4] ?? 1;
+    if (!block.shapes) return 0;
+
+    if (block.shapes.length === 0) return 0;
+
+    if (block.shapes[0].length === 0) return 0;
+    return block.shapes[0]?.[4] ?? 0;
   }
 
   isAir(pos) {
@@ -495,7 +501,6 @@ class Move {
     if (block.shapes[0]?.length === 0) return false;
     const maxY = block.shapes[0]?.[4];
 
-    let yThreshhold = block.name.includes("slab") ? 0.5 : 1;
     return maxY === 1;
   }
 
@@ -749,7 +754,7 @@ function getNeighbors2(node, config, manager, bot, end) {
 
     const origin = node.worldPos;
     const generatedNeighbors = [];
-    move.generate(cardinalDirections, origin, generatedNeighbors, end);
+    move.generate(cardinalDirections, origin, generatedNeighbors, end, node);
 
     for (const neighbor of generatedNeighbors) {
       const hasBreaks = neighbor.attributes?.break?.length > 0;

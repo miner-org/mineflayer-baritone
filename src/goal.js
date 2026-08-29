@@ -66,6 +66,35 @@ class GoalNear extends Goal {
   }
 }
 
+class GoalNearAvoid extends Goal {
+  /**
+   * @param {Vec3} position - block to get near
+   * @param {number} distance - max reach distance
+   */
+  constructor(position, distance) {
+    super(position);
+    this.distance = distance;
+  }
+
+  isReached(otherPosition) {
+    if (!otherPosition) return false;
+
+    const feet = otherPosition.floored();
+    const target = this.getPosition();
+
+    if (feet.equals(target)) {
+      return false;
+    }
+
+    const center = target.offset(0.5, 0, 0.5);
+    const dx = center.x - otherPosition.x;
+    const dy = center.y - otherPosition.y;
+    const dz = center.z - otherPosition.z;
+
+    return dx * dx + dy * dy + dz * dz <= this.distance * this.distance;
+  }
+}
+
 class GoalNearXZ extends Goal {
   /**
    * @param {Vec3} position
@@ -428,7 +457,7 @@ class GoalLookAtBlockFace extends Goal {
   /**
    * @param {Vec3} position
    * @param {object} world
-   * @param {{ reach?: number, entityHeight?: number, face?: FaceDirection }} [options={}]
+   * @param {{ reach?: number, entityHeight?: number, face?: FaceDirection, minDistance?: number }} [options={}]
    */
   constructor(position, world, options = {}) {
     super(position);
@@ -436,6 +465,10 @@ class GoalLookAtBlockFace extends Goal {
     this.reach = options.reach ?? 4.5;
     this.entityHeight = options.entityHeight ?? 1.6;
     this.face = normalizeVertical(options.face);
+
+    // Minimum horizontal-ish distance to keep the bot's hitbox clear
+    // of the target block so it doesn't stand where it's trying to build.
+    this.minDistance = options.minDistance ?? 1.0;
   }
 
   isReached(nodePos) {
@@ -445,7 +478,9 @@ class GoalLookAtBlockFace extends Goal {
     const node = nodePos.offset(0, this.entityHeight, 0);
     const blockCenter = this.getPosition().offset(0.5, 0.5, 0.5);
 
-    if (node.distanceTo(blockCenter) > this.reach) return false;
+    const distToCenter = node.distanceTo(blockCenter);
+    if (distToCenter > this.reach) return false;
+    if (distToCenter < this.minDistance) return false;
 
     const faceTarget = blockCenter.plus(dir.scaled(0.5));
     const rayDir = faceTarget.minus(node).normalize();
@@ -471,6 +506,37 @@ class GoalLookAtBlockFace extends Goal {
   }
 }
 
+class GoalNearBlockFace extends Goal {
+  /**
+   * @param {Vec3} position
+   * @param {number} distance
+   * @param {{ face?: FaceDirection, entityHeight?: number }} [options={}]
+   */
+  constructor(position, distance, options = {}) {
+    super(position);
+    this.distance = distance;
+    this.face = normalizeVertical(options.face);
+    this.entityHeight = options.entityHeight ?? 1.6;
+  }
+
+  isReached(nodePos) {
+    if (!nodePos) return false;
+
+    const dir = FACE_DIRS[this.face];
+    if (!dir) return false;
+
+    const blockCenter = this.getPosition().offset(0.5, 0.5, 0.5);
+    const faceTarget = blockCenter.plus(dir.scaled(0.5));
+    const node = nodePos.offset(0, this.entityHeight, 0);
+
+    const dx = faceTarget.x - node.x;
+    const dy = faceTarget.y - node.y;
+    const dz = faceTarget.z - node.z;
+
+    return dx * dx + dy * dy + dz * dz <= this.distance * this.distance;
+  }
+}
+
 module.exports = {
   Goal,
   GoalDynamic,
@@ -487,5 +553,7 @@ module.exports = {
   GoalXZNear,
   GoalLookAtBlock,
   GoalLookAtBlockFace,
+  GoalNearBlockFace,
   GoalFollowEntity,
+  GoalNearAvoid,
 };

@@ -1,7 +1,9 @@
 const { Move, registerMoves, DirectionalVec3, clamp } = require("./");
 
 class MoveForward extends Move {
-  generate(cardinalDirections, origin, neighbors, end) {
+  generate(cardinalDirections, origin, neighbors, end, node) {
+    if (!node.canStandOnTop) return;
+
     for (const dir of cardinalDirections) {
       const snappedY = Math.floor(origin.y + 0.5); // round to nearest block
       const originVec = new DirectionalVec3(origin.x, snappedY, origin.z, dir);
@@ -35,9 +37,10 @@ class MoveForward extends Move {
         !this.getBlock(node).getProperties().open);
 
     if (
-      (this.isSlab(below) && this.isHalfSlab(below)) ||
-      (this.isSlab(node) && this.isHalfSlab(node)) ||
-      isWalkableTrapdoorBelow
+      this.isWalkable(head) &&
+      ((this.isSlab(below) && this.isHalfSlab(below)) ||
+        (this.isSlab(node) && this.isHalfSlab(node)) ||
+        isWalkableTrapdoorBelow)
     ) {
       node.attributes = {
         name: this.name,
@@ -47,6 +50,8 @@ class MoveForward extends Move {
         cost: this.COST_NORMAL,
         interact: false,
       };
+
+      if (this.isSlab(node)) node.y += this.getMaxY(node);
 
       neighbors.push(this.makeMovement(node, node.attributes.cost));
       return;
@@ -76,6 +81,7 @@ class MoveForward extends Move {
         place: [],
         cost: this.COST_NORMAL,
         interact: false,
+        canStandOnTop: true,
       };
       neighbors.push(this.makeMovement(node, node.attributes.cost));
       return;
@@ -96,6 +102,7 @@ class MoveForward extends Move {
         cost: this.COST_NORMAL,
         interact: false,
         crouch: true,
+        canStandOnTop: true,
       };
       neighbors.push(this.makeMovement(node, node.attributes.cost));
       return;
@@ -112,7 +119,12 @@ class MoveForward extends Move {
     const canStand = isSolidBelow || canScaffold;
     if (!canStand && !interactable) return;
 
-    node.attributes = { name: this.name, break: [], place: [] };
+    node.attributes = {
+      name: this.name,
+      break: [],
+      place: [],
+      canStandOnTop: true,
+    };
 
     if (canScaffold) node.attributes.place.push(below.clone());
     if (!isSolidBelow && node.attributes.place.length === 0) return;
@@ -199,7 +211,8 @@ class MoveForward extends Move {
 }
 
 class MoveDiagonal extends Move {
-  generate(cardinalDirections, origin, neighbors) {
+  generate(cardinalDirections, origin, neighbors, end, node) {
+    if (!node.canStandOnTop) return;
     const diagonalOffsets = [
       { x: 1, z: 1 },
       { x: -1, z: 1 },
@@ -240,14 +253,15 @@ class MoveDiagonal extends Move {
       node.attributes["name"] = this.name;
       const cost = this.COST_DIAGONAL;
       node.attributes["cost"] = cost;
+      node.attributes["canStandOnTop"] = true;
       neighbors.push(this.makeMovement(node, cost));
     }
   }
 }
 
 class MoveForwardUp extends Move {
-  generate(cardinalDirections, origin, neighbors) {
-    if (this.config.fly) return;
+  generate(cardinalDirections, origin, neighbors, end, node) {
+    if (!node.canStandOnTop) return;
     for (const dir of cardinalDirections) {
       const snappedY = Math.floor(origin.y + 0.5); // round to nearest block
       const originVec = new DirectionalVec3(origin.x, snappedY, origin.z, dir);
@@ -274,7 +288,13 @@ class MoveForwardUp extends Move {
     const canPlace = this.config.placeBlocks && this.hasScaffoldingBlocks();
     const canBreak = this.config.breakBlocks;
 
-    node.attributes = { name: this.name, break: [], place: [], nJump: true };
+    node.attributes = {
+      name: this.name,
+      break: [],
+      place: [],
+      nJump: true,
+      canStandOnTop: true,
+    };
 
     // === EARLY EXIT if already standable ===
     if (this.isStandable(node) && this.isAir(above)) {
@@ -392,8 +412,8 @@ class MoveForwardUp extends Move {
 }
 
 class MoveForwardDown extends Move {
-  generate(cardinalDirections, origin, neighbors) {
-    if (this.config.fly) return;
+  generate(cardinalDirections, origin, neighbors, end, node) {
+    if (!node.canStandOnTop) return;
     for (const dir of cardinalDirections) {
       const snappedY = Math.floor(origin.y + 0.5); // round to nearest block
       const originVec = new DirectionalVec3(origin.x, snappedY, origin.z, dir);
@@ -473,6 +493,7 @@ class MoveForwardDown extends Move {
     targetNode.attributes.originVec = originVec;
     targetNode.attributes.break = [];
     targetNode.attributes.place = [];
+    targetNode.attributes.canStandOnTop = true;
 
     if (willPlace) {
       targetNode.attributes.place.push(below.clone());
@@ -489,7 +510,8 @@ class MoveForwardDown extends Move {
 }
 
 class MoveDiagonalUp extends Move {
-  generate(cardinalDirections, origin, neighbors) {
+  generate(cardinalDirections, origin, neighbors, end, node) {
+    if (!node.canStandOnTop) return;
     const diagonalOffsets = [
       { x: 1, z: 1 },
       { x: -1, z: 1 },
@@ -538,12 +560,17 @@ class MoveDiagonalUp extends Move {
     const cost = this.COST_DIAGONAL + this.COST_UP;
     node.attributes["cost"] = cost;
     node.attributes["nJump"] = true;
+    node.attributes["up"] = true;
+    node.attributes["diagonal"] = true;
+    node.attributes["canStandOnTop"] = true;
+
     neighbors.push(this.makeMovement(node, cost));
   }
 }
 
 class MoveDiagonalDown extends Move {
-  generate(cardinalDirections, origin, neighbors) {
+  generate(cardinalDirections, origin, neighbors, end, node) {
+    if (!node.canStandOnTop) return;
     const diagonalOffsets = [
       { x: 1, z: 1 },
       { x: -1, z: 1 },
@@ -635,6 +662,7 @@ class MoveDiagonalDown extends Move {
     targetNode.attributes.originVec = originVec;
     targetNode.attributes.place = [];
     targetNode.attributes.break = [];
+    targetNode.attributes.canStandOnTop = true;
 
     if (willPlace) {
       targetNode.attributes.place.push(below.clone());

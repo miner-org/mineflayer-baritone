@@ -30,6 +30,8 @@ class MoveForwardParkour extends Move {
 
     const start = originVec.forward(1);
 
+    if (!this.isWalkable(start)) return;
+
     for (let distance = minDistance; distance <= maxDistance; distance++) {
       const landingNode = start.forward(distance);
       const standingNode = landingNode.down(1);
@@ -65,6 +67,7 @@ class MoveForwardParkour extends Move {
       for (let i = 1; i <= distance; i++) {
         const forward = last.forward(1);
 
+        if (!this.isWalkable(forward)) break;
         if (forward.y !== originVec.y) break;
 
         bodyClear.push(forward.up(1));
@@ -90,13 +93,14 @@ class MoveForwardParkour extends Move {
         nJump: distance === 1,
         sJump: distance >= 2,
         dist: distance,
+        canStandOnTop: true,
         parkour: true,
         originVec,
       };
 
       if (this.isAir(landingNode.down(1))) {
         parkourNode.attributes.place = [landingNode.clone().down(1)];
-        parkourNode.attributes.cost *= 2;
+        parkourNode.attributes.cost += this.COST_PLACE;
       }
       neighbors.push(
         this.makeMovement(parkourNode, parkourNode.attributes.cost),
@@ -115,7 +119,7 @@ class MoveForwardParkourUp extends Move {
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
 
-      if (!this.isWalkable(originVec)) continue; //dont fucknig know hwy this happens
+      if (!this.isWalkable(originVec) && !this.isAir(originVec.up(1))) continue; //dont fucknig know hwy this happens
 
       if (this.isWater(originVec)) continue;
       this.addNeighbors(neighbors, originVec);
@@ -127,13 +131,14 @@ class MoveForwardParkourUp extends Move {
     const minDistance = 1;
     const maxDistance = 2; // small parkour forward
     const start = originVec.forward(1);
+    if (!this.isWalkable(start)) return;
 
     for (let distance = minDistance; distance <= maxDistance; distance++) {
       const landingNode = start.forward(distance).up(1); // step up 1
       const standingNode = landingNode.down(1); // block under feet
 
-      if (!this.isStandable(landingNode)  ) {
-        if(!this.isWalkable(landingNode))continue;
+      if (!this.isStandable(landingNode)) {
+        if (!this.isWalkable(landingNode)) continue;
         const canPlace =
           this.config.placeBlocks &&
           this.hasScaffoldingBlocks() &&
@@ -174,6 +179,7 @@ class MoveForwardParkourUp extends Move {
         nJump: distance === 1,
         sJump: distance >= 2,
         dist: distance,
+        canStandOnTop: true,
         up: true, // mark as upward jump
         parkour: true, // mark as parkour
         originVec,
@@ -182,7 +188,6 @@ class MoveForwardParkourUp extends Move {
       if (!this.isStandable(landingNode)) {
         parkourNode.attributes.place = [landingNode.clone().down(1)];
         parkourNode.attributes.cost += this.COST_PLACE;
-        parkourNode.attributes.cost *= 0.8;
       }
 
       neighbors.push(
@@ -212,6 +217,7 @@ class MoveForwardParkourDown extends Move {
     const maxDistance = 2; // small parkour forward
 
     const start = originVec.forward(1);
+    if (!this.isWalkable(start)) return;
 
     for (let distance = minDistance; distance <= maxDistance; distance++) {
       const landingNode = start.forward(distance).down(1); // step down 1
@@ -243,6 +249,7 @@ class MoveForwardParkourDown extends Move {
         cost: this.COST_PARKOUR * distance + this.COST_FALL,
         nJump: true,
         dist: distance,
+        canStandOnTop: true,
         down: true, // mark as downward jump
         parkour: true, // mark as parkour
         originVec,
@@ -274,20 +281,30 @@ class MoveDiagonalParkour extends Move {
       if (!this.isWalkable(originVec)) continue;
       if (this.isWater(originVec)) continue;
 
-      this.addNeighbors(neighbors, originVec);
+      const adj1 = originVec.offset(dir.x, 0, 0);
+      const adj2 = originVec.offset(0, 0, dir.z);
+
+      this.addNeighbors(neighbors, originVec, adj1, adj2);
     }
   }
 
-  addNeighbors(neighbors, originVec) {
+  addNeighbors(neighbors, originVec, adj1, adj2) {
     if (!this.isStandable(originVec)) return;
 
     const distance = 1;
     const start = originVec.forward(1);
     const landingNode = start.forward(distance);
+    if (!this.isWalkable(start)) return;
 
     if (!this.isStandable(landingNode)) return;
 
-    // Validate full diagonal sweep (same logic as ParkourUp)
+    const adj1Blocked = this.isWalkable(adj1);
+    const adj2Blocked = this.isWalkable(adj2);
+
+    if (!adj1Blocked || !adj2Blocked) {
+      return;
+    }
+
     for (let i = 1; i <= distance; i++) {
       const t = i / distance;
 
@@ -306,15 +323,10 @@ class MoveDiagonalParkour extends Move {
       const head = base.up(1);
       const aboveHead = base.up(2);
 
-      // Feet must be air/water (must jump over gap)
       if (!this.isAir(feet) && !this.isWater(feet)) return;
-
       if (!this.isAir(feet2) && !this.isWater(feet2)) return;
-
-      // Full 2-block clearance
       if (!this.isWalkable(head) || !this.isWalkable(aboveHead)) return;
 
-      // Strict diagonal corner prevention
       const sideA = base.offset(landingNode.dir.x, 0, 0);
       const sideB = base.offset(0, 0, landingNode.dir.z);
 
@@ -328,6 +340,7 @@ class MoveDiagonalParkour extends Move {
       sJump: true,
       diagonal: true,
       parkour: true,
+      canStandOnTop: true,
       dist: distance,
       originVec,
     };
@@ -364,6 +377,7 @@ class MoveDiagonalParkourUp extends Move {
     const minDistance = 1;
     const maxDistance = 1; // allow small diagonal parkour
     const start = originVec.forward(1);
+    if (!this.isWalkable(start)) return;
 
     for (let distance = minDistance; distance <= maxDistance; distance++) {
       const landingNode = start.forward(distance).up(1);
@@ -432,6 +446,7 @@ class MoveDiagonalParkourUp extends Move {
         diagonal: true,
         up: true,
         parkour: true,
+        canStandOnTop: true,
         dist: distance,
         originVec,
       };
@@ -473,6 +488,7 @@ class MoveDiagonalParkourDown extends Move {
     const distance = 1;
     const start = originVec.forward(1);
     const landingNode = start.forward(distance).down(1);
+    if (!this.isWalkable(start)) return;
 
     if (!this.isStandable(landingNode)) return;
 
@@ -515,6 +531,7 @@ class MoveDiagonalParkourDown extends Move {
       diagonal: true,
       down: true,
       parkour: true,
+      canStandOnTop: true,
       dist: distance,
       originVec,
     };

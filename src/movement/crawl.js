@@ -38,6 +38,7 @@ class MoveCrawlStart extends Move {
       isCrawling: true,
       interact: true,
       interactBlock: toInteract.clone(),
+      canStandOnTop: true,
     };
 
     neighbors.push(this.makeMovement(node, this.COST_CRAWL));
@@ -73,7 +74,8 @@ class MoveCrawlForward extends Move {
     node.attributes = {
       name: this.name,
       cost: this.COST_NORMAL,
-      isCrawling: true,
+      isCrawling: true,      canStandOnTop: true,
+
     };
 
     neighbors.push(this.makeMovement(node, this.COST_CRAWL));

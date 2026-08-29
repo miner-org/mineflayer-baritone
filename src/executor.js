@@ -22,17 +22,6 @@ const ALL_CONTROLS = [
   "sneak",
 ];
 
-/** Block-type Y-offsets for reach-node calculations. */
-const BLOCK_Y_OFFSETS = {
-  farmland: 0.9375,
-  fence: 1.5,
-  wall: 1.5, // matched via includes("wall") && !includes("sign")
-  soul_sand: 0.875,
-  carpet: 0.0625,
-  snow: 0.125,
-  path: 0.9375, // matched via includes("path")
-};
-
 class PathExecutor {
   /**
    * @param {import("mineflayer").Bot} bot
@@ -110,7 +99,14 @@ class PathExecutor {
 
     const loop = async () => {
       if (!this.running) return;
-      if (!this.paused) this.tick();
+      if (!this.paused && !this._ticking) {
+        this._ticking = true;
+        try {
+          await this.tick();
+        } finally {
+          this._ticking = false;
+        }
+      }
       setTimeout(loop, 20);
     };
 
@@ -312,6 +308,7 @@ class PathExecutor {
             console.log(
               "[PathExecutor] Partial path exhausted with no continuation",
             );
+          this.resetStates();
           this._clearAllControls();
           this._resolveCompletion();
           this.executing = false;
@@ -326,6 +323,7 @@ class PathExecutor {
         });
       } else {
         this._clearAllControls();
+        this.resetStates();
         this._resolveCompletion();
         this.executing = false;
       }
@@ -386,6 +384,7 @@ class PathExecutor {
     this.placing = false;
     this.breakingState = null;
     this.digging = false;
+    this.isFlying = false;
     this.toweringState = { active: false, phase: 0 };
     this.swimmingState = { active: false, sinking: false, floating: false };
     this.elytraFlyingState = { active: false, gliding: false };
@@ -467,6 +466,7 @@ class PathExecutor {
       ) {
         this._clearAllControls();
         await this.jumpAndPlaceBlock(node);
+        this._clearAllControls();
       }
     } else if (attr.isFlying) {
       if (!this.isFlying) await this._startPacketFly();
@@ -936,19 +936,26 @@ class PathExecutor {
     if (node.attributes.up && this.jumpState.forwardTicks < 8) return;
 
     if (!this.jumpState.jumped) {
+      const isDiagonal = node.attributes?.diagonal ?? false;
+
       const shouldJump = this._shouldJumpNow(
         from.floored(),
         to.floored(),
         bot,
         node.attributes?.up ?? node.attributes?.down ?? false,
+        isDiagonal,
       );
-      const shouldAutoJump = this._shouldAutoJump(to, bot);
+
+      const shouldAutoJump = !isDiagonal && this._shouldAutoJump(to, bot);
 
       if (shouldJump || shouldAutoJump) {
         this._setControlState("jump", true);
         this.jumpState.jumped = true;
         this.jumpState.timer = 0;
         this.jumpState.isAutoJump = shouldAutoJump;
+        this.jumpState.up = node.attributes?.up ?? false;
+        this.jumpState.down = node.attributes?.down ?? false;
+        this.jumpState.diagonal = isDiagonal;
 
         if (this.ashfinder.debug)
           console.log(
@@ -960,7 +967,15 @@ class PathExecutor {
     if (this.jumpState.jumped) {
       this.jumpState.timer++;
 
-      const maxTimer = this.jumpState.isAutoJump ? 3 : 10;
+      let maxTimer = this.jumpState.isAutoJump ? 3 : 10;
+
+      if (
+        !this.jumpState.diagonal &&
+        (this.jumpState.up || this.jumpState.down)
+      ) {
+        maxTimer = 8;
+      }
+
       if (this.jumpState.timer > maxTimer) {
         this._setControlState("jump", false);
         this.jumpState = null;
@@ -1029,13 +1044,9 @@ class PathExecutor {
     if (this.jumpState.jumped) {
       this.jumpState.timer++;
 
-      const maxTimer = 7;
+      const maxTimer = node.attributes?.place ? 13 : 7;
 
-      if (this.jumpState.timer === 5 && node.attributes?.place) {
-        await this._placeBlock(node, false);
-      }
-
-      if (this.jumpState.timer >= maxTimer) {
+      if (this.jumpState && this.jumpState.timer >= maxTimer) {
         this._clearAllControls();
         this.jumpState = null;
         this.comingFromSJ = true;
@@ -1199,7 +1210,9 @@ class PathExecutor {
       const sendElytraPacket = () =>
         bot._client.write("entity_action", {
           entityId: bot.entity.id,
-          actionId: 8,
+          actionId: bot.supportFeature("entityActionUsesStringMapper")
+            ? "start_elytra_flying"
+            : 8,
           jumpBoost: 0,
         });
 
@@ -1235,9 +1248,10 @@ class PathExecutor {
 
   async _stopPacketFly() {
     if (!this.isFlying) return;
+    if (!this.bot.entity?.elytraFlying) return;
     this.isFlying = false;
 
-    await this.bot.elytraFly();
+    // await this.bot.elytraFly();
     this.elytraFlyingState = { active: false, gliding: false };
 
     if (this.flyingInterval) {
@@ -1248,7 +1262,8 @@ class PathExecutor {
 
   /** @param {Cell} node */
   async jumpAndPlaceBlock(node) {
-    if (this.toweringState.active) return;
+    if (this.toweringState.active)
+      return { success: false, reason: "already_active" };
 
     this.toweringState.active = true;
     this._clearAllControls();
@@ -1256,12 +1271,27 @@ class PathExecutor {
     const bot = this.bot;
     const placePos = node.attributes.place[0];
 
+    const MAX_LIFT_TICKS = 5;
+    const MAX_AIRBORNE_TICKS = 40;
+
+    let placed = false;
+    let reason = null;
+
     try {
-      await this._snapToXZ(placePos);
+      const snapped = await this._snapToXZ(placePos);
+      await this.bot.waitForTicks(5);
+      if (!snapped) {
+        reason = "snap_failed";
+        return { success: false, reason };
+      }
 
       while (!bot.entity.onGround) await bot.waitForTicks(1);
 
       const blockPlace = getBlockToPlace(bot);
+      if (!blockPlace) {
+        reason = "no_block_available";
+        return { success: false, reason };
+      }
       await equipBlockIfNeeded(bot, blockPlace);
 
       await bot.waitForTicks(1);
@@ -1269,32 +1299,52 @@ class PathExecutor {
       await bot.waitForTicks(1);
 
       let lifted = false;
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < MAX_LIFT_TICKS; i++) {
         if (bot.entity.velocity.y > 0) {
           lifted = true;
           break;
         }
         await bot.waitForTicks(1);
       }
-
-      if (!lifted) return;
+      if (!lifted) {
+        reason = "jump_failed";
+        return { success: false, reason };
+      }
 
       bot.look(bot.entity.yaw, 90, true);
 
+      let airborneTicks = 0;
       while (!bot.entity.onGround) {
+        if (++airborneTicks > MAX_AIRBORNE_TICKS) {
+          reason = "airborne_timeout";
+          break;
+        }
+
+        const feetY = bot.entity.position.y;
+        const targetTopY = placePos.y + 1; // top surface of the block we're placing
+        const clearOfHitbox = feetY >= targetTopY - 0.05; // small epsilon, tune as needed
+
         const footPos = bot.entity.position.floored().offset(0.5, -0.5, 0.5);
         const below = bot.blockAt(footPos);
 
-        if (below?.boundingBox === "empty") {
-          try {
-            await placeBlockAtTarget(bot, placePos, { x: 0, z: 0 }, blockPlace);
-          } catch {
-            /* non-fatal */
+        if (below?.boundingBox === "empty" && clearOfHitbox && !placed) {
+          placed = await this._tryPlace(bot, placePos, blockPlace);
+          if (
+            !placed &&
+            !bot.inventory.items().some((i) => i.type === blockPlace?.type)
+          ) {
+            reason = "out_of_blocks";
+            break;
           }
         }
 
         await bot.waitForTicks(1);
       }
+
+      // landed but never actually placed
+      if (!placed && !reason) reason = "landed_without_placing";
+
+      return { success: placed, reason: placed ? null : reason };
     } finally {
       this._setControlState("jump", false);
       this._clearAllControls();
@@ -1303,30 +1353,50 @@ class PathExecutor {
     }
   }
 
+  async _tryPlace(bot, placePos, blockPlace) {
+    try {
+      await placeBlockAtTarget(bot, placePos, { x: 0, z: 0 }, blockPlace);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** @param {Vec3} targetPos */
-  async _snapToXZ(targetPos) {
+  async _snapToXZ(targetPos, { timeoutTicks = 100 } = {}) {
     const bot = this.bot;
     this._clearAllControls();
 
-    while (true) {
-      const dx = targetPos.x - bot.entity.position.x;
-      const dz = targetPos.z - bot.entity.position.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
+    let ticks = 0;
+    let lastDist = Infinity;
+    let stuckTicks = 0;
 
-      if (dist < 0.35) {
-        this._clearAllControls();
-        break;
+    try {
+      while (true) {
+        const dx = targetPos.x - bot.entity.position.x;
+        const dz = targetPos.z - bot.entity.position.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+
+        if (dist < 0.15) return true;
+        if (++ticks > timeoutTicks) return false;
+
+        if (Math.abs(lastDist - dist) < 0.01) {
+          if (++stuckTicks > 10) return false;
+        } else {
+          stuckTicks = 0;
+        }
+        lastDist = dist;
+
+        bot.lookAt(
+          new Vec3(targetPos.x, bot.entity.position.y, targetPos.z),
+          true,
+        );
+        this._setControlState("forward", true);
+        await bot.waitForTicks(1);
       }
-
-      bot.lookAt(
-        new Vec3(targetPos.x, bot.entity.position.y, targetPos.z),
-        true,
-      );
-      this._setControlState("forward", dist >= 0.3);
-      await bot.waitForTicks(1);
+    } finally {
+      this._clearAllControls();
     }
-
-    this._clearAllControls();
   }
 
   /**
@@ -1359,31 +1429,47 @@ class PathExecutor {
   _shouldJumpNow(from, to, bot, up = false, diagonal = false) {
     const pos = bot.entity.position;
 
-    // Direction from current block to next block
     const dir = to.clone().subtract(from);
     dir.y = 0;
     dir.normalize();
 
-    // How close to the edge before jumping
     let edgeThreshold = 0.15;
-    if (up) edgeThreshold = 0.1;
     if (diagonal) edgeThreshold = 0.4;
+    if (up) edgeThreshold = 0.1;
+    if (up && diagonal) edgeThreshold = 0.3;
 
-    // Get block min/max bounds
     const minX = from.x;
     const maxX = from.x + 1;
     const minZ = from.z;
     const maxZ = from.z + 1;
 
-    let distanceToEdge = 0;
+    if (diagonal) {
+      // Need to be close to BOTH edges before committing to the jump
+      let distX = 0;
+      let distZ = 0;
 
-    // Determine which edge we're moving toward
+      if (dir.x > 0) distX = maxX - pos.x;
+      else if (dir.x < 0) distX = pos.x - minX;
+
+      if (dir.z > 0) distZ = maxZ - pos.z;
+      else if (dir.z < 0) distZ = pos.z - minZ;
+
+      // Use whichever axis is FARTHER from the edge — the bottleneck axis.
+      // This stops the bot from jumping the instant the fast axis clears,
+      // while the slow (wall-friction) axis is still lagging behind.
+      const distanceToEdge = Math.max(Math.abs(distX), Math.abs(distZ));
+
+      return distanceToEdge <= edgeThreshold;
+    }
+
+    // non-diagonal: unchanged single-axis check
+    let distanceToEdge = 0;
     if (dir.x > 0) distanceToEdge = maxX - pos.x;
     else if (dir.x < 0) distanceToEdge = pos.x - minX;
     else if (dir.z > 0) distanceToEdge = maxZ - pos.z;
     else if (dir.z < 0) distanceToEdge = pos.z - minZ;
 
-    return distanceToEdge <= edgeThreshold;
+    return Math.abs(distanceToEdge) <= edgeThreshold;
   }
 
   /**
@@ -1406,54 +1492,6 @@ class PathExecutor {
       (!aboveFront || aboveFront.boundingBox === "empty") &&
       (!twoAbove || twoAbove.boundingBox === "empty")
     );
-  }
-
-  /** @param {Cell} node @returns {boolean} */
-  _passedNode(node) {
-    const pos = this.bot.entity.position;
-    const target = node.worldPos;
-    const dx = Math.abs(pos.x - target.x);
-    const dz = Math.abs(pos.z - target.z);
-
-    if (dx < 0.35 && dz < 0.35) return false;
-
-    if (node.parent) {
-      const prev = node.parent.worldPos;
-      const moveDir = target.minus(prev).normalize();
-      const botOffset = pos.minus(target);
-      const progress = botOffset.x * moveDir.x + botOffset.z * moveDir.z;
-      return progress > 0.25;
-    }
-
-    return dx > 0.7 || dz > 0.7;
-  }
-
-  /**
-   * Returns true if the next `maxLookahead` nodes are all flat, simple moves.
-   * @param {number} startIndex
-   * @returns {boolean}
-   */
-  _isStraightFlatRun(startIndex) {
-    const MAX_LOOKAHEAD = 3;
-    const startNode = this.path[startIndex];
-
-    for (
-      let i = 0;
-      i < MAX_LOOKAHEAD && startIndex + i < this.path.length;
-      i++
-    ) {
-      const node = this.path[startIndex + i];
-      if (
-        node.attributes.name !== "MoveForward" &&
-        node.attributes.name !== "MoveDiagonal"
-      )
-        return false;
-      if (node.attributes.place?.length || node.attributes.break?.length)
-        return false;
-      if (node.worldPos.y !== startNode.worldPos.y) return false;
-    }
-
-    return true;
   }
 
   /**
@@ -1516,9 +1554,13 @@ class PathExecutor {
     const dx = Math.abs(pos.x - target.x);
     const dy = Math.abs(pos.y - topOfBlockY);
     const dz = Math.abs(pos.z - target.z);
-    const jump = node.attributes?.parkour ?? false;
+    const jump =
+      (node.attributes?.parkour ||
+        node.attributes?.nJump ||
+        node.attributes?.sJump) ??
+      false;
 
-    let hThresh = jump ? 0.8 : 0.35;
+    let hThresh = jump ? 0.6 : 0.25;
     if (node.attributes.scaffolding) hThresh = 0.7;
     // Enter nodes must be tight-centred so the next Up/Down phase starts clean.
     if (node.attributes.scaffoldingEnter) hThresh = 0.3;

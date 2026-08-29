@@ -3,7 +3,6 @@ const { Move, registerMoves, DirectionalVec3 } = require("./");
 class MoveSwimForward extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.swimming) return;
-    if (this.config.fly) return;
 
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
@@ -38,15 +37,16 @@ class MoveSwimForward extends Move {
       swim: true,
       cost: this.COST_SWIM ?? this.COST_NORMAL + 1.2,
     };
+    node.attributes.canStandOnTop = false;
 
     neighbors.push(this.makeMovement(node, node.attributes.cost));
   }
 }
 
 class MoveSwimStart extends Move {
-  generate(cardinalDirections, origin, neighbors) {
+  generate(cardinalDirections, origin, neighbors, end, node) {
+    if (!node.canStandOnTop) return;
     if (!this.config.swimming) return;
-    if (this.config.fly) return;
     for (const dir of cardinalDirections) {
       const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, dir);
       const node = originVec.offset(dir.x, 0, dir.z);
@@ -78,6 +78,7 @@ class MoveSwimStart extends Move {
         cost: this.COST_SWIM_START ?? this.COST_NORMAL + 1.5,
         enterTarget: node,
       };
+      trueNode.attributes.canStandOnTop = false;
       neighbors.push(this.makeMovement(trueNode, trueNode.attributes.cost));
       // console.log("Swin step")
       return;
@@ -94,6 +95,7 @@ class MoveSwimStart extends Move {
         enterTarget: node,
         cost: this.COST_SWIM_START ?? this.COST_NORMAL + 1.5,
       };
+      trueNode.attributes.canStandOnTop = false;
       neighbors.push(this.makeMovement(trueNode, trueNode.attributes.cost));
       return;
     }
@@ -130,6 +132,7 @@ class MoveSwimStart extends Move {
         fallDistance: diveDistance,
         cost: this.COST_SWIM_START + diveDistance * 0.3,
       };
+      targetNode.attributes.canStandOnTop = false;
       neighbors.push(this.makeMovement(targetNode, targetNode.attributes.cost));
     }
   }
@@ -151,7 +154,7 @@ class MoveSwimStart extends Move {
 class MoveSwimExit extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.swimming) return;
-    if (this.config.fly) return;
+
     const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
       x: 0,
       z: 0,
@@ -197,7 +200,7 @@ class MoveSwimExit extends Move {
 
     const cost = isClimbingOut
       ? (this.COST_SWIM_EXIT ?? this.COST_NORMAL + 2.5) + this.COST_UP
-      : this.COST_SWIM_EXIT ?? this.COST_NORMAL + 2;
+      : (this.COST_SWIM_EXIT ?? this.COST_NORMAL + 2);
 
     node.attributes = {
       name: this.name,
@@ -205,6 +208,7 @@ class MoveSwimExit extends Move {
       climbOut: isClimbingOut,
       cost,
     };
+    node.attributes.canStandOnTop = true;
 
     neighbors.push(this.makeMovement(node, cost));
   }
@@ -213,7 +217,7 @@ class MoveSwimExit extends Move {
 class MoveSwimUp extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.swimming) return;
-    if (this.config.fly) return;
+
     const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
       x: 0,
       z: 0,
@@ -239,14 +243,16 @@ class MoveSwimUp extends Move {
     // Head must be clear
     if (this.isWalkable(head)) return;
 
-    const cost = (this.COST_SWIM ?? this.COST_NORMAL + 1.2);
+    const cost = this.COST_SWIM ?? this.COST_NORMAL + 1.2;
 
     node.attributes = {
       name: this.name,
       swim: true,
       up: true,
+
       cost,
     };
+    node.attributes.canStandOnTop = false;
 
     neighbors.push(this.makeMovement(node, cost));
   }
@@ -255,7 +261,7 @@ class MoveSwimUp extends Move {
 class MoveSwimDown extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.swimming) return;
-    if (this.config.fly) return;
+
     const originVec = new DirectionalVec3(origin.x, origin.y, origin.z, {
       x: 0,
       z: 0,
@@ -288,6 +294,7 @@ class MoveSwimDown extends Move {
       depth,
       cost,
     };
+    node.attributes.canStandOnTop = false;
 
     neighbors.push(this.makeMovement(node, cost));
   }
@@ -296,7 +303,7 @@ class MoveSwimDown extends Move {
 class MoveSwimDiagonal extends Move {
   generate(cardinalDirections, origin, neighbors) {
     if (!this.config.swimming) return;
-    if (this.config.fly) return;
+
     const diagonals = [
       { x: 1, z: 1 },
       { x: -1, z: 1 },
@@ -332,6 +339,7 @@ class MoveSwimDiagonal extends Move {
       swim: true,
       cost: this.COST_DIAGONAL * (this.COST_SWIM ?? 1.2),
     };
+    node.attributes.canStandOnTop = false;
 
     neighbors.push(this.makeMovement(node, node.attributes.cost));
   }

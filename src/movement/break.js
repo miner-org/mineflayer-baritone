@@ -28,6 +28,7 @@ class MoveForwardDownBreak extends Move {
       name: this.name,
       break: [],
       down: true,
+      canStandOnTop: true,
     };
 
     const checkNodes = [node, head, top];
@@ -141,6 +142,7 @@ class MoveBreakDown extends Move {
       name: this.name,
       break: [target.clone()],
       cost: this.COST_BREAK + totalDigTime + this.COST_FALL * fallDistance,
+      canStandOnTop: true,
     };
 
     neighbors.push(this.makeMovement(moveNode, moveNode.attributes.cost));
